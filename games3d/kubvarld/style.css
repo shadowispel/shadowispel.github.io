@@ -308,6 +308,11 @@
 @media (max-width: 860px) {
   .kv-sk { grid-template-columns: 1fr; }
   .kv-sktools { flex-direction: row; flex-wrap: wrap; justify-content: center; }
-  .kv-skside { order: -1; }
+  .kv-sktools { order: 0; gap: 4px; }
+  .kv-sktool { width: 50px; padding: 4px 2px; }
+  .kv-sktool span { font-size: 17px; }
+  .kv-skmid { order: 1; }
+  .kv-skside { order: 2; }
+  .kv-skpanel { padding: 14px 10px; }
   .kv-skpreview { width: 150px !important; height: 172px !important; }
 }
