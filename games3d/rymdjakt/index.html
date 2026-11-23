@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rymdjakt – Spelhallen</title>
+<meta name="description" content="Rymdjakt – ett arkadflygspel i rymden. Flyg för Nordstjärneflottan mot Järnsvärmen i en kampanj med tolv uppdrag, eller testa hur länge du överlever.">
+<link rel="stylesheet" href="../../shared.css">
+<link rel="stylesheet" href="../../engine/kit.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.js", "three/addons/": "../../vendor/three/addons/" } }</script>
+</head>
+<body class="game3d">
+<div class="g3-root" id="root">
+  <!-- ======================================================= HUD -->
+  <div class="g3-hud rj-hud" id="hud">
+    <div class="rj-vignette" id="vignette"></div>
+    <canvas id="hudc"></canvas>
+    <div class="rj-obj" id="objBox"><div class="rj-h">Uppdragsmål</div><ul id="objList"></ul><div class="rj-score">Poäng <b id="txtScore">0</b></div></div>
+    <div class="rj-radio" id="radio"><canvas id="radioPic" width="96" height="96"></canvas><div class="rj-radio-t"><b id="radioName"></b><p id="radioText"></p></div></div>
+    <div class="rj-tgt" id="tgtBox">
+      <div class="rj-tgt-top"><b id="tgtName"></b><span id="tgtClass"></span></div>
+      <div class="rj-tgt-dist" id="tgtDist"></div>
+      <div class="rj-bar sh"><i id="tgtShield"></i></div>
+      <div class="rj-bar hu"><i id="tgtHull"></i></div>
+      <div class="rj-tgt-sub" id="tgtSub"></div>
+      <div class="rj-tgt-lock" id="tgtLock"></div>
+    </div>
+    <div class="rj-status" id="status">
+      <div class="rj-row"><span>Sköld</span><div class="rj-bar sh"><i id="barShield"></i></div><em id="txtShield"></em></div>
+      <div class="rj-row"><span>Skrov</span><div class="rj-bar hu"><i id="barHull"></i></div><em id="txtHull"></em></div>
+      <div class="rj-row"><span>Energi</span><div class="rj-bar en"><i id="barEnergy"></i></div><em></em></div>
+      <div class="rj-row" id="rowHeat"><span>Värme</span><div class="rj-bar he"><i id="barHeat"></i></div><em class="ov">ÖVERHETTAD</em></div>
+    </div>
+    <div class="rj-weap" id="weap">
+      <div class="rj-speed"><b id="txtSpeed">0</b><small>m/s</small></div>
+      <div class="rj-thr"><span>Gas</span><div class="rj-bar th"><i id="barThr"></i></div></div>
+      <div class="rj-w"><span id="txtWeap"></span></div>
+      <div class="rj-w"><span id="txtSec"></span> <b id="txtAmmo"></b></div>
+      <div class="rj-w">Motåtgärder <b id="txtFlares"></b></div>
+    </div>
+    <div class="rj-wing" id="wing"></div>
+    <div class="rj-timer" id="timer"></div>
+    <div class="rj-warn" id="warn">MISSILVARNING</div>
+    <div class="rj-bound" id="boundWarn">Du lämnar operationsområdet – autopiloten vänder</div>
+    <div class="rj-msg" id="centerMsg"></div>
+    <div class="rj-tip" id="tip"></div>
+    <button class="rj-pausebtn" id="pauseBtn" aria-label="Paus">❚❚</button>
+  </div>
+  <div class="g3-touch" id="touch"></div>
+  <div class="g3-lockhint hidden" id="lockhint">Klicka i bilden för att styra med musen</div>
+
+  <!-- ======================================================= Laddning -->
+  <div class="g3-screen" id="loading">
+    <div class="g3-panel">
+      <h1 class="g3-title">Rymdjakt</h1>
+      <p class="g3-sub" id="loadSub">Bygger rymden …</p>
+      <div class="g3-loadbar"><i></i></div>
+      <div class="g3-loadtext">Förbereder</div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Huvudmeny -->
+  <div class="g3-screen hidden rj-menu" id="menu">
+    <a class="g3-back" href="../../index.html">← Spelhallen</a>
+    <div class="g3-panel">
+      <h1 class="g3-title">Rymdjakt</h1>
+      <p class="g3-sub">Nordstjärneflottan behöver piloter. Järnsvärmen har vaknat vid Vegagränsen – flyg, skjut och led din rote genom tolv uppdrag, eller se hur länge du överlever.</p>
+      <div class="g3-btns">
+        <button class="btn primary" id="btnCampaign">Kampanj</button>
+        <button class="btn" id="btnSurvival">Överlevnad</button>
+        <button class="btn" id="btnHangar">Hangar</button>
+        <button class="btn" id="btnSettings">Inställningar</button>
+        <button class="btn" id="btnHelp">Hur man spelar</button>
+        <button class="btn" id="btnRecords">Rekord</button>
+      </div>
+      <p class="rj-credits-line" id="menuCredits"></p>
+    </div>
+  </div>
+
+  <!-- ======================================================= Kampanj -->
+  <div class="g3-screen hidden" id="campaign">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Kampanj: Nordstjärnans vakt</h2>
+      <p class="g3-sub" id="campSub"></p>
+      <div class="rj-missions" id="missionList"></div>
+      <div class="g3-row"><button class="btn" data-back>Tillbaka</button><button class="btn" id="campHangar">Hangar</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Genomgång -->
+  <div class="g3-screen hidden" id="briefing">
+    <div class="g3-panel wide rj-brief">
+      <div class="rj-brief-head"><span id="brNum"></span><h2 class="g3-h2" id="brTitle"></h2><span id="brPlace"></span></div>
+      <div class="rj-brief-body">
+        <img id="brPic" alt="" width="96" height="96">
+        <div id="brText"></div>
+      </div>
+      <div class="rj-brief-cols">
+        <div><h3>Uppdragsmål</h3><ul id="brObj"></ul></div>
+        <div><h3>Ditt skepp</h3><div id="brShip"></div><button class="btn small" id="brHangar">Till hangaren</button></div>
+      </div>
+      <div class="rj-diff"><span>Svårighetsgrad</span><div class="g3-tabs" id="brDiff"></div></div>
+      <div class="g3-row"><button class="btn" data-back>Tillbaka</button><button class="btn primary" id="brStart">Starta uppdraget</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Överlevnad -->
+  <div class="g3-screen hidden" id="survival">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Överlevnad</h2>
+      <p class="g3-sub">Ändlösa vågor av Järnsvärmens jaktplan, bombplan och stora skepp. Mellan vågorna laddas skölden och skrovet lagas delvis. Varje våg ger bonuspoäng – och poängen för nedskjutningar ökar för varje våg.</p>
+      <div class="rj-brief-cols">
+        <div><h3>Ditt skepp</h3><div id="svShip"></div><button class="btn small" id="svHangar">Till hangaren</button></div>
+        <div><h3>Bästa omgångar</h3><ol class="rj-top" id="svTop"></ol></div>
+      </div>
+      <div class="rj-diff"><span>Svårighetsgrad</span><div class="g3-tabs" id="svDiff"></div></div>
+      <div class="g3-row"><button class="btn" data-back>Tillbaka</button><button class="btn primary" id="svStart">Starta</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Hangar -->
+  <div class="g3-screen hidden rj-hangar" id="hangar">
+    <div class="g3-panel wide">
+      <div class="rj-hangar-head"><h2 class="g3-h2">Hangaren</h2><div class="rj-cred">Krediter: <b id="hgCredits">0</b></div></div>
+      <div class="g3-tabs" id="hgTabs"><button data-tab="ships" class="on">Skepp</button><button data-tab="upg">Uppgraderingar</button><button data-tab="weap">Beväpning</button></div>
+      <div id="hgBody"></div>
+      <div class="g3-row"><button class="btn primary" data-back>Klar</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Debriefing -->
+  <div class="g3-screen hidden" id="debrief">
+    <div class="g3-panel wide rj-debrief">
+      <h2 class="g3-h2" id="dbTitle"></h2>
+      <p class="g3-sub" id="dbSub"></p>
+      <div class="rj-db-main">
+        <div class="rj-grade" id="dbGrade">A</div>
+        <table class="rj-stats" id="dbStats"></table>
+      </div>
+      <p class="rj-db-cred" id="dbCred"></p>
+      <p class="new-record" id="dbRecord"></p>
+      <div class="g3-row" id="dbBtns"></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Paus -->
+  <div class="g3-screen hidden clear" id="pause">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Paus</h2>
+      <p class="g3-sub" id="pauseSub"></p>
+      <div class="g3-btns">
+        <button class="btn primary" id="pResume">Fortsätt</button>
+        <button class="btn" id="pRestart">Starta om uppdraget</button>
+        <button class="btn" id="pSettings">Inställningar</button>
+        <button class="btn" id="pHelp">Hur man spelar</button>
+        <button class="btn" id="pQuit">Avsluta till huvudmenyn</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Inställningar -->
+  <div class="g3-screen hidden" id="settingsScr">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Inställningar</h2>
+      <div id="setBox"></div>
+      <div class="g3-row"><button class="btn primary" data-back>Klar</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Hjälp -->
+  <div class="g3-screen hidden" id="help">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Hur man spelar</h2>
+      <div class="g3-tabs" id="helpTabs"><button data-h="kb" class="on">Tangentbord och mus</button><button data-h="pad">Handkontroll</button><button data-h="touch">Pekskärm</button><button data-h="tips">Tips</button></div>
+      <div class="g3-keys" data-hp="kb">
+        <span>Mus</span><span>Styr nosen som en mjuk styrspak (klicka i bilden först)</span>
+        <span><kbd>W</kbd> <kbd>S</kbd></span><span>Öka / minska gas (även mushjulet)</span>
+        <span><kbd>A</kbd> <kbd>D</kbd></span><span>Rolla eller gira (väljs under Inställningar)</span>
+        <span><kbd>Q</kbd> <kbd>E</kbd></span><span>Gira eller rolla (det A/D inte gör)</span>
+        <span>Piltangenter</span><span>Tippa och gira utan mus</span>
+        <span><kbd>Skift</kbd></span><span>Boost (drar energi)</span>
+        <span><kbd>X</kbd></span><span>Broms</span>
+        <span>Vänsterklick / <kbd>Mellanslag</kbd></span><span>Laser (se upp för överhettning)</span>
+        <span>Högerklick / <kbd>C</kbd></span><span>Missil (lås först genom att hålla målet i siktet)</span>
+        <span><kbd>F</kbd></span><span>Motåtgärder mot missiler</span>
+        <span><kbd>R</kbd> / <kbd>T</kbd> / <kbd>Y</kbd></span><span>Närmaste mål / nästa mål / den som anfaller dig</span>
+        <span><kbd>G</kbd></span><span>Välj delsystem på stora skepp</span>
+        <span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></span><span>Vingmän: anfall mitt mål / skydda mig / fri jakt</span>
+        <span><kbd>V</kbd></span><span>Jaktkamera / cockpitvy</span>
+        <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>Paus</span>
+        <span><kbd>M</kbd></span><span>Ljud av/på</span>
+      </div>
+      <div class="g3-keys hidden" data-hp="pad">
+        <span>Vänster spak</span><span>Styr nosen</span>
+        <span>Höger spak</span><span>Rolla (sidled) och gas (upp/ner)</span>
+        <span>RT / LT</span><span>Laser / missil</span>
+        <span>A / B</span><span>Boost / broms</span>
+        <span>X</span><span>Motåtgärder</span>
+        <span>RB / Y</span><span>Närmaste mål / nästa mål</span>
+        <span>LB</span><span>Välj delsystem</span>
+        <span>Styrkors</span><span>Upp: anfall mitt mål · Ner: skydda mig · Vänster: fri jakt</span>
+        <span>Select</span><span>Byt kameravy</span>
+        <span>Start</span><span>Paus</span>
+      </div>
+      <div class="g3-keys hidden" data-hp="touch">
+        <span>Vänster halva</span><span>Dra för att styra nosen</span>
+        <span>Skjut</span><span>Håll in för laser</span>
+        <span>Missil</span><span>Avfyra missil (lås först)</span>
+        <span>Boost</span><span>Håll in för boost</span>
+        <span>Fackla</span><span>Motåtgärder (facklor) mot missiler</span>
+        <span>Mål</span><span>Välj närmaste mål</span>
+        <span>⟲ ⟳</span><span>Rolla</span>
+        <span>Order</span><span>Växla vingmännens order: skydda mig → anfall mitt mål → fri jakt</span>
+        <span>Gas</span><span>Sköts automatiskt</span>
+      </div>
+      <div class="rj-helptips hidden" data-hp="tips">
+        <p><b>Förhandsringen:</b> den gula ringen framför ett rörligt mål visar var skotten möts. Lägg siktet på ringen, inte på skeppet.</p>
+        <p><b>Värme:</b> bågen runt siktet visar laservärmen. Blir den full överhettas vapnen en stund – skjut i korta skurar.</p>
+        <p><b>Sköld och skrov:</b> skölden laddas om när du inte blivit träffad på ett par sekunder. Skrovet lagas inte under uppdraget.</p>
+        <p><b>Missiler:</b> håll målet nära siktet tills det står LÅST. Olåsta missiler flyger rakt fram.</p>
+        <p><b>Stora skepp:</b> sköldgeneratorer skyddar skrovet. Välj skeppet och tryck G för att sikta på delsystem – motorer, kanontorn, hangarer och generatorer.</p>
+        <p><b>Vingmän:</b> ge order med 1–3. ”Skydda mig” är guld värt när du jagas.</p>
+        <p><b>Hangaren:</b> krediter från uppdragen köper nya skepp, uppgraderingar och vapen. Spela om uppdrag för bättre betyg och mer krediter.</p>
+      </div>
+      <div class="g3-row"><button class="btn primary" data-back>Tillbaka</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Rekord -->
+  <div class="g3-screen hidden" id="records">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Rekord</h2>
+      <div class="rj-brief-cols">
+        <div><h3>Kampanjen</h3><p class="rj-big" id="recCamp"></p><table class="rj-stats" id="recMissions"></table></div>
+        <div><h3>Överlevnad</h3><ol class="rj-top" id="recSurv"></ol></div>
+      </div>
+      <div class="g3-row"><button class="btn" data-back>Tillbaka</button><button class="btn small" id="recReset">Nollställ framsteg</button></div>
+    </div>
+  </div>
+</div>
+<script src="../../shared.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ljusbrytaren – Spelhallen</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  .stage { padding-bottom: 10px; }
+  .game-wrap { --sidew: 150px; max-width: 100%; }
+  .game-wrap canvas { position: absolute; inset: 0; }
+  .hud .grp { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .hud .chip b { color: var(--accent); }
+  .chip.lvl { max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip.capped { border-color: #6b5a24; color: #ffd98a; }
+  .info {
+    position: absolute; left: 12px; right: 12px; bottom: 66px; z-index: 4;
+    text-align: center; color: #cdd6f6; font-size: .95rem; line-height: 1.35; pointer-events: none;
+    text-shadow: 0 1px 3px #000; min-height: 2.7em;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .game-wrap.side .info { display: block; min-height: 0; }
+  .info.tip { color: #ffe9a8; }
+  .toolbar {
+    position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 5;
+    display: flex; gap: 8px; justify-content: center;
+  }
+  .toolbar .btn { padding: 9px 14px; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+  .toolbar .btn .ic { font-size: 1.05em; margin-right: 4px; }
+  .toolbar .btn.hint-btn { border-color: #6b5a24; }
+  .game-wrap.side .hud { left: auto; right: 10px; width: var(--sidew); flex-direction: column; align-items: stretch; }
+  .game-wrap.side .hud .grp { flex-direction: column; align-items: stretch; }
+  .game-wrap.side .chip { text-align: center; max-width: none; }
+  .game-wrap.side .info { left: auto; right: 10px; width: var(--sidew); bottom: auto; text-align: left; font-size: .85rem; }
+  .game-wrap.side .toolbar { left: auto; right: 10px; width: var(--sidew); display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .game-wrap.side .toolbar .btn { padding: 6px 4px; font-size: .82rem; }
+  .game-wrap.side .toolbar .btn .ic { display: block; margin: 0; }
+  @media (max-width: 430px) {
+    .toolbar { gap: 5px; }
+    .toolbar .btn { padding: 8px 9px; font-size: .88rem; }
+    .info { font-size: .86rem; min-height: 4.05em; }
+  }
+  @media (max-height: 560px) { .stage { padding: 6px; gap: 6px; } .help { display: none; } }
+  .help-touch { display: none; }
+  @media (pointer: coarse) { .help-touch { display: inline; } .help-mouse, .help-kbd, .kbd-hint { display: none; } }
+
+  /* Överlägg */
+  .overlay h2.title {
+    background: linear-gradient(90deg, #ff5a6e, #ffcc33, #4ade80, #39d5ff, #b083ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    font-size: clamp(2rem, 7vw, 3.4rem);
+  }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: .9rem; }
+  .legend span { white-space: nowrap; }
+  .legend i { font-style: normal; }
+  .legend .r { color: #ff4d5e; } .legend .g { color: #3dff7a; } .legend .b { color: #4d8dff; }
+  #startOverlay, #winOverlay { justify-content: flex-start; overflow-y: auto; }
+  #startOverlay > :first-child, #winOverlay > :first-child { margin-top: auto; }
+  #startOverlay > :last-child, #winOverlay > :last-child { margin-bottom: auto; }
+  @media (max-height: 560px) {
+    #startOverlay, #winOverlay { gap: 8px; padding: 12px 16px; }
+    #startOverlay p, #winOverlay p { font-size: .9rem; line-height: 1.35; }
+    .overlay h2.title { font-size: 2rem; }
+    .stars-big { font-size: 2.2rem; }
+    .kbd-hint { display: none; }
+  }
+  #levelOverlay { justify-content: flex-start; overflow-y: auto; padding: 16px 12px 20px; }
+  .lvl-head { display: flex; align-items: center; justify-content: space-between; width: 100%; max-width: 640px; gap: 10px; }
+  .lvl-head h2 { font-size: clamp(1.3rem, 4vw, 1.9rem); }
+  .chapter { width: 100%; max-width: 640px; text-align: left; }
+  .chapter h3 { margin: 10px 2px 8px; font-size: 1rem; color: var(--muted); font-weight: 700; display: flex; justify-content: space-between; }
+  .chapter h3 b { color: var(--accent); }
+  .lvl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 8px; }
+  .lvl-btn {
+    position: relative; min-height: 64px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font: inherit; font-weight: 900; font-size: 1.15rem;
+    cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  }
+  .lvl-btn:hover:not(:disabled) { background: var(--panel-2); }
+  .lvl-btn:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 2px; }
+  .lvl-btn.current { border-color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2) inset; }
+  .lvl-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .lvl-btn .st { font-size: .8rem; letter-spacing: 1px; color: #3d4870; }
+  .lvl-btn .st i { font-style: normal; color: var(--accent); }
+  .lvl-btn.done { background: linear-gradient(180deg, #1f2b50, #19234a); }
+  #winOverlay h2 {
+    animation: winPop .6s cubic-bezier(.2, 1.5, .4, 1) both;
+    background: linear-gradient(90deg, #fff3b0, #ffcc33, #fff3b0); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  @keyframes winPop { from { transform: scale(.3) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
+  .stars-big { display: flex; gap: 12px; font-size: clamp(2.4rem, 9vw, 3.6rem); line-height: 1; }
+  .stars-big span { color: #2e3858; transform: scale(0); animation: starPop .5s cubic-bezier(.2, 1.7, .4, 1) forwards; }
+  .stars-big span:nth-child(1) { animation-delay: .25s; }
+  .stars-big span:nth-child(2) { animation-delay: .45s; }
+  .stars-big span:nth-child(3) { animation-delay: .65s; }
+  .stars-big span.on { color: var(--accent); text-shadow: 0 0 20px rgba(255, 204, 51, .75); }
+  @keyframes starPop { to { transform: scale(1); } }
+  .new-record.hidden { display: none; }
+  .win-stats { color: var(--muted); }
+  .win-stats b { color: var(--text); }
+  @media (prefers-reduced-motion: reduce) {
+    #winOverlay h2, .stars-big span { animation: none; transform: none; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="back" href="../index.html">← Spelhallen</a>
+  <h1>Ljusbrytaren</h1>
+  <div class="topbar-right"><span class="best">Rekord: <b id="best">0</b></span><button class="icon-btn" data-mute aria-label="Ljud">🔊</button></div>
+</header>
+<main class="stage">
+  <div class="game-wrap" id="wrap">
+    <canvas id="c" aria-label="Spelplan för Ljusbrytaren"></canvas>
+    <div class="hud">
+      <span class="chip lvl" id="lvlChip">1-1</span>
+      <div class="grp">
+        <span class="chip" id="moveChip">Drag 0 · par 1</span>
+        <span class="chip" id="starChip">★ 0</span>
+      </div>
+    </div>
+    <div class="info" id="info" aria-live="polite"></div>
+    <div class="toolbar" id="toolbar">
+      <button class="btn" id="btnLevels" title="Banval (L)"><span class="ic">☰</span>Banor</button>
+      <button class="btn" id="btnUndo" title="Ångra (Z)"><span class="ic">↶</span>Ångra</button>
+      <button class="btn" id="btnRestart" title="Börja om (R)"><span class="ic">↻</span>Börja om</button>
+      <button class="btn hint-btn" id="btnHint" title="Tips – kostar en stjärna (H)"><span class="ic">💡</span>Tips</button>
+    </div>
+
+    <div class="overlay" id="startOverlay">
+      <h2 class="title">Ljusbrytaren</h2>
+      <p>Vrid speglar, stråldelare, filter och ljuskällor så att varje kristall träffas av <b>exakt</b> rätt färg. Färger blandas när strålar möts!</p>
+      <div class="legend"><span><i class="r">▲</i> röd</span><span><i class="g">■</i> grön</span><span><i class="b">●</i> blå</span><span><i class="r">▲</i><i class="b">●</i> lila</span><span><i class="r">▲</i><i class="g">■</i> gul</span><span><i class="g">■</i><i class="b">●</i> cyan</span><span><i class="r">▲</i><i class="g">■</i><i class="b">●</i> vit</span></div>
+      <p class="big" id="startStars"></p>
+      <div class="row">
+        <button class="btn primary" id="btnPlay">Spela</button>
+        <button class="btn" id="btnPick">Välj bana</button>
+      </div>
+      <p class="kbd-hint"><kbd>Enter</kbd> startar</p>
+    </div>
+
+    <div class="overlay hidden" id="levelOverlay" role="dialog" aria-label="Välj bana">
+      <div class="lvl-head"><h2>Välj bana</h2><button class="btn small" id="btnCloseLevels">Stäng</button></div>
+      <div id="chapters" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:4px"></div>
+    </div>
+
+    <div class="overlay hidden" id="winOverlay" role="dialog" aria-label="Bana klar">
+      <h2 id="winTitle">Bana klar!</h2>
+      <div class="stars-big" id="winStars"><span>★</span><span>★</span><span>★</span></div>
+      <p class="win-stats" id="winStats"></p>
+      <p class="big" id="winScore"></p>
+      <p class="new-record hidden" id="winRecord">Nytt rekord!</p>
+      <div class="row">
+        <button class="btn primary" id="btnNext">Nästa bana</button>
+        <button class="btn" id="btnAgain">Spela igen</button>
+        <button class="btn" id="btnWinLevels">Banval</button>
+      </div>
+    </div>
+  </div>
+  <p class="help"><span class="help-mouse">Klicka på ett element för att vrida det medurs – högerklick vrider moturs.</span><span class="help-touch">Tryck på ett element för att vrida det medurs – håll inne för att vrida moturs.</span>
+    <span class="help-kbd">Tangentbord: <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> flyttar markören, <kbd>Mellanslag</kbd>/<kbd>Enter</kbd> vrider (<kbd>Shift</kbd> moturs),
+    <kbd>Z</kbd> ångra, <kbd>R</kbd> börja om, <kbd>H</kbd> tips, <kbd>L</kbd> banval, <kbd>M</kbd> ljud.</span></p>
+</main>
+<script src="../shared.js"></script>
+<script>
+(function () {
+'use strict';
+// === CORE START ===
+// Gemensam strålsimulering (används både av spelet och av lösarskriptet).
+const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+const COLOR_MASK = { R: 1, G: 2, B: 4, Y: 3, P: 5, C: 6, W: 7 };
+const DIR_CH = { '^': 0, '>': 1, 'v': 2, '<': 3 };
+
+// Bygger en bana från textformat. Tecken per ruta (separerade med blanksteg):
+//  .  tom         #  vägg
+//  S>R fast ljuskälla (riktning ^ > v <, färg R G B W)   s>R vridbar ljuskälla
+//  M/ M\ vridbar spegel     m/ m\ låst spegel
+//  D/ D\ vridbar stråldelare d/ d\ låst stråldelare
+//  FR FG FB vridbart färgfilter (byter färg)   fY ... låst filter (valfri färg)
+//  P  prisma (röd viker vänster, grön rakt, blå höger)
+//  KR KG KB KY KP KC KW kristall med färgkrav
+function parseLevel(def) {
+  const rows = def.grid.trim().split('\n').map(r => r.trim().split(/\s+/));
+  const h = rows.length, w = rows[0].length;
+  const cells = [], start = [];
+  for (let y = 0; y < h; y++) {
+    if (rows[y].length !== w) throw new Error('Ojämn rad ' + y + ' i ' + def.name);
+    for (let x = 0; x < w; x++) {
+      const tok = rows[y][x], c0 = tok[0];
+      let c;
+      if (tok === '.') c = { t: 'empty' };
+      else if (tok === '#') c = { t: 'wall' };
+      else if (c0 === 'S' || c0 === 's') c = { t: 'src', fixed: c0 === 'S', n: 4, s: DIR_CH[tok[1]], color: COLOR_MASK[tok[2]] };
+      else if (c0 === 'M' || c0 === 'm') c = { t: 'mirror', fixed: c0 === 'm', n: 2, s: tok[1] === '/' ? 0 : 1 };
+      else if (c0 === 'D' || c0 === 'd') c = { t: 'split', fixed: c0 === 'd', n: 2, s: tok[1] === '/' ? 0 : 1 };
+      else if (c0 === 'F') c = { t: 'filter', fixed: false, n: 3, s: 'RGB'.indexOf(tok[1]) };
+      else if (c0 === 'f') c = { t: 'filter', fixed: true, n: 1, s: 0, color: COLOR_MASK[tok[1]] };
+      else if (tok === 'P') c = { t: 'prism' };
+      else if (c0 === 'K') c = { t: 'crystal', need: COLOR_MASK[tok[1]] };
+      else throw new Error('Okänt tecken "' + tok + '" i ' + def.name);
+      if ((c.t === 'src' && (c.s === undefined || !c.color)) || (c.t === 'filter' && (c.fixed ? !c.color : c.s < 0)) || (c.t === 'crystal' && !c.need))
+        throw new Error('Felaktigt tecken "' + tok + '" i ' + def.name);
+      if (c.s === undefined) c.s = 0;
+      if (!c.n) c.n = 1;
+      if (c.fixed === undefined) c.fixed = true;
+      c.x = x; c.y = y; c.i = y * w + x;
+      cells.push(c); start.push(c.s);
+    }
+  }
+  const rot = cells.filter(c => !c.fixed && c.n > 1).map(c => c.i);
+  const crystals = cells.filter(c => c.t === 'crystal').map(c => c.i);
+  const sources = cells.filter(c => c.t === 'src').map(c => c.i);
+  return { name: def.name, text: def.text || '', w, h, cells, start, rot, crystals, sources };
+}
+
+// Utgående riktningar för en färgbit (1=R,2=G,4=B) som kommer in i cell c med riktning d.
+function outDirs(c, s, d, bit) {
+  switch (c.t) {
+    case 'empty': return [d];
+    case 'mirror': return [s === 0 ? d ^ 1 : 3 - d];
+    case 'split': return [d, s === 0 ? d ^ 1 : 3 - d];
+    case 'filter': return ((c.fixed ? c.color : 1 << s) & bit) ? [d] : [];
+    case 'prism': return [bit === 1 ? (d + 3) % 4 : bit === 2 ? d : (d + 1) % 4];
+    default: return [];
+  }
+}
+
+// Simulerar alla strålar. st = tillstånd per cell. Hanterar loopar genom att
+// varje (cell, riktning, färgbit) bara följs en gång.
+function simulate(L, st, wantSegs) {
+  const W = L.w, H = L.h, cells = L.cells;
+  const recv = new Uint8Array(W * H);
+  const seen = new Uint8Array(W * H * 4);
+  const segs = wantSegs ? [] : null;
+  const q = [];
+  for (const i of L.sources) {
+    const c = cells[i], d = st[i];
+    for (let bit = 1; bit <= 4; bit <<= 1) if (c.color & bit) { seen[i * 4 + d] |= bit; q.push(i, d, bit, 0); }
+  }
+  let qi = 0;
+  while (qi < q.length) {
+    const i = q[qi++], d = q[qi++], bit = q[qi++], depth = q[qi++];
+    const x = i % W, y = (i / W) | 0, nx = x + DX[d], ny = y + DY[d];
+    if (nx < 0 || ny < 0 || nx >= W || ny >= H) { if (segs) segs.push({ a: i, d, bit, depth, end: 1 }); continue; }
+    const j = ny * W + nx, c = cells[j];
+    if (c.t === 'wall' || c.t === 'src') { if (segs) segs.push({ a: i, d, bit, depth, end: 1 }); continue; }
+    if (segs) segs.push({ a: i, d, bit, depth, end: 2 });
+    if (c.t === 'crystal') { recv[j] |= bit; continue; }
+    const outs = outDirs(c, st[j], d, bit);
+    for (let k = 0; k < outs.length; k++) {
+      const od = outs[k], key = j * 4 + od;
+      if (seen[key] & bit) continue;
+      seen[key] |= bit;
+      q.push(j, od, bit, depth + 1);
+    }
+  }
+  let solved = true;
+  for (const ci of L.crystals) if (recv[ci] !== cells[ci].need) { solved = false; break; }
+  return { recv, segs, solved };
+}
+
+function rotDist(a, b, n) { const d = Math.abs(a - b); return Math.min(d, n - d); }
+
+// Går igenom alla kombinationer av roterbara element. Returnerar lista av lösningar (tillståndsarrayer för rot).
+function solveAll(L, limit) {
+  const rot = L.rot, ns = rot.map(i => L.cells[i].n);
+  const st = L.start.slice();
+  const cur = rot.map(() => 0);
+  const sols = [];
+  let total = 1; for (const n of ns) total *= n;
+  if (limit && total > limit) return null;
+  for (let k = 0; k < total; k++) {
+    let r = k;
+    for (let e = 0; e < rot.length; e++) { cur[e] = r % ns[e]; r = (r / ns[e]) | 0; st[rot[e]] = cur[e]; }
+    if (simulate(L, st, false).solved) sols.push(cur.slice());
+  }
+  return sols;
+}
+
+// Minsta antal drag från tillstånd st till närmaste lösning.
+function nearest(L, st, sols) {
+  let best = Infinity, bestSol = null;
+  for (const s of sols) {
+    let d = 0;
+    for (let e = 0; e < L.rot.length; e++) { const c = L.cells[L.rot[e]]; d += rotDist(st[L.rot[e]], s[e], c.n); }
+    if (d < best) { best = d; bestSol = s; }
+  }
+  return { dist: best, sol: bestSol };
+}
+const CHAPTERS = ['Speglar', 'Delare och filter', 'Prismor'];
+const GENERIC_TEXT = 'Lys upp alla kristaller med exakt rätt färg.';
+// par = minsta antal drag (verifieras av lösarskriptet).
+const LEVELS = [
+  { id: 'a1', ch: 0, par: 1, name: 'Första ljuset', text: 'Klicka på spegeln för att vrida den och led den röda strålen till kristallen.', grid: String.raw`
+    . . . . .
+    . . KR . .
+    S>R . M\ . .
+    . . . . .
+    . # . . .` },
+  { id: 'a2', ch: 0, par: 2, name: 'Sicksack', text: 'Varje vridning är ett drag. Klarar du banan på par-antal drag får du tre stjärnor.', grid: String.raw`
+    . . . . . .
+    . M/ . M\ . KR
+    . . . . . .
+    . . # . . .
+    S>R . . M\ . .
+    . . . . . .` },
+  { id: 'a3', ch: 0, par: 2, name: 'Låsta speglar', text: 'Speglar med hänglås sitter fast – använd dem som de är.', grid: String.raw`
+    . . . . . .
+    S>R m\ . . . .
+    . . . M\ . KR
+    . . . . . .
+    . M/ . m/ . .
+    . . . . # .` },
+  { id: 'a4', ch: 0, par: 3, name: 'Två färger', text: 'Kristallen kräver exakt sin färg. Symbolerna visar vilken: ▲ röd, ■ grön, ● blå.', grid: String.raw`
+    . . . . . . .
+    S>R . . M/ . m/ KB
+    . . . . . . .
+    S>B . . . . M\ .
+    . . # . . . .
+    . . . M/ . . KR` },
+  { id: 'a5', ch: 0, par: 2, name: 'Blandning', text: 'Färger blandas! Röd + blå = lila – kristallen behöver båda strålarna samtidigt.', grid: String.raw`
+    . . SvR . . .
+    . . . . . .
+    . . M/ . m\ .
+    . . . . . .
+    . M\ . . KP .
+    . S^B . . . .` },
+  { id: 'a6', ch: 0, par: 4, name: 'Grönt och blått', text: 'Grön + blå = cyan. Kristallens symboler visar alltid vilka färger som behövs.', grid: String.raw`
+    # . M/ . . . KR
+    S>G . M\ . # . .
+    # M\ M\ . . M\ .
+    . M/ . . m\ . .
+    . . KC . . M\ M\
+    . . . . . . .
+    . . . . S^B S^R .` },
+  { id: 'a9', ch: 0, par: 5, name: 'Ljusväven', text: 'Röd + grön = gul. En spegel reflekterar på båda sidorna – den kan leda två strålar.', grid: String.raw`
+    . . SvG M\ . M/ SvG .
+    . . . . . M/ M\ M/
+    S>R . M/ M/ . . . #
+    . . M/ KY . KC . .
+    . # . . . . . .
+    . . . . . M/ . S<B` },
+  { id: 'a7', ch: 0, par: 5, name: 'Lockbeten', text: 'Alla speglar behövs inte – vissa är bara i vägen.', grid: String.raw`
+    . SvR . SvG . . # .
+    . . KR . # . . .
+    # . . . . . . .
+    m/ M\ . KC . . . .
+    M/ . M\ . . . . S<B
+    M/ . M/ . # . . .
+    M\ M\ . m/ . . . S<B
+    KB . . M\ M\ . . .` },
+  { id: 'a10', ch: 0, par: 6, name: 'Korsvägen', text: '', grid: String.raw`
+    . . . SvB . . .
+    . M\ . . . M/ .
+    . . . . . . .
+    S>R . . M/ . M/ KR
+    . . . M/ . . M\
+    . . . M\ . M\ .
+    . M/ . KB . . .` },
+  { id: 'a8', ch: 0, par: 6, name: 'Spegelsalen', text: 'Två gula kristaller – båda behöver både rött och grönt.', grid: String.raw`
+    . . M/ M/ SvG . . .
+    . . m\ . m/ . M/ .
+    . . KY . M/ M/ . .
+    . . M\ . . M\ . S<R
+    . # M/ . . . . #
+    S>B . M/ KY . . M\ #
+    . # . M/ M\ . . S<G
+    . . KB . . S^R . .` },
+
+  { id: 'b1', ch: 1, par: 3, name: 'Stråldelaren', text: 'Stråldelaren (randigt glas) släpper igenom ljuset och speglar det samtidigt.', grid: String.raw`
+    . . . . . . .
+    . . . M\ . KR .
+    . . . . . . .
+    S>R . . D\ . M/ .
+    . . . . . . .
+    . . . . . KR .
+    . . . . . . .` },
+  { id: 'b2', ch: 1, par: 4, name: 'Gaffeln', text: '', grid: String.raw`
+    . KR KR M\ . m\ .
+    # D\ M/ M\ . . S<B
+    . . . . . M\ S<R
+    . M\ M\ . M\ . .
+    . . . . . . .
+    . M\ . . # . .
+    . # . KB . . .` },
+  { id: 'b9', ch: 1, par: 5, name: 'Sammanflödet', text: 'Båda kristallerna vill ha lila – men det finns bara en röd och en blå stråle …', grid: String.raw`
+    . . # KP # . .
+    . . . . . . .
+    SvR . . . . # .
+    . . M\ D\ . . KP
+    M/ . M\ . . . .
+    . . . . # . .
+    . . . M/ . . S<B` },
+  { id: 'b3', ch: 1, par: 5, name: 'Korsdrag', text: '', grid: String.raw`
+    . . SvB . KB . # .
+    . . . . . . # .
+    . KP . . M/ M\ M\ S<G
+    . M\ M\ . D\ m/ . #
+    . M/ . . M\ . . .
+    . . . . . . . .
+    . . M/ . D/ . . S<R
+    . . . KR M\ . KG .` },
+  { id: 'b4', ch: 1, par: 3, name: 'Färgfilter', text: 'Vitt ljus består av rött, grönt och blått. Filtret släpper bara igenom sin färg – klicka för att byta.', grid: String.raw`
+    . . KG . . . .
+    . . FR . . . .
+    . . . . . # .
+    S>W . d/ . FB M/ .
+    . . . . . . .
+    . # . . . . .
+    . . . . . KR .` },
+  { id: 'b5', ch: 1, par: 5, name: 'Grindvakten', text: 'Tre kristaller men bara två ljuskällor – och en av kristallerna är lila.', grid: String.raw`
+    . . # KP # . . .
+    SvR . . . . M/ . .
+    . . . . . . . .
+    M/ . . D\ . D/ FG KR
+    . . . . . FR . .
+    M\ . . . . . . .
+    . . . S^B . KB . .` },
+  { id: 'b10', ch: 1, par: 6, name: 'Ljusbygget', text: 'Ett filter släpper bara igenom en färg – hur får du fram cyan ur vitt ljus?', grid: String.raw`
+    . . M\ FR . M/ .
+    . . . . . . .
+    S>W . D\ FR . D/ #
+    . . . . . . .
+    . . . . . KC .` },
+  { id: 'b7', ch: 1, par: 6, name: 'Gult glas', text: 'Filter med lås kan inte bytas. Gult glas släpper igenom rött och grönt, cyan glas grönt och blått.', grid: String.raw`
+    . . . . # KY KC #
+    . . M\ . . . . .
+    . . . . . . . .
+    . M\ D/ fY . D\ fC KG
+    . . . . . . . .
+    . . M/ . . . M\ .
+    S>W M\ . . . . . .` },
+  { id: 'b6', ch: 1, par: 7, name: 'Vitglöd', text: 'Vit kristall = röd + grön + blå – men här finns ingen vit ljuskälla.', grid: String.raw`
+    SvR # KY # . KW # .
+    . . . . . . . .
+    M/ . D\ . . D\ . #
+    . . . . . . . .
+    . M/ M\ . M/ M/ M/ .
+    . . . . . . . .
+    S>G M\ . . . . S^B .` },
+  { id: 'b8', ch: 1, par: 8, name: 'Ljusverkstaden', text: '', grid: String.raw`
+    SvW . . . # KP # .
+    . . . . . . . .
+    M/ . D/ . FG D\ FR KB
+    . . . . . . . .
+    . . . . . . . .
+    KR . M/ FR . M\ . .
+    # . . . . . . .
+    S>R . M\ . . . . .` },
+
+  { id: 'c1', ch: 2, par: 3, name: 'Prismat', text: 'Prismat delar ljuset: rött viker åt vänster, grönt går rakt fram och blått viker åt höger (sett i strålens färdriktning).', grid: String.raw`
+    . . . . . KG .
+    . . . M\ . . KR
+    . . . . . . .
+    S>W . . P . M\ .
+    . . . . . . .
+    . . . M/ . . KB
+    . . . . . . .` },
+  { id: 'c2', ch: 2, par: 4, name: 'Regnbåge', text: '', grid: String.raw`
+    # . . . . KG . .
+    # M\ . . M\ . M\ .
+    . . . . . . . .
+    . M/ . . m\ . . S<W
+    KR . . . . P . KB
+    . M\ . . . . M/ .
+    . M/ . . . M\ . .
+    . # . . . . . .` },
+  { id: 'c3', ch: 2, par: 5, name: 'Brytpunkt', text: '', grid: String.raw`
+    . . . KB . . . .
+    . . KY P . . . m\
+    . M\ M/ M\ . . . .
+    KR . . . . M\ . .
+    . . . # . . . .
+    # . M/ . . M/ . M\
+    M\ . D/ . . . . S<R
+    KR . M\ . # S^W . .` },
+  { id: 'c9', ch: 2, par: 4, name: 'Platsbyte', text: 'Rött viker alltid åt vänster i prismat och blått åt höger – oavsett varifrån strålen kommer.', grid: String.raw`
+    . . # KP # . .
+    . . # . # . .
+    . M\ . . . M/ .
+    S>B M/ . P . M/ S<R
+    . . . . . . .
+    . M/ . . . M\ .` },
+  { id: 'c4', ch: 2, par: 3, name: 'Fyren', text: 'Ljuskällor med ring kan vridas åt fyra håll. Högerklick eller långt tryck vrider moturs.', grid: String.raw`
+    . . . . . . #
+    # . M/ . M/ . .
+    . m/ M\ . . . .
+    KB . . . P . KR
+    . M\ svW . . M/ .
+    . . . . KG . .
+    . . . . . . .` },
+  { id: 'c5', ch: 2, par: 5, name: 'Två fyrar', text: 'Två vita strålar i samma prisma – färgerna från båda blandas.', grid: String.raw`
+    . . . KY . . .
+    M\ . s^W . . M/ .
+    . . . . . . .
+    . M/ M/ P . . KC
+    . . . M/ . . s^W
+    . . . . . . .
+    . . . M/ . . M/` },
+  { id: 'c6', ch: 2, par: 6, name: 'Spektrum', text: '', grid: String.raw`
+    . . . . . KG . . .
+    M/ . . M\ . . M/ . .
+    . . . . . . . . .
+    M\ . . P . FR . . KG
+    . . . . . . . . .
+    s>W . . . . . . . .
+    . M\ . M/ . . KP . .
+    . . . . . S^W . . .` },
+  { id: 'c10', ch: 2, par: 7, name: 'Vitt igen', text: 'Prismat delar vitt ljus – kan det också sätta ihop det igen?', grid: String.raw`
+    . M\ M/ . . . M\ S<R
+    # . . . . . . .
+    KW . P . M/ . . .
+    # . M/ . . . M\ .
+    . M/ . . . . . S<B
+    . . . . S^G . . .` },
+  { id: 'c7', ch: 2, par: 7, name: 'Ljusbrytaren', text: 'Färger som lämnar ett prisma kan fortsätta in i nästa.', grid: String.raw`
+    . . . M/ . . . M\ .
+    KR FG . M/ . M\ . . KG
+    . . . . . . . . .
+    s^W D/ . P . P . . KC
+    . . . . . . . . .
+    M/ M/ . . . M\ . . .
+    . . . KP . . . . .` },
+  { id: 'c8', ch: 2, par: 10, name: 'Finalen', text: 'Dela upp det vita ljuset i ett prisma – och sätt ihop det igen i ett annat.', grid: String.raw`
+    . . . . . # KW # .
+    . M\ . . . . . . KY
+    M/ . M/ . . M/ . . .
+    . fY . . . . . . .
+    s^W D\ P . M/ M/ P M/ .
+    . . . . . . . . .
+    . . . M\ M/ . M/ . .
+    . . M/ . . . . M\ .` },
+];
+// === CORE END ===
+
+// =====================================================================
+//  Spelet
+// =====================================================================
+const SH = window.Spelhallen;
+const GAME = 'ljusbrytaren';
+const PROG_KEY = 'ljusbrytaren:progress';
+const STEP_MS = 34;            // hur snabbt strålen växer per ruta
+const REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const BEAM = { 1: '255,60,72', 2: '60,255,110', 4: '70,135,255' };
+const BEAM_CORE = { 1: '255,150,158', 2: '175,255,195', 4: '165,195,255' };
+const MASK_COL = { 1: '#ff4d5e', 2: '#3dff7a', 4: '#4d8dff', 3: '#ffe14d', 5: '#c66bff', 6: '#3de8ff', 7: '#ffffff' };
+const MASK_NAME = { 1: 'röd', 2: 'grön', 4: 'blå', 3: 'gul', 5: 'lila', 6: 'cyan', 7: 'vit' };
+
+const $ = id => document.getElementById(id);
+const wrap = $('wrap'), canvas = $('c'), ctx = canvas.getContext('2d');
+const info = $('info'), toolbar = $('toolbar');
+const startOv = $('startOverlay'), levelOv = $('levelOverlay'), winOv = $('winOverlay');
+
+// ---------- Framsteg ----------
+let prog = SH.store.get(PROG_KEY, null);
+if (!prog || typeof prog !== 'object') prog = {};
+prog.stars = prog.stars || {}; prog.perfect = prog.perfect || {};
+function saveProg() { SH.store.set(PROG_KEY, prog); }
+function starsOf(i) { return prog.stars[LEVELS[i].id] || 0; }
+function isUnlocked(i) { return i === 0 || starsOf(i - 1) > 0 || starsOf(i) > 0; }
+function totalStars() { let s = 0; LEVELS.forEach((l, i) => s += starsOf(i)); return s; }
+function chapterDone(ch) { return LEVELS.every((l, i) => l.ch !== ch || starsOf(i) > 0); }
+function computeScore() {
+  let perfect = 0; LEVELS.forEach(l => { if (prog.perfect[l.id]) perfect++; });
+  let chapters = 0; CHAPTERS.forEach((c, ch) => { if (chapterDone(ch)) chapters++; });
+  return totalStars() * 100 + perfect * 50 + chapters * 250;
+}
+function levelLabel(i) { const l = LEVELS[i]; let n = 0; for (let k = 0; k <= i; k++) if (LEVELS[k].ch === l.ch) n++; return (l.ch + 1) + '-' + n; }
+
+// ---------- Speltillstånd ----------
+const parsed = [];
+const solveCache = [];
+let li = 0, L = null, st = null, history = [], moves = 0, hintUsed = false, won = false;
+let sim = null;
+let vis = null;              // visuell vinkel per cell {a, t}
+let beamSegs = [], fadeSegs = [], beamT0 = 0, crystalArrive = new Map();
+let shownRecv = new Map(), litAt = new Map();
+let particles = [];
+let hint = null;             // {i, dir, until}
+let cursor = { x: 0, y: 0, show: false }, hover = -1;
+let shake = new Map();       // cell -> starttid (låst element)
+let winTimer = 0, winFx = 0;
+let geo = { W: 300, H: 300, cell: 40, bx: 0, by: 0, side: false, dpr: 1 };
+let staticLayer = null;
+let state = 'start';         // start | play | levels | win
+
+function getLevel(i) { if (!parsed[i]) parsed[i] = parseLevel(LEVELS[i]); return parsed[i]; }
+
+function loadLevel(i) {
+  li = Math.max(0, Math.min(LEVELS.length - 1, i));
+  L = getLevel(li);
+  st = L.start.slice();
+  history = []; moves = 0; hintUsed = false; won = false; hint = null;
+  clearTimeout(winTimer); winFx = 0;
+  particles = []; shake.clear(); shownRecv = new Map(); litAt = new Map();
+  vis = L.cells.map(c => ({ a: baseAngle(c, c.s), t: baseAngle(c, c.s), f: c.s }));
+  beamSegs = []; fadeSegs = [];
+  cursor = { x: 0, y: 0, show: cursor.show };
+  const firstRot = L.rot.length ? L.cells[L.rot[0]] : null;
+  if (firstRot) { cursor.x = firstRot.x; cursor.y = firstRot.y; }
+  SH.store.set('ljusbrytaren:last', li);
+  setInfo();
+  layout();
+  recompute(-1);
+  updateHud();
+  startSolve(li);
+}
+
+function baseAngle(c, s) {
+  if (c.t === 'mirror' || c.t === 'split') return s === 0 ? -Math.PI / 4 : Math.PI / 4;
+  if (c.t === 'src') return s * Math.PI / 2;
+  if (c.t === 'filter') return s * Math.PI * 2 / 3;
+  return 0;
+}
+
+function setInfo(text, isTip) {
+  const l = LEVELS[li];
+  info.textContent = text || l.text || GENERIC_TEXT;
+  info.classList.toggle('tip', !!isTip);
+}
+
+// Räkna om strålarna. from = cell som ändrades (-1 = allt växer från källorna)
+function recompute(from) {
+  const now = performance.now();
+  const prevKeys = new Map();
+  for (const s of beamSegs) prevKeys.set(s.key, s);
+  sim = simulate(L, st, true);
+  const segs = [];
+  let minNew = Infinity;
+  for (const s of sim.segs) {
+    const key = (s.a * 4 + s.d) * 8 + s.bit;
+    const old = prevKeys.get(key);
+    const g = { key, a: s.a, d: s.d, bit: s.bit, depth: s.depth, end: s.end, delay: 0, isNew: !old };
+    if (!old && s.depth < minNew) minNew = s.depth;
+    segs.push(g);
+  }
+  for (const g of segs) {
+    if (g.isNew && !REDUCED) g.delay = (g.depth - minNew) * STEP_MS;
+    prevKeys.delete(g.key);
+  }
+  // segment som försvann tonas ut
+  fadeSegs = fadeSegs.filter(f => now - f.t < 220);
+  for (const old of prevKeys.values()) fadeSegs.push({ seg: old, t: now });
+  beamSegs = segs; beamT0 = now;
+  // när når strålen varje kristall?
+  crystalArrive = new Map();
+  for (const g of segs) {
+    if (g.end !== 2) continue;
+    const x = g.a % L.w + DX[g.d], y = ((g.a / L.w) | 0) + DY[g.d], j = y * L.w + x;
+    if (L.cells[j].t !== 'crystal') continue;
+    const arr = crystalArrive.get(j) || [];
+    arr.push({ bit: g.bit, at: now + g.delay + (g.isNew ? STEP_MS : 0) });
+    crystalArrive.set(j, arr);
+  }
+}
+
+function rotateCell(i, dir, record) {
+  if (won || !L) return false;
+  const c = L.cells[i];
+  if (!c || c.n <= 1 || c.fixed) {
+    if (c && (c.t === 'mirror' || c.t === 'split' || c.t === 'filter' || c.t === 'src')) {
+      shake.set(i, performance.now()); SH.sfx('hit', 120);
+      setInfo(c.t === 'src' ? 'Den här ljuskällan sitter fast – bara källor med ring kan vridas.' : 'Den här delen är låst och kan inte vridas.', true);
+    }
+    return false;
+  }
+  st[i] = (st[i] + dir + c.n) % c.n;
+  const step = (c.t === 'filter') ? Math.PI * 2 / 3 : Math.PI / 2;
+  vis[i].t += dir * step;
+  if (record) { history.push({ i, dir }); moves++; } else { moves = Math.max(0, moves - 1); }
+  if (hint && hint.i === i) hint = null;
+  SH.sfx('click');
+  recompute(i);
+  updateHud();
+  if (info.classList.contains('tip')) setInfo();
+  return true;
+}
+
+function undo() {
+  if (won || !history.length) return;
+  const h = history.pop();
+  rotateCell(h.i, -h.dir, false);
+}
+
+function restart() {
+  if (!L) return;
+  if (won) return;
+  if (!history.length) return;
+  history = []; moves = 0;
+  for (const i of L.rot) {
+    const c = L.cells[i];
+    if (st[i] !== L.start[i]) {
+      const n = c.n, fwd = (L.start[i] - st[i] + n) % n;
+      const dir = fwd <= n - fwd ? 1 : -1, steps = Math.min(fwd, n - fwd);
+      vis[i].t += dir * steps * (c.t === 'filter' ? Math.PI * 2 / 3 : Math.PI / 2);
+    }
+  }
+  st = L.start.slice(); hint = null;
+  SH.sfx('select');
+  recompute(-1); updateHud(); setInfo();
+}
+
+// ---------- Lösare i bakgrunden (för tips) ----------
+function startSolve(idx) {
+  if (solveCache[idx]) return;
+  const Lx = getLevel(idx);
+  const rot = Lx.rot, ns = rot.map(i => Lx.cells[i].n);
+  let total = 1; for (const n of ns) total *= n;
+  const job = { done: false, sols: [], k: 0, total };
+  solveCache[idx] = job;
+  const s = Lx.start.slice();
+  function chunk() {
+    const t0 = performance.now();
+    while (job.k < total && performance.now() - t0 < 12) {
+      for (let m = 0; m < 400 && job.k < total; m++, job.k++) {
+        let r = job.k;
+        for (let e = 0; e < rot.length; e++) { s[rot[e]] = r % ns[e]; r = (r / ns[e]) | 0; }
+        if (simulate(Lx, s, false).solved) job.sols.push(rot.map(i => s[i]));
+      }
+    }
+    if (job.k < total) setTimeout(chunk, 0);
+    else { job.done = true; if (job.waiting && li === idx) showHint(); }
+  }
+  setTimeout(chunk, 30);
+}
+
+function showHint() {
+  if (won || state !== 'play') return;
+  const job = solveCache[li];
+  if (!job || !job.done) {
+    if (job) job.waiting = true;
+    setInfo('Räknar fram ett tips …', true);
+    return;
+  }
+  job.waiting = false;
+  if (sim && sim.solved) return;
+  const nr = nearest(L, st, job.sols);
+  if (!nr.sol) return;
+  // välj det drag (mot närmaste lösning) som tänder flest kristaller,
+  // i första hand bland element som strålarna redan träffar
+  const lit = new Uint8Array(L.w * L.h);
+  for (const g of sim.segs) if (g.end === 2) lit[(((g.a / L.w) | 0) + DY[g.d]) * L.w + g.a % L.w + DX[g.d]] = 1;
+  for (const i of L.sources) lit[i] = 1;
+  let best = null, bestScore = -1;
+  L.rot.forEach((ci, e) => {
+    const c = L.cells[ci], n = c.n, cur = st[ci], want = nr.sol[e];
+    if (cur === want) return;
+    const fwd = (want - cur + n) % n, dir = fwd <= n - fwd ? 1 : -1;
+    const s2 = st.slice(); s2[ci] = (cur + dir + n) % n;
+    const r = simulate(L, s2, false);
+    let sc = lit[ci]; for (const k of L.crystals) if (r.recv[k] === L.cells[k].need) sc += 2;
+    if (sc > bestScore) { bestScore = sc; best = { i: ci, dir }; }
+  });
+  if (!best) return;
+  const firstHint = !hintUsed;
+  if (!hintUsed) { hintUsed = true; updateHud(); }
+  hint = { i: best.i, dir: best.dir, t0: performance.now() };
+  const c = L.cells[best.i];
+  cursor.x = c.x; cursor.y = c.y;
+  const what = { mirror: 'spegeln', split: 'stråldelaren', filter: 'filtret', src: 'ljuskällan' }[c.t] || 'elementet';
+  setInfo('Tips: vrid den markerade ' + what + (c.n === 2 ? '' : best.dir > 0 ? ' medurs' : ' moturs') + '.' + (firstHint ? ' (Med tips blir det högst två stjärnor.)' : ''), true);
+  SH.sfx('select');
+}
+
+// ---------- Vinst ----------
+function checkWin(now) {
+  if (won || !sim || !sim.solved) return;
+  for (const k of L.crystals) { if ((shownRecv.get(k) || 0) !== L.cells[k].need) return; }
+  won = true; hint = null;
+  winFx = now;
+  SH.sfx('win');
+  for (const k of L.crystals) burst(k, 26);
+  const l = LEVELS[li];
+  const slack = Math.max(2, Math.ceil(l.par / 2));
+  let stars = moves <= l.par ? 3 : moves <= l.par + slack ? 2 : 1;
+  if (hintUsed) stars = Math.min(stars, 2);
+  const prev = prog.stars[l.id] || 0;
+  prog.stars[l.id] = Math.max(prev, stars);
+  if (stars === 3 && !hintUsed) prog.perfect[l.id] = true;
+  saveProg();
+  const score = computeScore();
+  const res = SH.submit(GAME, score);
+  winTimer = setTimeout(() => showWin(stars, score, res.isNew), REDUCED ? 300 : 1100);
+  updateHud();
+}
+
+function showWin(stars, score, isNew) {
+  const l = LEVELS[li];
+  const last = li === LEVELS.length - 1;
+  $('winTitle').textContent = last && LEVELS.every((x, i) => starsOf(i) > 0) ? 'Alla banor klara!' : 'Bana klar!';
+  const spans = $('winStars').children;
+  for (let k = 0; k < 3; k++) spans[k].className = k < stars ? 'on' : '';
+  // starta om animationerna
+  const ws = $('winStars'); ws.replaceWith(ws.cloneNode(true));
+  const t = $('winTitle'); t.style.animation = 'none'; void t.offsetWidth; t.style.animation = '';
+  let txt = `Drag: <b>${moves}</b> · Par: <b>${l.par}</b>`;
+  if (hintUsed) txt += ' · tips använt (max ★★)';
+  else if (stars < 3) txt += ` · klara på ${l.par} drag för ★★★`;
+  $('winStats').innerHTML = txt;
+  $('winScore').textContent = 'Poäng: ' + SH.fmt(score);
+  $('winRecord').classList.toggle('hidden', !isNew);
+  $('btnNext').textContent = last ? 'Banval' : 'Nästa bana';
+  $('btnWinLevels').hidden = last;
+  showOverlay('win');
+  if (stars === 3) setTimeout(() => SH.sfx('power'), 700);
+}
+
+// ---------- Överlägg ----------
+function showOverlay(name) {
+  state = name === 'none' ? 'play' : name;
+  startOv.classList.toggle('hidden', name !== 'start');
+  levelOv.classList.toggle('hidden', name !== 'levels');
+  winOv.classList.toggle('hidden', name !== 'win');
+  const ov = { start: startOv, levels: levelOv, win: winOv }[name];
+  toolbar.inert = !!ov;
+  if (ov) {
+    const focusEl = name === 'levels' ? levelOv.querySelector('.lvl-btn.current') || levelOv.querySelector('.lvl-btn:not(:disabled)')
+      : ov.querySelector('.btn.primary');
+    if (focusEl) setTimeout(() => focusEl.focus({ preventScroll: true }), 30);
+  } else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+}
+
+function buildLevelSelect() {
+  const root = $('chapters');
+  root.innerHTML = '';
+  CHAPTERS.forEach((name, ch) => {
+    const sec = document.createElement('section'); sec.className = 'chapter';
+    let got = 0, max = 0;
+    LEVELS.forEach((l, i) => { if (l.ch === ch) { got += starsOf(i); max += 3; } });
+    sec.innerHTML = `<h3><span>Kapitel ${ch + 1}: ${name}</span><span><b>★ ${got}</b> / ${max}</span></h3>`;
+    const grid = document.createElement('div'); grid.className = 'lvl-grid';
+    LEVELS.forEach((l, i) => {
+      if (l.ch !== ch) return;
+      const b = document.createElement('button');
+      const s = starsOf(i), open = isUnlocked(i);
+      b.className = 'lvl-btn' + (s ? ' done' : '') + (i === li && L ? ' current' : '');
+      b.disabled = !open;
+      b.dataset.idx = i;
+      const starStr = '<i>' + '★'.repeat(s) + '</i>' + '★'.repeat(3 - s);
+      b.innerHTML = open ? `<span>${levelLabel(i)}</span><span class="st">${starStr}</span>` : `<span>🔒</span><span class="st">${levelLabel(i)}</span>`;
+      b.title = open ? l.name : 'Låst – klara föregående bana först';
+      b.setAttribute('aria-label', open ? `Bana ${levelLabel(i)}, ${l.name}, ${s} stjärnor` : `Bana ${levelLabel(i)}, låst`);
+      b.addEventListener('click', () => { SH.sfx('select'); showOverlay('none'); loadLevel(i); });
+      grid.appendChild(b);
+    });
+    sec.appendChild(grid);
+    root.appendChild(sec);
+  });
+  $('btnCloseLevels').style.visibility = L ? 'visible' : 'hidden';
+}
+let levelsFrom = 'play';
+function openLevels() {
+  if (state !== 'levels') levelsFrom = state;
+  buildLevelSelect(); showOverlay('levels'); levelOv.scrollTop = 0;
+}
+function closeLevels() {
+  if (!L) return;
+  SH.sfx('select');
+  showOverlay(levelsFrom === 'start' || levelsFrom === 'win' ? levelsFrom : 'none');
+}
+
+function firstOpenLevel() {
+  for (let i = 0; i < LEVELS.length; i++) if (isUnlocked(i) && !starsOf(i)) return i;
+  const last = SH.store.get('ljusbrytaren:last', 0);
+  return Math.min(Math.max(0, last | 0), LEVELS.length - 1);
+}
+
+function updateHud() {
+  const l = LEVELS[li];
+  $('lvlChip').textContent = levelLabel(li) + ' · ' + l.name;
+  const mc = $('moveChip');
+  mc.innerHTML = `Drag <b>${moves}</b> · par ${l.par}`;
+  mc.classList.toggle('capped', hintUsed);
+  mc.title = hintUsed ? 'Tips använt – max två stjärnor' : '';
+  $('starChip').textContent = '★ ' + totalStars() + ' / ' + LEVELS.length * 3;
+  $('btnUndo').disabled = !history.length || won;
+  $('btnRestart').disabled = !history.length || won;
+  $('startStars').textContent = totalStars() ? `★ ${totalStars()} av ${LEVELS.length * 3} stjärnor` : '';
+}
+
+// ---------- Layout ----------
+function layout() {
+  if (!L) return;
+  const stage = wrap.parentElement;
+  const cs = getComputedStyle(stage);
+  const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const topH = document.querySelector('.topbar').offsetHeight;
+  const help = document.querySelector('.help');
+  const helpH = help && help.offsetParent ? help.offsetHeight + parseFloat(cs.rowGap || cs.gap || 12) : 0;
+  const availW = Math.max(260, stage.clientWidth - padX);
+  const availH = Math.max(240, window.innerHeight - topH - padY - helpH - 2);
+  const cols = L.w, rows = L.h;
+  const TB = 62, SIDE = 150;
+  const hud = wrap.querySelector('.hud');
+
+  // stående/vanlig layout: HUD överst, verktygsrad nederst
+  wrap.classList.remove('side');
+  let W = Math.min(availW, 860);
+  wrap.style.width = W + 'px';
+  let TOP = hud.offsetHeight + 18;
+  let infoH = info.offsetHeight + 10;
+  let cellA = Math.min((W - 20) / cols, (availH - TOP - TB - infoH) / rows, 78);
+  // liggande layout: allt i en sidokolumn
+  const cellB = Math.min((availW - SIDE - 40) / cols, (availH - 28) / rows, 78);
+  const side = cellB > cellA * 1.12 && availW > 520 && availH < 640;
+  let cell, H, bx, by;
+  if (side) {
+    wrap.classList.add('side');
+    cell = Math.floor(cellB);
+    const boardW = cell * cols, boardH = cell * rows;
+    W = Math.min(availW, boardW + SIDE + 44);
+    H = Math.min(availH, Math.max(boardH + 28, 300));
+    bx = 14 + (W - SIDE - 34 - boardW) / 2; by = (H - boardH) / 2;
+  } else {
+    cell = Math.floor(Math.max(16, cellA));
+    W = Math.min(availW, Math.max(cell * cols + 20, Math.min(availW, 480)));
+    wrap.style.width = W + 'px';
+    infoH = info.offsetHeight + 10;
+    TOP = hud.offsetHeight + 18;
+    cell = Math.floor(Math.max(16, Math.min((W - 20) / cols, (availH - TOP - TB - infoH) / rows, 78)));
+    const boardW = cell * cols, boardH = cell * rows;
+    H = Math.min(availH, Math.max(boardH + TOP + TB + infoH, Math.min(availH, 430)));
+    bx = (W - boardW) / 2; by = TOP + (H - TOP - TB - infoH - boardH) / 2;
+  }
+  W = Math.round(W); H = Math.round(H);
+  wrap.style.width = W + 'px'; wrap.style.height = H + 'px';
+  if (side) {
+    info.style.top = (hud.offsetTop + hud.offsetHeight + 12) + 'px';
+  } else info.style.top = '';
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  geo = { W, H, cell, bx: Math.round(bx), by: Math.round(by), side, dpr };
+  buildStatic();
+}
+
+function rr(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+
+function buildStatic() {
+  const { W, H, cell, bx, by, dpr } = geo;
+  staticLayer = document.createElement('canvas');
+  staticLayer.width = canvas.width; staticLayer.height = canvas.height;
+  const c = staticLayer.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const bg = c.createRadialGradient(W / 2, H * 0.4, 10, W / 2, H / 2, Math.max(W, H) * 0.8);
+  bg.addColorStop(0, '#0d1430'); bg.addColorStop(1, '#04060d');
+  c.fillStyle = bg; c.fillRect(0, 0, W, H);
+  // ram runt plan
+  rr(c, bx - 6, by - 6, cell * L.w + 12, cell * L.h + 12, 12);
+  c.fillStyle = '#070b18'; c.fill();
+  c.strokeStyle = '#1e2a52'; c.lineWidth = 1.5; c.stroke();
+  for (const cl of L.cells) {
+    const x = bx + cl.x * cell, y = by + cl.y * cell;
+    if (cl.t === 'wall') {
+      const g = c.createLinearGradient(x, y, x, y + cell);
+      g.addColorStop(0, '#3a4468'); g.addColorStop(1, '#232a45');
+      rr(c, x + 2, y + 2, cell - 4, cell - 4, cell * 0.12); c.fillStyle = g; c.fill();
+      c.strokeStyle = 'rgba(255,255,255,.08)'; c.lineWidth = 1; c.stroke();
+      // tegelmönster
+      c.strokeStyle = 'rgba(0,0,0,.35)'; c.beginPath();
+      c.moveTo(x + 4, y + cell / 2); c.lineTo(x + cell - 4, y + cell / 2);
+      c.moveTo(x + cell / 2, y + 4); c.lineTo(x + cell / 2, y + cell / 2);
+      c.moveTo(x + cell * 0.3, y + cell / 2); c.lineTo(x + cell * 0.3, y + cell - 4);
+      c.moveTo(x + cell * 0.75, y + cell / 2); c.lineTo(x + cell * 0.75, y + cell - 4);
+      c.stroke();
+    } else {
+      rr(c, x + 1.5, y + 1.5, cell - 3, cell - 3, cell * 0.14);
+      c.fillStyle = (cl.x + cl.y) % 2 ? '#0c1226' : '#0e152b'; c.fill();
+      c.fillStyle = 'rgba(120,150,255,.06)';
+      c.beginPath(); c.arc(x + cell / 2, y + cell / 2, Math.max(1, cell * 0.03), 0, 7); c.fill();
+    }
+  }
+}
+
+// ---------- Ritning ----------
+function cellCenter(i) { return [geo.bx + (i % L.w + 0.5) * geo.cell, geo.by + (((i / L.w) | 0) + 0.5) * geo.cell]; }
+
+function segPoints(s) {
+  const [x1, y1] = cellCenter(s.a);
+  const len = s.end === 2 ? geo.cell : geo.cell / 2;
+  return [x1, y1, x1 + DX[s.d] * len, y1 + DY[s.d] * len];
+}
+
+function drawBeams(now) {
+  const cell = geo.cell;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  const passes = [
+    { list: beamSegs, alpha: 1 },
+  ];
+  for (const f of fadeSegs) { const a = 1 - (now - f.t) / 220; if (a > 0) passes.push({ list: [f.seg], alpha: a, fade: true }); }
+  for (const bit of [1, 2, 4]) {
+    for (const pass of passes) {
+      const p = new Path2D(); let any = false;
+      for (const s of pass.list) {
+        if (s.bit !== bit) continue;
+        let k = 1;
+        if (!pass.fade && s.isNew) {
+          const segDur = s.end === 2 ? STEP_MS : STEP_MS / 2;
+          k = Math.max(0, Math.min(1, (now - beamT0 - s.delay) / segDur));
+        }
+        if (k <= 0) continue;
+        const [x1, y1, x2, y2] = segPoints(s);
+        p.moveTo(x1, y1); p.lineTo(x1 + (x2 - x1) * k, y1 + (y2 - y1) * k); any = true;
+      }
+      if (!any) continue;
+      const A = pass.alpha;
+      const flick = REDUCED ? 1 : 0.9 + 0.1 * Math.sin(now / 90 + bit);
+      ctx.strokeStyle = `rgba(${BEAM[bit]},${0.10 * A * flick})`; ctx.lineWidth = cell * 0.46; ctx.stroke(p);
+      ctx.strokeStyle = `rgba(${BEAM[bit]},${0.30 * A})`; ctx.lineWidth = cell * 0.19; ctx.stroke(p);
+      ctx.strokeStyle = `rgba(${BEAM_CORE[bit]},${0.85 * A})`; ctx.lineWidth = Math.max(1.5, cell * 0.055); ctx.stroke(p);
+      if (!REDUCED && !pass.fade) {
+        ctx.setLineDash([cell * 0.1, cell * 0.4]);
+        ctx.lineDashOffset = -(now * 0.0016 * cell) % (cell * 0.5);
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = Math.max(2, cell * 0.08); ctx.stroke(p);
+        ctx.setLineDash([]);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// Symboler: ▲ röd, ■ grön, ● blå
+function pip(c, bit, x, y, r, fill, stroke) {
+  c.beginPath();
+  if (bit === 1) { c.moveTo(x, y - r); c.lineTo(x + r * 0.95, y + r * 0.72); c.lineTo(x - r * 0.95, y + r * 0.72); c.closePath(); }
+  else if (bit === 2) { c.rect(x - r * 0.78, y - r * 0.78, r * 1.56, r * 1.56); }
+  else c.arc(x, y, r * 0.82, 0, Math.PI * 2);
+  if (fill) { c.fillStyle = fill; c.fill(); }
+  if (stroke) { c.strokeStyle = stroke; c.lineWidth = Math.max(1, r * 0.28); c.stroke(); }
+}
+function pips(c, mask, x, y, r, fillFn, strokeFn) {
+  const bits = [1, 2, 4].filter(b => mask & b);
+  const gap = r * 2.3, x0 = x - (bits.length - 1) * gap / 2;
+  bits.forEach((b, k) => pip(c, b, x0 + k * gap, y, r, fillFn ? fillFn(b) : null, strokeFn ? strokeFn(b) : null));
+}
+
+function lockIcon(c, x, y, s) {
+  c.save();
+  c.fillStyle = '#c9a54a'; c.strokeStyle = '#c9a54a'; c.lineWidth = Math.max(1.2, s * 0.18);
+  c.beginPath(); c.arc(x, y - s * 0.15, s * 0.32, Math.PI, 0); c.stroke();
+  rr(c, x - s * 0.48, y - s * 0.15, s * 0.96, s * 0.72, s * 0.12); c.fill();
+  c.restore();
+}
+
+function rotArrows(c, x, y, r, col) {
+  c.save(); c.strokeStyle = col; c.lineWidth = Math.max(1, r * 0.07); c.setLineDash([r * 0.18, r * 0.16]);
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke(); c.restore();
+}
+
+function drawElements(now) {
+  const cell = geo.cell;
+  for (const c of L.cells) {
+    if (c.t === 'empty' || c.t === 'wall') continue;
+    let [x, y] = cellCenter(c.i);
+    const v = vis[c.i];
+    const sh = shake.get(c.i);
+    if (sh) { const k = (now - sh) / 300; if (k < 1) x += Math.sin(k * 30) * cell * 0.06 * (1 - k); else shake.delete(c.i); }
+    ctx.save();
+    ctx.translate(x, y);
+    if (c.t === 'mirror' || c.t === 'split') drawMirror(c, v.a, cell);
+    else if (c.t === 'src') drawSource(c, v.a, cell, now);
+    else if (c.t === 'filter') drawFilter(c, v.a, cell);
+    else if (c.t === 'prism') drawPrism(cell, now);
+    else if (c.t === 'crystal') drawCrystal(c, cell, now);
+    ctx.restore();
+  }
+}
+
+function drawMirror(c, ang, cell) {
+  const r = cell * 0.4;
+  // fot/platta
+  if (c.fixed) {
+    rr(ctx, -cell * 0.34, -cell * 0.34, cell * 0.68, cell * 0.68, cell * 0.1);
+    ctx.fillStyle = '#151b30'; ctx.fill(); ctx.strokeStyle = '#4a3f1f'; ctx.lineWidth = 1.5; ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(0, 0, cell * 0.33, 0, Math.PI * 2);
+    ctx.fillStyle = '#18223f'; ctx.fill();
+    rotArrows(ctx, 0, 0, cell * 0.33, 'rgba(57,213,255,.35)');
+  }
+  ctx.save();
+  ctx.rotate(ang);
+  if (c.t === 'mirror') {
+    const g = ctx.createLinearGradient(0, -cell * 0.06, 0, cell * 0.06);
+    if (c.fixed) { g.addColorStop(0, '#fff1c4'); g.addColorStop(1, '#a88a3c'); }
+    else { g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#cfe6ff'); g.addColorStop(1, '#5d7fae'); }
+    rr(ctx, -r, -cell * 0.055, r * 2, cell * 0.11, cell * 0.04);
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 1; ctx.stroke();
+  } else {
+    rr(ctx, -r, -cell * 0.06, r * 2, cell * 0.12, cell * 0.04);
+    ctx.fillStyle = c.fixed ? 'rgba(255,220,140,.28)' : 'rgba(150,215,255,.28)'; ctx.fill();
+    ctx.strokeStyle = c.fixed ? 'rgba(255,225,150,.85)' : 'rgba(180,230,255,.9)'; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.beginPath();
+    for (let k = -3; k <= 3; k++) { ctx.moveTo(k * r / 3.6 - cell * 0.03, cell * 0.05); ctx.lineTo(k * r / 3.6 + cell * 0.03, -cell * 0.05); }
+    ctx.strokeStyle = 'rgba(220,245,255,.75)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  ctx.restore();
+  if (c.fixed) lockIcon(ctx, cell * 0.3, cell * 0.3, cell * 0.2);
+}
+
+function drawSource(c, ang, cell, now) {
+  const col = MASK_COL[c.color];
+  // pip i riktningen
+  ctx.save(); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(-cell * 0.16, -cell * 0.28); ctx.lineTo(cell * 0.16, -cell * 0.28); ctx.lineTo(cell * 0.09, -cell * 0.47); ctx.lineTo(-cell * 0.09, -cell * 0.47); ctx.closePath();
+  ctx.fillStyle = '#2b3760'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+  rr(ctx, -cell * 0.32, -cell * 0.32, cell * 0.64, cell * 0.64, cell * 0.16);
+  ctx.fillStyle = '#121a33'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, cell * 0.05); ctx.stroke();
+  if (!c.fixed) rotArrows(ctx, 0, 0, cell * 0.44, 'rgba(255,204,51,.7)');
+  const pulse = REDUCED ? 1 : 0.85 + 0.15 * Math.sin(now / 300);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, cell * 0.3);
+  g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = 0.55 * pulse; ctx.fillStyle = g; ctx.fillRect(-cell * 0.3, -cell * 0.3, cell * 0.6, cell * 0.6); ctx.globalAlpha = 1;
+  pips(ctx, c.color, 0, 0, cell * (c.color === 7 ? 0.075 : 0.1), () => '#0b1020', () => '#fff');
+}
+
+function drawFilter(c, ang, cell) {
+  const mask = c.fixed ? c.color : 1 << ((Math.round(ang / (Math.PI * 2 / 3)) % 3 + 3) % 3);
+  const col = MASK_COL[mask];
+  rr(ctx, -cell * 0.3, -cell * 0.36, cell * 0.6, cell * 0.72, cell * 0.12);
+  ctx.globalAlpha = 0.33; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, cell * 0.05); ctx.stroke();
+  // glansstreck
+  ctx.beginPath(); ctx.moveTo(-cell * 0.2, -cell * 0.24); ctx.lineTo(-cell * 0.2, cell * 0.05);
+  ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = Math.max(1, cell * 0.035); ctx.stroke();
+  pips(ctx, mask, 0, 0, cell * (mask === 3 || mask === 5 || mask === 6 ? 0.085 : 0.12), () => col, () => '#0b1020');
+  if (c.fixed) lockIcon(ctx, cell * 0.3, cell * 0.3, cell * 0.2);
+  else {
+    ctx.save(); ctx.rotate(ang);
+    rotArrows(ctx, 0, 0, cell * 0.44, 'rgba(255,255,255,.25)');
+    ctx.restore();
+  }
+}
+
+function drawPrism(cell, now) {
+  const r = cell * 0.36;
+  ctx.beginPath();
+  for (let k = 0; k < 3; k++) { const a = -Math.PI / 2 + k * Math.PI * 2 / 3; ctx[k ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r + cell * 0.05); }
+  ctx.closePath();
+  const g = ctx.createLinearGradient(-r, 0, r, 0);
+  g.addColorStop(0, 'rgba(255,80,90,.45)'); g.addColorStop(0.5, 'rgba(80,255,130,.4)'); g.addColorStop(1, 'rgba(80,140,255,.45)');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = Math.max(1.5, cell * 0.04); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,' + (REDUCED ? 0.5 : 0.35 + 0.25 * Math.sin(now / 400)) + ')';
+  ctx.beginPath(); ctx.arc(0, cell * 0.06, cell * 0.06, 0, 7); ctx.fill();
+}
+
+function drawCrystal(c, cell, now) {
+  const need = c.need, got = shownRecv.get(c.i) || 0;
+  const ok = got === need, wrong = got && (got & ~need);
+  const col = MASK_COL[need];
+  const r = cell * 0.38;
+  let jitter = 0;
+  if (wrong && !REDUCED) jitter = Math.sin(now / 35) * cell * 0.02;
+  ctx.translate(jitter, 0);
+  if (ok) {
+    const t = (now - (litAt.get(c.i) || now)) / 1000;
+    const pulse = REDUCED ? 1 : 0.8 + 0.2 * Math.sin(now / 250);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, cell * (0.9 + Math.max(0, 0.6 - t)));
+    g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.55 * pulse;
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, cell * 1.5, 0, 7); ctx.fill(); ctx.restore();
+  }
+  // sexhörning
+  ctx.beginPath();
+  for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; ctx[k ? 'lineTo' : 'moveTo'](Math.cos(a) * r, Math.sin(a) * r); }
+  ctx.closePath();
+  const g2 = ctx.createLinearGradient(0, -r, 0, r);
+  if (ok) { g2.addColorStop(0, '#ffffff'); g2.addColorStop(0.35, col); g2.addColorStop(1, col); }
+  else { g2.addColorStop(0, 'rgba(255,255,255,.18)'); g2.addColorStop(1, 'rgba(10,14,28,.9)'); }
+  ctx.fillStyle = g2; ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, cell * (ok ? 0.05 : 0.06)); ctx.stroke();
+  // facetter
+  ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r * 0.15); ctx.moveTo(-r * 0.86, -r * 0.5); ctx.lineTo(0, r * 0.15); ctx.lineTo(r * 0.86, -r * 0.5);
+  ctx.strokeStyle = ok ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.12)'; ctx.lineWidth = 1; ctx.stroke();
+  // krav-symboler: fyllda när färgen tas emot
+  const pr = cell * (need === 7 ? 0.07 : 0.085);
+  pips(ctx, need, 0, r * 0.42, pr,
+    b => ok ? '#0b1020' : (got & b) ? MASK_COL[b] : 'rgba(10,14,28,.9)',
+    b => ok ? null : MASK_COL[b]);
+  if (wrong) {
+    // fel färg: rött kryss + symbol för den felaktiga färgen
+    ctx.strokeStyle = '#ff5a6e'; ctx.lineWidth = Math.max(2, cell * 0.06);
+    const q = cell * 0.13, oy = -r * 0.3;
+    ctx.beginPath(); ctx.moveTo(-q, oy - q); ctx.lineTo(q, oy + q); ctx.moveTo(q, oy - q); ctx.lineTo(-q, oy + q); ctx.stroke();
+  }
+}
+
+function drawCursorEtc(now) {
+  const cell = geo.cell;
+  const ring = (cx, cy, col, w, pad) => { rr(ctx, geo.bx + cx * cell + pad, geo.by + cy * cell + pad, cell - pad * 2, cell - pad * 2, cell * 0.18); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); };
+  if (hover >= 0 && !cursor.show) {
+    const c = L.cells[hover];
+    if (c && !c.fixed && c.n > 1) { rr(ctx, geo.bx + c.x * cell + 2, geo.by + c.y * cell + 2, cell - 4, cell - 4, cell * 0.16); ctx.fillStyle = 'rgba(57,213,255,.08)'; ctx.fill(); }
+  }
+  if (cursor.show && state === 'play') {
+    const p = REDUCED ? 1 : 0.6 + 0.4 * Math.sin(now / 180);
+    ring(cursor.x, cursor.y, `rgba(57,213,255,${p})`, 2.5, 2);
+  }
+  if (hint) {
+    const [x, y] = cellCenter(hint.i);
+    const k = REDUCED ? 0.5 : (now - hint.t0) / 900 % 1;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,204,51,${1 - k})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, cell * (0.45 + k * 0.35), 0, 7); ctx.stroke();
+    // pil som visar vridriktningen
+    ctx.translate(x, y);
+    const R = cell * 0.5, a0 = -Math.PI * 0.75, a1 = a0 + hint.dir * Math.PI * 0.6;
+    ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = Math.max(2, cell * 0.06);
+    ctx.beginPath(); ctx.arc(0, 0, R, Math.min(a0, a1), Math.max(a0, a1)); ctx.stroke();
+    const ex = Math.cos(a1) * R, ey = Math.sin(a1) * R, ta = a1 + hint.dir * Math.PI / 2;
+    ctx.fillStyle = '#ffcc33'; ctx.beginPath();
+    ctx.moveTo(ex + Math.cos(ta) * cell * 0.13, ey + Math.sin(ta) * cell * 0.13);
+    ctx.lineTo(ex + Math.cos(ta + 2.4) * cell * 0.1, ey + Math.sin(ta + 2.4) * cell * 0.1);
+    ctx.lineTo(ex + Math.cos(ta - 2.4) * cell * 0.1, ey + Math.sin(ta - 2.4) * cell * 0.1);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function burst(i, n) {
+  if (REDUCED) return;
+  const [x, y] = cellCenter(i);
+  const col = MASK_COL[L.cells[i].need] || '#fff';
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * Math.PI * 2, sp = (0.4 + Math.random()) * geo.cell * 2.2;
+    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5 + Math.random() * 0.5, age: 0, col });
+  }
+}
+
+function drawParticles(dt) {
+  if (!particles.length) return;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  particles = particles.filter(p => (p.age += dt) < p.life);
+  for (const p of particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.94; p.vy *= 0.94;
+    ctx.globalAlpha = 1 - p.age / p.life; ctx.fillStyle = p.col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, geo.cell * 0.05), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawWinFx(now) {
+  if (!winFx) return;
+  const t = (now - winFx) / 1000;
+  if (t > 1.4) return;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const k of L.crystals) {
+    const [x, y] = cellCenter(k);
+    for (let w = 0; w < 2; w++) {
+      const tt = t - w * 0.25; if (tt < 0 || tt > 1) continue;
+      ctx.strokeStyle = MASK_COL[L.cells[k].need]; ctx.globalAlpha = (1 - tt) * 0.8; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y, geo.cell * (0.4 + tt * 2.4), 0, 7); ctx.stroke();
+    }
+  }
+  const a = Math.max(0, 0.18 * (1 - t / 0.7));
+  if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, geo.W, geo.H); }
+  ctx.restore();
+}
+
+// Uppdatera vilka färger kristallerna "ser" (när strålen hunnit fram)
+function updateCrystals(now) {
+  for (const k of L.crystals) {
+    let m = 0;
+    const arr = crystalArrive.get(k);
+    if (arr) for (const a of arr) if (now >= a.at) m |= a.bit;
+    const prev = shownRecv.get(k) || 0;
+    if (m !== prev) {
+      shownRecv.set(k, m);
+      const need = L.cells[k].need;
+      if (m === need) { litAt.set(k, now); SH.sfx('coin', 60); burst(k, 12); }
+    }
+  }
+}
+
+let lastT = performance.now(), frame = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (!L || !staticLayer) return;
+  frame++;
+  // när ett meny-överlägg täcker spelet räcker det med ett lägre tempo
+  if ((state === 'start' || state === 'levels') && frame % 4) return;
+  for (const c of L.cells) {
+    const v = vis[c.i];
+    if (v.a !== v.t) { const d = v.t - v.a; v.a = Math.abs(d) < 0.002 || REDUCED ? v.t : v.a + d * Math.min(1, dt * 16); }
+  }
+  updateCrystals(now);
+  checkWin(now);
+  const { dpr } = geo;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(staticLayer, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawBeams(now);
+  drawElements(now);
+  drawCursorEtc(now);
+  drawParticles(dt);
+  drawWinFx(now);
+}
+
+// ---------- Inmatning ----------
+function cellAt(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const sx = geo.W / r.width, sy = geo.H / r.height;
+  const x = (clientX - r.left) * sx, y = (clientY - r.top) * sy;
+  const cx = Math.floor((x - geo.bx) / geo.cell), cy = Math.floor((y - geo.by) / geo.cell);
+  if (cx < 0 || cy < 0 || cx >= L.w || cy >= L.h) return -1;
+  return cy * L.w + cx;
+}
+
+let press = null;
+canvas.addEventListener('pointerdown', e => {
+  if (state !== 'play' || !L) return;
+  const i = cellAt(e.clientX, e.clientY);
+  cursor.show = false;
+  if (i < 0) return;
+  e.preventDefault();
+  if (e.pointerType === 'mouse') {
+    if (e.button === 0) rotateCell(i, 1, true);
+    else if (e.button === 2) rotateCell(i, -1, true);
+    return;
+  }
+  // pekskärm/penna: tryck = medurs, långt tryck = moturs
+  const p = { id: e.pointerId, i, x: e.clientX, y: e.clientY, long: false };
+  p.timer = setTimeout(() => {
+    p.long = true; rotateCell(i, -1, true);
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) { /* ignorera */ }
+  }, 430);
+  press = p;
+});
+canvas.addEventListener('pointermove', e => {
+  if (!L) return;
+  if (press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 14) { clearTimeout(press.timer); press = null; }
+  if (e.pointerType === 'mouse') {
+    const i = cellAt(e.clientX, e.clientY);
+    hover = i;
+    const c = i >= 0 ? L.cells[i] : null;
+    canvas.style.cursor = state === 'play' && c && !c.fixed && c.n > 1 ? 'pointer' : 'default';
+  }
+});
+const endPress = cancel => e => {
+  if (!press || press.id !== e.pointerId) return;
+  clearTimeout(press.timer);
+  if (!cancel && !press.long) rotateCell(press.i, 1, true);
+  press = null;
+};
+canvas.addEventListener('pointerup', endPress(false));
+canvas.addEventListener('pointercancel', endPress(true));
+canvas.addEventListener('pointerleave', e => { hover = -1; if (press && e.pointerType === 'mouse') press = null; });
+wrap.addEventListener('contextmenu', e => e.preventDefault());
+
+function moveCursor(dx, dy) {
+  if (!cursor.show) { cursor.show = true; }
+  else {
+    cursor.x = Math.max(0, Math.min(L.w - 1, cursor.x + dx));
+    cursor.y = Math.max(0, Math.min(L.h - 1, cursor.y + dy));
+  }
+  SH.sfx('select', 60);
+}
+
+function levelGridNav(key) {
+  const btns = [...levelOv.querySelectorAll('.lvl-btn:not(:disabled)')];
+  if (!btns.length) return;
+  let cur = btns.indexOf(document.activeElement);
+  if (cur < 0) { btns[0].focus(); return; }
+  const r0 = btns[cur].getBoundingClientRect();
+  let best = null, bestD = Infinity;
+  for (const b of btns) {
+    if (b === btns[cur]) continue;
+    const r = b.getBoundingClientRect();
+    const dx = r.left - r0.left, dy = r.top - r0.top;
+    let ok = false;
+    if (key === 'ArrowRight') ok = (Math.abs(dy) < 4 && dx > 0) || dy > 4;
+    if (key === 'ArrowLeft') ok = (Math.abs(dy) < 4 && dx < 0) || dy < -4;
+    if (key === 'ArrowDown') ok = dy > 4;
+    if (key === 'ArrowUp') ok = dy < -4;
+    if (!ok) continue;
+    const d = (key === 'ArrowLeft' || key === 'ArrowRight') ? Math.abs(dy) * 100 + Math.abs(dx) : Math.abs(dx) + Math.abs(dy) * 3;
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  if (best) { best.focus(); best.scrollIntoView({ block: 'nearest' }); }
+}
+
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  const isNav = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Spacebar'].includes(k);
+  const onButton = document.activeElement && document.activeElement.tagName === 'BUTTON' && document.activeElement !== document.body;
+  if (state === 'start') {
+    if (k === 'Enter' && !onButton) { e.preventDefault(); startGame(); }
+    else if (k === 'l' || k === 'L') { e.preventDefault(); openLevels(); }
+    else if (isNav && !onButton) e.preventDefault();
+    return;
+  }
+  if (state === 'levels') {
+    if (k.startsWith('Arrow')) { e.preventDefault(); levelGridNav(k); }
+    else if (k === 'Escape' || k === 'l' || k === 'L') { e.preventDefault(); closeLevels(); }
+    else if (k === ' ' && !onButton) e.preventDefault();
+    return;
+  }
+  if (state === 'win') {
+    if (k === 'Enter' && !onButton) { e.preventDefault(); nextLevel(); }
+    else if ((k === 'r' || k === 'R') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); replay(); }
+    else if (k === 'l' || k === 'L' || k === 'Escape') { e.preventDefault(); openLevels(); }
+    else if (isNav && !onButton) e.preventDefault();
+    return;
+  }
+  // spelläge
+  if (e.altKey) return;
+  if (onButton && (k === 'Enter' || k === ' ')) return;   // låt fokuserade knappar fungera som vanligt
+  if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'Z')) { e.preventDefault(); undo(); return; }
+  if (e.ctrlKey || e.metaKey) return;
+  switch (k) {
+    case 'ArrowUp': e.preventDefault(); moveCursor(0, -1); break;
+    case 'ArrowDown': e.preventDefault(); moveCursor(0, 1); break;
+    case 'ArrowLeft': e.preventDefault(); moveCursor(-1, 0); break;
+    case 'ArrowRight': e.preventDefault(); moveCursor(1, 0); break;
+    case ' ': case 'Spacebar': case 'Enter':
+      e.preventDefault();
+      if (!cursor.show) { cursor.show = true; break; }
+      rotateCell(cursor.y * L.w + cursor.x, e.shiftKey ? -1 : 1, true); break;
+    case 'q': case 'Q': if (cursor.show) rotateCell(cursor.y * L.w + cursor.x, -1, true); break;
+    case 'e': case 'E': if (cursor.show) rotateCell(cursor.y * L.w + cursor.x, 1, true); break;
+    case 'z': case 'Z': case 'Backspace': e.preventDefault(); undo(); break;
+    case 'r': case 'R': restart(); break;
+    case 'h': case 'H': case '?': showHint(); break;
+    case 'l': case 'L': case 'Escape': openLevels(); break;
+  }
+});
+
+// ---------- Knappar ----------
+function btn(id, fn) { $(id).addEventListener('click', e => { e.currentTarget.blur(); fn(); }); }
+function startGame() { SH.sfx('select'); showOverlay('none'); loadLevel(firstOpenLevel()); }
+function nextLevel() {
+  if (li >= LEVELS.length - 1) { openLevels(); return; }
+  SH.sfx('select'); showOverlay('none'); loadLevel(li + 1);
+}
+function replay() { SH.sfx('select'); showOverlay('none'); loadLevel(li); }
+btn('btnPlay', startGame);
+btn('btnPick', () => { SH.sfx('select'); openLevels(); });
+btn('btnLevels', () => { SH.sfx('select'); openLevels(); });
+btn('btnUndo', undo);
+btn('btnRestart', restart);
+btn('btnHint', showHint);
+btn('btnNext', nextLevel);
+btn('btnAgain', replay);
+btn('btnWinLevels', () => { SH.sfx('select'); openLevels(); });
+btn('btnCloseLevels', closeLevels);
+
+let resizeRaf = 0;
+window.addEventListener('resize', () => { cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(layout); });
+window.addEventListener('orientationchange', () => setTimeout(layout, 150));
+
+// ---------- Start ----------
+SH.init(GAME);
+loadLevel(firstOpenLevel());
+showOverlay('start');
+updateHud();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout).catch(() => {});
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

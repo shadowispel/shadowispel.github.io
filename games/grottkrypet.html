@@ -1,0 +1,2928 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Grottkrypet – Spelhallen</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  .stage { padding: 10px 10px 16px; gap: 10px; }
+  @media (max-width: 560px) { .stage { padding: 6px 6px 12px; gap: 8px; } }
+  .game-wrap { height: 560px; max-width: 1100px; background: #04060c; }
+  .game-wrap canvas { cursor: default; }
+  .hide { display: none !important; }
+
+  /* HUD */
+  .hud { top: 8px; left: 8px; right: 8px; gap: 6px; align-items: flex-start; }
+  .hud-l, .hud-r { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .hud-r { justify-content: flex-end; }
+  .hud .chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: .85rem; padding: 4px 9px; }
+  .hud .chip b { color: var(--accent); font-weight: 900; }
+  .bar { position: relative; width: 104px; height: 15px; border-radius: 8px; background: #2b0f1c; overflow: hidden; border: 1px solid rgba(255,255,255,.14); }
+  .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; background: linear-gradient(180deg, #ff7d8d, #d8253f); transition: width .25s ease; }
+  .bar span { position: absolute; inset: 0; display: grid; place-items: center; font-size: .72rem; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  .bar.low i { background: linear-gradient(180deg, #ffb057, #ff3d3d); animation: lowhp 0.9s ease-in-out infinite; }
+  @keyframes lowhp { 50% { filter: brightness(1.5); } }
+  .bar.xp { width: 58px; height: 8px; background: #1b1840; }
+  .bar.xp i { background: linear-gradient(90deg, #8a6cff, #39d5ff); }
+  .chip.status { color: #a6ff8f; border-color: #3f7a3a; }
+  .chip.status.rest { color: #9fd8ff; border-color: #2f5a7a; }
+  @media (max-width: 560px) {
+    .hud .chip { font-size: .78rem; padding: 3px 7px; gap: 4px; }
+    .bar { width: 78px; }
+    .bar.xp { width: 40px; }
+  }
+
+  /* Bossmätare */
+  .bossbar { position: absolute; left: 50%; transform: translateX(-50%); z-index: 5; pointer-events: none;
+    width: min(320px, 56%); text-align: center; font-weight: 900; font-size: .85rem; color: #ffd0d6; text-shadow: 0 1px 3px #000; }
+  .bossbar .bar { width: 100%; height: 10px; margin-top: 3px; }
+  .bossbar .bar i { background: linear-gradient(90deg, #ff3d6e, #ff9a3d); }
+
+  /* Logg */
+  .log { position: absolute; left: 8px; bottom: 8px; z-index: 4; max-width: min(64%, 560px); pointer-events: none;
+    display: flex; flex-direction: column; gap: 2px; font-size: .86rem; line-height: 1.3; }
+  .log div { background: rgba(5, 8, 18, .66); padding: 2px 8px; border-radius: 6px; width: fit-content; max-width: 100%; text-shadow: 0 1px 2px #000; }
+  .log .bad { color: #ff8e9b; } .log .good { color: #8ff0a8; } .log .gold { color: var(--accent); }
+  .log .info { color: #c3cbe8; } .log .magic { color: #d0b2ff; } .log .warn { color: #ffb35c; font-weight: 700; }
+  @media (max-width: 560px) { .log { font-size: .76rem; max-width: 96%; right: 8px; } }
+
+  /* Knappar på skärmen (mus) */
+  .actbar { position: absolute; right: 8px; bottom: 8px; z-index: 6; display: flex; gap: 6px; }
+  .actbar .btn { background: rgba(24, 34, 63, .88); }
+  .actbar .btn.glow { border-color: var(--accent); box-shadow: 0 0 14px rgba(255, 204, 51, .5); color: var(--accent); }
+  .actbar kbd { margin-left: 4px; font-size: .72em; }
+
+  /* Banner */
+  .banner { position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 4; text-align: center; pointer-events: none;
+    opacity: 0; transition: opacity .6s ease; width: 90%; }
+  .banner.show { opacity: 1; }
+  .banner b { display: block; font-size: clamp(1.7rem, 6vw, 2.8rem); font-weight: 900; letter-spacing: 3px; text-shadow: 0 3px 14px #000, 0 0 30px rgba(255, 204, 51, .35); }
+  .banner small { display: block; color: #ffd5a0; font-size: 1rem; text-shadow: 0 2px 6px #000; margin-top: 4px; }
+
+  /* Överlägg / paneler */
+  .overlay { overflow: auto; justify-content: safe center; }
+  .overlay h2 .em { font-size: .9em; }
+  .overlay .small { font-size: .85rem; }
+  .keys { display: grid; grid-template-columns: auto auto; gap: 4px 14px; text-align: left; font-size: .9rem; color: var(--muted); }
+  .keys span:nth-child(odd) { text-align: right; color: var(--text); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+    width: min(580px, 100%); max-height: 100%; display: flex; flex-direction: column; text-align: left; overflow: hidden; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+  .panel-head h3 { margin: 0; font-size: 1.1rem; }
+  .panel-head h3 small { color: var(--muted); font-weight: 500; }
+  .equip { padding: 8px 14px; display: grid; gap: 3px; font-size: .9rem; border-bottom: 1px solid var(--line); }
+  .equip .stats { color: var(--muted); font-size: .82rem; }
+  .inv-list { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; min-height: 60px; }
+  .inv-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; }
+  .inv-list li.sel { background: var(--panel-2); border-color: var(--accent-2); }
+  .inv-list li .ic { font-size: 1.5rem; width: 34px; text-align: center; flex: none; position: relative; }
+  .inv-list li .ic i { position: absolute; right: 0; bottom: 2px; width: 9px; height: 9px; border-radius: 50%; }
+  .inv-list li .info { flex: 1; min-width: 0; }
+  .inv-list li .info b { display: block; font-size: .95rem; }
+  .inv-list li .info small { color: var(--muted); font-size: .8rem; }
+  .inv-list li .acts { display: flex; gap: 6px; flex: none; }
+  .inv-list .empty { color: var(--muted); justify-content: center; cursor: default; }
+  .up { color: var(--good); font-weight: 700; } .down { color: var(--bad); font-weight: 700; } .same { color: var(--muted); }
+  .panel-hint { margin: 0; padding: 8px 14px; font-size: .78rem; color: var(--muted); border-top: 1px solid var(--line); }
+  @media (max-width: 560px) { .inv-list li .acts .btn { padding: 6px 9px; } .inv-list li { gap: 6px; padding: 5px; } }
+
+  .choices { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .choice { width: 200px; min-height: 130px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 14px 12px; }
+  .choice .ci { font-size: 2rem; }
+  .choice small { font-weight: 500; color: var(--muted); font-size: .84rem; line-height: 1.35; }
+  .choice kbd { margin-top: auto; }
+  @media (max-width: 560px) { .choice { width: 100%; min-height: 0; flex-direction: row; text-align: left; padding: 10px; } .choice .ci { font-size: 1.6rem; } .choice kbd { display: none; } }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px 18px; color: var(--muted); font-size: .9rem; }
+  .stats-grid b { color: var(--text); display: block; font-size: 1.1rem; }
+  .breakdown { font-size: .85rem; }
+  .cause { color: #ffb3bd !important; font-weight: 700; }
+
+  /* Pekskärm */
+  .touch-controls { width: 100%; max-width: 1100px; justify-content: space-between; align-items: center; gap: 10px; }
+  .tbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 1; max-width: 230px; }
+  .tbtn, .dbtn { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 12px;
+    font-family: inherit; font-weight: 700; font-size: .92rem; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .tbtn { min-height: 48px; padding: 4px; }
+  .tbtn.glow { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 12px rgba(255, 204, 51, .45); }
+  .tbtn:active, .dbtn:active, .dbtn.on { background: var(--panel-2); }
+  .dpad { display: grid; grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); gap: 4px; }
+  .dbtn { font-size: 1.15rem; padding: 0; }
+  .dbtn.c { font-size: .8rem; color: var(--muted); }
+  body.land .touch-controls { position: fixed; left: 0; right: 0; bottom: 8px; padding: 0 10px; pointer-events: none; z-index: 30; max-width: none; }
+  body.land .touch-controls > * { pointer-events: auto; opacity: .85; }
+  body.land .tbtns { max-width: 200px; }
+  body.land .log { left: 25%; right: 25%; max-width: 50%; }
+  body.ovl .touch-controls { visibility: hidden; }
+  body.land .topbar { padding-top: 3px; padding-bottom: 3px; }
+  @media (pointer: coarse) { .choice kbd { display: none; } }
+
+  .lastlog { max-width: 520px; text-align: left; font-size: .8rem; line-height: 1.35; color: var(--muted); display: grid; gap: 1px; }
+  .lastlog b { color: var(--text); font-size: .8rem; }
+  .lastlog .bad { color: #ff8e9b; } .lastlog .good { color: #8ff0a8; } .lastlog .gold { color: var(--accent); }
+  .lastlog .magic { color: #d0b2ff; } .lastlog .warn { color: #ffb35c; }
+  .inv-list li .info b.art { color: #d0b2ff; }
+  @media (max-height: 520px) {
+    .overlay { gap: 6px; padding: 8px 12px; }
+    .overlay h2 { font-size: 1.45rem; }
+    .overlay p { line-height: 1.3; }
+    .overlay .big { font-size: 1.15rem; }
+    .stats-grid { grid-template-columns: repeat(6, auto); gap: 2px 14px; font-size: .8rem; }
+    .stats-grid b { font-size: .95rem; }
+    .lastlog { display: none; }
+    #overOverlay .small, #startOverlay .small { display: none; }
+    .choice { min-height: 0; padding: 8px 10px; gap: 3px; }
+    .choice .ci { font-size: 1.4rem; }
+    .keys { font-size: .8rem; gap: 2px 12px; }
+    .panel-head { padding: 5px 12px; }
+    .equip { padding: 4px 12px; font-size: .8rem; gap: 1px; }
+    .inv-list { padding: 3px; }
+    .inv-list li { padding: 2px 6px; gap: 6px; }
+    .inv-list li .ic { font-size: 1.2rem; width: 26px; }
+    .inv-list li .info b { font-size: .88rem; }
+    .inv-list li .acts .btn { min-height: 32px; padding: 4px 10px; }
+    .panel-hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="back" href="../index.html">← Spelhallen</a>
+  <h1>Grottkrypet</h1>
+  <div class="topbar-right"><span class="best">Rekord: <b id="best">0</b></span><button class="icon-btn" data-mute aria-label="Ljud">🔊</button></div>
+</header>
+<main class="stage">
+  <div class="game-wrap" id="wrap">
+    <canvas id="c" aria-label="Spelplan"></canvas>
+    <div class="hud" id="hud">
+      <div class="hud-l">
+        <span class="chip" title="Hälsa">❤️<span class="bar" id="hpBar"><i id="hpFill"></i><span id="hpText">30/30</span></span></span>
+        <span class="chip" title="Nivå och erfarenhet">⭐ Nv <b id="lvlText">1</b><span class="bar xp"><i id="xpFill"></i></span></span>
+        <span class="chip status hide" id="statusChip"></span>
+      </div>
+      <div class="hud-r">
+        <span class="chip" title="Djup">⛏️ Djup <b id="depthText">1</b></span>
+        <span class="chip" title="Guld">💰 <b id="goldText">0</b></span>
+        <span class="chip" title="Dödade monster">☠️ <b id="killText">0</b></span>
+      </div>
+    </div>
+    <div class="bossbar hide" id="bossBar"><span id="bossName">Boss</span><div class="bar"><i id="bossFill"></i></div></div>
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="actbar no-touch" id="actbar">
+      <button class="btn small" data-act="stairs" id="stairsBtn" title="Gå ned (Enter)">⬇️ Ned</button>
+      <button class="btn small" data-act="rest" title="Vila tills du är läkt (V)">💤 Vila<kbd>V</kbd></button>
+      <button class="btn small" data-act="wait" title="Vänta ett drag (Mellanslag)">⏳<kbd>␣</kbd></button>
+      <button class="btn small" data-act="inv" title="Packning (I)">🎒 Packning<kbd>I</kbd></button>
+    </div>
+    <div class="banner" id="banner"><b id="bannerT"></b><small id="bannerS"></small></div>
+
+    <div class="overlay" id="startOverlay">
+      <h2>🕯️ Grottkrypet</h2>
+      <p>Kliv ned i de eviga grottorna. Varje djup är nytt, mörkare och farligare – men skatterna blir större. Sovande monster tar dubbel skada av en smygattack. Var femte djup vaktas av en boss. Håll utkik efter källor, offeraltare och skattkammare. Hur djupt vågar du gå?</p>
+      <div class="keys no-touch">
+        <span><kbd>WASD</kbd> <kbd>↑↓←→</kbd></span><span>gå / attackera</span>
+        <span><kbd>Q</kbd><kbd>E</kbd><kbd>Z</kbd><kbd>C</kbd> / numpad</span><span>gå diagonalt</span>
+        <span><kbd>Mellanslag</kbd> <kbd>V</kbd></span><span>vänta ett drag / vila</span>
+        <span><kbd>G</kbd> <kbd>I</kbd></span><span>plocka upp / packning</span>
+        <span><kbd>Enter</kbd> <kbd>&gt;</kbd></span><span>gå ned för trappan</span>
+        <span>Mus</span><span>klicka på en ruta för att gå dit</span>
+      </div>
+      <p class="touch-only small">Tryck på en ruta för att gå dit, eller använd styrkorset.</p>
+      <button class="btn primary" id="playBtn">Spela</button>
+      <p class="small no-touch">Tryck <kbd>Enter</kbd> för att starta</p>
+    </div>
+
+    <div class="overlay hidden" id="invOverlay">
+      <div class="panel" role="dialog" aria-label="Packning">
+        <div class="panel-head"><h3>🎒 Packning <small id="invCount"></small></h3><button class="icon-btn" id="invClose" aria-label="Stäng">✕</button></div>
+        <div class="equip" id="equipBox"></div>
+        <ul class="inv-list" id="invList"></ul>
+        <p class="panel-hint no-touch"><kbd>↑</kbd><kbd>↓</kbd> välj · <kbd>Enter</kbd> använd/utrusta · <kbd>1</kbd>–<kbd>0</kbd> snabbval · <kbd>X</kbd> släng · <kbd>Esc</kbd> stäng</p>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="lvlOverlay">
+      <h2 id="chTitle">⭐ Nivå 2!</h2>
+      <p id="chSub">Välj en förbättring:</p>
+      <div class="choices" id="choices"></div>
+      <p class="small hide" id="chCancel"><button class="btn small" id="chCancelBtn">Avbryt <kbd class="no-touch">Esc</kbd></button></p>
+    </div>
+
+    <div class="overlay hidden" id="overOverlay">
+      <h2>☠️ Du dog</h2>
+      <p class="cause" id="causeText"></p>
+      <div class="lastlog" id="lastLog"></div>
+      <p class="big">Poäng: <span id="scoreText">0</span></p>
+      <div class="new-record hide" id="newRecord">🏆 Nytt rekord!</div>
+      <p class="breakdown" id="breakdown"></p>
+      <div class="stats-grid" id="statsGrid"></div>
+      <p>Rekord: <b id="bestOver">0</b></p>
+      <div class="row"><button class="btn primary" id="againBtn">Spela igen</button></div>
+      <p class="small no-touch">Tryck <kbd>Enter</kbd> eller <kbd>R</kbd></p>
+    </div>
+  </div>
+
+  <div class="touch-controls touch-only" id="touch">
+    <div class="tbtns">
+      <button class="tbtn" data-act="pickup">✋ Plocka</button>
+      <button class="tbtn" data-act="inv">🎒 Väska</button>
+      <button class="tbtn" data-act="rest">💤 Vila</button>
+      <button class="tbtn" data-act="stairs" id="tStairs">⬇️ Ned</button>
+    </div>
+    <div class="dpad" id="dpad">
+      <button class="dbtn" data-d="-1,-1" aria-label="Upp vänster">↖</button>
+      <button class="dbtn" data-d="0,-1" aria-label="Upp">▲</button>
+      <button class="dbtn" data-d="1,-1" aria-label="Upp höger">↗</button>
+      <button class="dbtn" data-d="-1,0" aria-label="Vänster">◀</button>
+      <button class="dbtn c" data-d="0,0" aria-label="Vänta">vänta</button>
+      <button class="dbtn" data-d="1,0" aria-label="Höger">▶</button>
+      <button class="dbtn" data-d="-1,1" aria-label="Ned vänster">↙</button>
+      <button class="dbtn" data-d="0,1" aria-label="Ned">▼</button>
+      <button class="dbtn" data-d="1,1" aria-label="Ned höger">↘</button>
+    </div>
+  </div>
+
+  <p class="help">
+    <span class="no-touch"><kbd>WASD</kbd>/<kbd>pilar</kbd> gå och attackera · <kbd>Q</kbd><kbd>E</kbd><kbd>Z</kbd><kbd>C</kbd> eller numpad diagonalt ·
+    <kbd>Mellanslag</kbd>/<kbd>.</kbd> vänta · <kbd>V</kbd> vila · <kbd>G</kbd> plocka upp / använd · <kbd>I</kbd> packning ·
+    <kbd>Enter</kbd>/<kbd>&gt;</kbd> gå ned · <kbd>Esc</kbd> stäng · <kbd>M</kbd> ljud.</span>
+    Klicka eller tryck på en ruta för att gå dit, på ett monster bredvid dig för att attackera.
+    Upptäckta fällor är ofarliga för dig – men monster som kliver i dem råkar illa ut.
+    Källor läker allt en gång, offeraltare byter guld mot en välsignelse. Den som dröjer sig kvar länge på ett djup får besök.
+  </p>
+</main>
+<script src="../shared.js"></script>
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+ *  Grundläggande verktyg
+ * ===================================================================== */
+const HEADLESS = typeof document === 'undefined';
+const SH = (typeof window !== 'undefined' && window.Spelhallen) || null;
+const sfx = n => { if (SH && !HEADLESS) SH.sfx(n); };
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const fmt = n => (SH ? SH.fmt(n) : String(Math.floor(n)));
+
+const W = 60, H = 40, N = W * H;
+const WALL = 0, FLOOR = 1, STAIRS = 2;
+const idx = (x, y) => y * W + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
+const D8 = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+class RNG {
+  constructor(seed) { this.f = mulberry32(seed >>> 0); }
+  n() { return this.f(); }
+  int(a, b) { return a + Math.floor(this.f() * (b - a + 1)); }
+  pick(arr) { return arr[Math.floor(this.f() * arr.length)]; }
+  chance(p) { return this.f() < p; }
+  weighted(list) {
+    let s = 0; for (const e of list) s += e[1];
+    let r = this.f() * s;
+    for (const e of list) { r -= e[1]; if (r < 0) return e[0]; }
+    return list[list.length - 1][0];
+  }
+  shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(this.f() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+}
+function hashSeed(a, b) {
+  let h = (Math.imul(a >>> 0, 2654435761) ^ Math.imul((b + 1) >>> 0, 1597334677)) >>> 0;
+  h = Math.imul(h ^ h >>> 16, 2246822507); h = Math.imul(h ^ h >>> 13, 3266489909);
+  return (h ^ h >>> 16) >>> 0;
+}
+
+/* =====================================================================
+ *  Speldata
+ * ===================================================================== */
+const MT = {
+  rat:      { name: 'Råtta', def: 'råttan', indef: 'en råtta', pl: 'råttor', glyph: '🐀', hp: 5, atk: 2, arm: 0, speed: 150, xp: 2, min: 1, max: 6, w: 10, pack: 3,
+              desc: 'Snabb men svag – hinner agera oftare än du.' },
+  bat:      { name: 'Fladdermus', def: 'fladdermusen', indef: 'en fladdermus', pl: 'fladdermöss', glyph: '🦇', hp: 6, atk: 3, arm: 0, speed: 150, xp: 3, min: 1, max: 9, w: 7,
+              flying: true, erratic: 0.45, desc: 'Snabb och oberäknelig. Flyger över fällor.' },
+  slime:    { name: 'Slem', def: 'slemmet', indef: 'ett slem', pl: 'slem', draw: 'slime', hp: 14, atk: 4, arm: 0, speed: 80, xp: 5, min: 2, max: 13, w: 7,
+              split: true, desc: 'Långsamt. Delar sig när det skadas.' },
+  skeleton: { name: 'Skelett', def: 'skelettet', indef: 'ett skelett', pl: 'skelett', glyph: '💀', hp: 12, atk: 5, arm: 1, speed: 100, xp: 6, min: 2, w: 9, track: 30,
+              desc: 'En envis benrangel som aldrig slutar jaga.' },
+  spider:   { name: 'Grottspindel', def: 'grottspindeln', indef: 'en grottspindel', pl: 'grottspindlar', glyph: '🕷️', hp: 10, atk: 4, arm: 0, speed: 120, xp: 7, min: 3, w: 6,
+              poison: 0.45, desc: 'Snabb. Bettet är giftigt.' },
+  archer:   { name: 'Goblinskytt', def: 'goblinskytten', indef: 'en goblinskytt', pl: 'goblinskyttar', glyph: '👺', hp: 10, atk: 3, arm: 0, speed: 100, xp: 8, min: 3, w: 6,
+              ranged: { dmg: 4, range: 7, cd: 2, kind: 'arrow', verb: 'skjuter en pil mot dig', miss: 'Pilen visslar förbi dig.' }, kite: true,
+              desc: 'Skjuter pilar på avstånd och håller sig undan.' },
+  troll:    { name: 'Troll', def: 'trollet', indef: 'ett troll', pl: 'troll', glyph: '👹', hp: 30, atk: 7, arm: 2, speed: 100, xp: 16, min: 4, w: 5, regen: 1,
+              desc: 'Slår hårt och läker hela tiden.' },
+  mage:     { name: 'Mörkermagiker', def: 'mörkermagikern', indef: 'en mörkermagiker', pl: 'mörkermagiker', glyph: '🧙', hp: 14, atk: 3, arm: 0, speed: 100, xp: 15, min: 5, w: 4,
+              ranged: { dmg: 8, range: 6, cd: 3, kind: 'bolt', verb: 'kastar en skuggpil mot dig', miss: 'Skuggpilen missar dig.' }, kite: true, blink: 0.4,
+              desc: 'Kastar skuggpilar och teleporterar sig undan.' },
+  golem:    { name: 'Stengolem', def: 'stengolemen', indef: 'en stengolem', pl: 'stengolemer', glyph: '🗿', hp: 48, atk: 12, arm: 5, speed: 60, xp: 24, min: 7, w: 4,
+              desc: 'Långsam men nästan ostoppbar.' },
+  // Bossar
+  boneking: { name: 'Benkungen', def: 'Benkungen', indef: 'Benkungen', glyph: '💀', crown: true, boss: true, hp: 75, atk: 9, arm: 2, speed: 100, xp: 60,
+              summon: { type: 'skeleton', every: 7, max: 2, total: 6, text: 'Benkungen höjer sin spira – de döda reser sig!' },
+              desc: 'Boss. Väcker skelett ur graven.' },
+  dragon:   { name: 'Grottdraken', def: 'Grottdraken', indef: 'Grottdraken', glyph: '🐉', boss: true, hp: 140, atk: 12, arm: 4, speed: 100, xp: 120,
+              breath: { dmg: 16, range: 7, every: 5 }, desc: 'Boss. Andas eld – lämna det markerade området när den drar efter andan!' },
+  demon:    { name: 'Avgrundsfursten', def: 'Avgrundsfursten', indef: 'Avgrundsfursten', glyph: '😈', boss: true, hp: 200, atk: 15, arm: 5, speed: 100, xp: 200,
+              ranged: { dmg: 12, range: 7, cd: 3, kind: 'fire', verb: 'slungar avgrundseld mot dig', miss: 'Avgrundselden missar dig.' }, blink: 0.25,
+              summon: { type: 'bat', every: 7, max: 3, total: 9, text: 'Avgrundsfursten kallar på mörkrets bevingade!' },
+              desc: 'Boss. Teleporterar, kastar eld och kallar på hjälp.' }
+};
+const BOSSES = ['boneking', 'dragon', 'demon'];
+
+const WEAPONS = [
+  { n: 'Rostig dolk', g: '🔪', v: 1 }, { n: 'Dolk', g: '🗡️', v: 2 }, { n: 'Kortsvärd', g: '🗡️', v: 3 }, { n: 'Stridsyxa', g: '🪓', v: 5 },
+  { n: 'Långsvärd', g: '⚔️', v: 6 }, { n: 'Stridshammare', g: '🔨', v: 8 }, { n: 'Runsvärd', g: '⚔️', v: 10 }, { n: 'Drakklinga', g: '🗡️', v: 13 }
+];
+const ARMORS = [
+  { n: 'Läderväst', g: '🧥', v: 1 }, { n: 'Läderrustning', g: '🧥', v: 2 }, { n: 'Nitläder', g: '🥋', v: 3 }, { n: 'Ringbrynja', g: '🛡️', v: 4 },
+  { n: 'Fjällbrynja', g: '🛡️', v: 6 }, { n: 'Plåtrustning', g: '🛡️', v: 8 }, { n: 'Mithrilbrynja', g: '🛡️', v: 10 }, { n: 'Drakfjällsrustning', g: '🛡️', v: 13 }
+];
+const SCROLLS = {
+  teleport: { name: 'Teleportrulle', color: '#b083ff', desc: 'Flyttar dig till en slumpvis plats långt bort.' },
+  fire:     { name: 'Eldbollsrulle', color: '#ff8a3d', desc: 'Eldboll mot närmaste synliga fiende – skadar även runt den.' },
+  map:      { name: 'Kartrulle', color: '#39d5ff', desc: 'Avslöjar hela djupets karta och trappan.' },
+  enchant:  { name: 'Förtrollningsrulle', color: '#ffcc33', desc: 'Ger ditt vapen eller din rustning +1 – du väljer.' },
+  fear:     { name: 'Skräckrulle', color: '#ff5a6e', desc: 'Alla fiender i sikte flyr i panik ett tag.' }
+};
+const SCROLL_W = [['teleport', 3], ['fire', 4], ['map', 3], ['enchant', 2], ['fear', 2]];
+// Unika föremål (artefakter) – svagare siffror ibland, men med en särskild egenskap.
+const ARTIFACTS = [
+  { id: 'leech',  kind: 'weapon', n: 'Vampyrklingan',  g: '🩸', d: 0, desc: 'läker 25 % av skadan du gör' },
+  { id: 'cleave', kind: 'weapon', n: 'Klyvyxan',       g: '🪓', d: 0, desc: 'träffar alla fiender runt dig' },
+  { id: 'thorns', kind: 'armor',  n: 'Törnbrynjan',    g: '🌵', d: 0, desc: 'den som slår dig tar skada' },
+  { id: 'shadow', kind: 'armor',  n: 'Skuggkappan',    g: '🧣', d: -1, desc: '+12 % undvika, sovande vaknar sällan' },
+  { id: 'troll',  kind: 'armor',  n: 'Trollhuden',     g: '🌿', d: -1, desc: 'du läker dubbelt så fort' }
+];
+const FEATURES = {
+  fountain: { name: 'Källa', desc: 'Klart, läkande vatten. Kliv hit för att dricka (en gång).', dry: 'En uttorkad källa.' },
+  altar:    { name: 'Offeraltare', desc: 'Offra guld (poäng!) för en välsignelse. Ställ dig här och tryck Plocka.', dry: 'Altaret är tyst nu.' }
+};
+// Färgteman per femtal djup – grottan byter karaktär när du går djupare.
+const THEMES = [
+  { name: 'Grottorna',   floor: ['#1f1b27', '#221d2b', '#1c1924', '#201c29'], wall: ['#3d3654', '#40395a', '#3a3350', '#433b5c'], face: '#29233a', mm: [70, 64, 96] },
+  { name: 'Mossgångarna', floor: ['#18201b', '#1b241e', '#161d18', '#1a221c'], wall: ['#34503d', '#375440', '#304a38', '#3a5843'], face: '#22342a', mm: [58, 92, 68] },
+  { name: 'Glödschakten', floor: ['#241a17', '#281c18', '#211715', '#261b17'], wall: ['#5a3328', '#5f362a', '#542f25', '#63392c'], face: '#3a221c', mm: [104, 60, 48] },
+  { name: 'Isdjupen',     floor: ['#171d26', '#19202a', '#151b23', '#182029'], wall: ['#3a5470', '#3d5875', '#364f69', '#405c7a'], face: '#26364a', mm: [62, 90, 120] }
+];
+const themeFor = d => THEMES[Math.floor((d - 1) / 5) % THEMES.length];
+const TRAPS = {
+  spike:  { name: 'Spjutfälla', indef: 'en spjutfälla', color: '#d9dde8', desc: 'Vassa spjut skjuter upp ur golvet.' },
+  poison: { name: 'Giftnål', indef: 'en giftnål', color: '#7dff6a', desc: 'En nål med gift.' },
+  tele:   { name: 'Teleportfälla', indef: 'en teleportfälla', color: '#b083ff', desc: 'Kastar iväg den som kliver på den.' },
+  alarm:  { name: 'Larmfälla', indef: 'en larmfälla', color: '#ff5a6e', desc: 'Väcker alla monster i närheten.' },
+  pit:    { name: 'Fallucka', indef: 'en fallucka', color: '#8a7a66', desc: 'Leder rakt ned till nästa djup.' }
+};
+
+const UPGRADES = [
+  { id: 'vit', icon: '❤️', name: 'Vitalitet', desc: '+12 max-HP och läk 12 HP.', apply: p => { p.maxHp += 12; p.hp = Math.min(p.maxHp, p.hp + 12); } },
+  { id: 'str', icon: '💪', name: 'Styrka', desc: '+2 attack.', apply: p => { p.bonusAtk += 2; } },
+  { id: 'def', icon: '🪨', name: 'Järnhud', desc: '+2 försvar.', apply: p => { p.bonusDef += 2; } },
+  { id: 'crit', icon: '🎯', name: 'Precision', desc: '+10 % chans till kritisk träff (dubbel skada).', ok: p => p.crit < 0.45, apply: p => { p.crit += 0.10; } },
+  { id: 'dodge', icon: '💨', name: 'Smidighet', desc: '+7 % chans att undvika attacker.', ok: p => p.dodge < 0.3, apply: p => { p.dodge += 0.07; } },
+  { id: 'vamp', icon: '🩸', name: 'Blodtörst', desc: 'Läk 2 HP för varje fiende du dödar.', apply: p => { p.vamp += 2; } },
+  { id: 'regen', icon: '🌿', name: 'Snabbläkning', desc: 'Återhämta HP 60 % snabbare.', apply: p => { p.regenMul += 0.6; } },
+  { id: 'greed', icon: '💰', name: 'Girighet', desc: '+35 % guld från allt du hittar. Guld ger poäng!', apply: p => { p.greed += 0.35; } },
+  { id: 'sight', icon: '👁️', name: 'Kattögon', desc: '+2 synvidd och hittar fällor lättare.', ok: p => p.sight < 12, apply: p => { p.sight += 2; p.trapSense += 0.15; } },
+  { id: 'alch', icon: '⚗️', name: 'Alkemist', desc: 'Drycker läker 50 % mer. Du får även en hälsodryck.', ok: p => p.alch < 2.4,
+    apply: p => { p.alch += 0.5; giveItem(mkPotion('small')); } }
+];
+
+/* =====================================================================
+ *  Föremål
+ * ===================================================================== */
+function mkWeapon(tier, ench) {
+  const b = WEAPONS[tier];
+  return { kind: 'weapon', tier, ench, name: b.n + (ench ? ' +' + ench : ''), glyph: b.g, val: b.v + ench, count: 1 };
+}
+function mkArmor(tier, ench) {
+  const b = ARMORS[tier];
+  return { kind: 'armor', tier, ench, name: b.n + (ench ? ' +' + ench : ''), glyph: b.g, val: b.v + ench, count: 1 };
+}
+function mkPotion(sub) {
+  return { kind: 'potion', sub, name: sub === 'large' ? 'Stor hälsodryck' : 'Liten hälsodryck', glyph: sub === 'large' ? '⚗️' : '🧪', count: 1 };
+}
+function mkScroll(sub) { return { kind: 'scroll', sub, name: SCROLLS[sub].name, glyph: '📜', count: 1 }; }
+function mkGold(amount) { return { kind: 'gold', amount, name: amount + ' guld', glyph: '💰', count: 1 }; }
+function mkArtifact(depth, rng, id) {
+  const a = id ? ARTIFACTS.find(x => x.id === id) : rng.pick(ARTIFACTS);
+  const tier = clamp(Math.floor((depth + 2) / 2) + a.d, 0, 7);
+  const base = (a.kind === 'weapon' ? WEAPONS : ARMORS)[tier].v;
+  const ench = Math.floor(depth / 6);
+  return { kind: a.kind, tier, ench, art: a.id, name: a.n + (ench ? ' +' + ench : ''), glyph: a.g, val: base + ench, count: 1 };
+}
+
+function randomGear(depth, rng, bonusTier) {
+  const base = Math.floor((depth + 2) / 2) + (bonusTier || 0);
+  const tier = clamp(base + rng.int(-1, 1), 1, 7);
+  const ench = (rng.chance(0.18 + depth * 0.03) || bonusTier) ? rng.int(1, 1 + Math.floor(depth / 5)) : 0;
+  if (depth >= 3 && rng.chance(0.06)) return mkArtifact(depth, rng);
+  return rng.chance(0.5) ? mkWeapon(tier, ench) : mkArmor(tier, ench);
+}
+function randomItem(depth, rng) {
+  const r = rng.n();
+  if (r < 0.17) return mkPotion(depth >= 4 && rng.chance(0.3 + depth * 0.02) ? 'large' : 'small');
+  if (r < 0.42) return mkScroll(rng.weighted(SCROLL_W));
+  return randomGear(depth, rng, 0);
+}
+function goldAmount(depth, rng) { return rng.int(4, 12) + depth * rng.int(3, 7); }
+
+/* =====================================================================
+ *  Synfält – rekursiv skuggkastning
+ * ===================================================================== */
+const MULT = [[1, 0, 0, -1, -1, 0, 0, 1], [0, 1, -1, 0, 0, -1, 1, 0], [0, 1, 1, 0, 0, -1, -1, 0], [1, 0, 0, 1, -1, 0, 0, -1]];
+function fovInto(map, ox, oy, r, out) {
+  out[idx(ox, oy)] = 1;
+  for (let o = 0; o < 8; o++) castLight(map, ox, oy, 1, 1.0, 0.0, r, MULT[0][o], MULT[1][o], MULT[2][o], MULT[3][o], out);
+}
+function castLight(map, cx, cy, row, start, end, r, xx, xy, yx, yy, out) {
+  if (start < end) return;
+  const r2 = (r + 0.5) * (r + 0.5);
+  let newStart = 0;
+  for (let j = row; j <= r; j++) {
+    let dx = -j - 1; const dy = -j; let blocked = false;
+    while (dx <= 0) {
+      dx++;
+      const X = cx + dx * xx + dy * xy, Y = cy + dx * yx + dy * yy;
+      const ls = (dx - 0.5) / (dy + 0.5), rs = (dx + 0.5) / (dy - 0.5);
+      if (start < rs) continue;
+      else if (end > ls) break;
+      const inside = inb(X, Y);
+      if (inside && dx * dx + dy * dy < r2) out[idx(X, Y)] = 1;
+      const op = !inside || map[idx(X, Y)] === WALL;
+      if (blocked) {
+        if (op) { newStart = rs; continue; }
+        blocked = false; start = newStart;
+      } else if (op && j < r) {
+        blocked = true;
+        castLight(map, cx, cy, j + 1, start, ls, r, xx, xy, yx, yy, out);
+        newStart = rs;
+      }
+    }
+    if (blocked) break;
+  }
+}
+
+/* =====================================================================
+ *  Avståndskartor (BFS, 8 riktningar)
+ * ===================================================================== */
+const QUEUE = new Int32Array(N);
+function bfs(map, sx, sy, out, pass) {
+  out.fill(-1);
+  let h = 0, t = 0;
+  const s = idx(sx, sy); out[s] = 0; QUEUE[t++] = s;
+  while (h < t) {
+    const c = QUEUE[h++], cx = c % W, cy = (c / W) | 0, nd = out[c] + 1;
+    for (let k = 0; k < 8; k++) {
+      const x = cx + D8[k][0], y = cy + D8[k][1];
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      const i = y * W + x;
+      if (out[i] !== -1 || map[i] === WALL) continue;
+      if (pass && !pass(i)) continue;
+      out[i] = nd; QUEUE[t++] = i;
+    }
+  }
+  return out;
+}
+
+/* =====================================================================
+ *  Nivågenerering
+ * ===================================================================== */
+function carveRoom(map, r) {
+  if (r.shape === 'cave') {
+    const ex = (r.w - 1) / 2, ey = (r.h - 1) / 2, mx = r.x + ex, my = r.y + ey;
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
+      const a = (x - mx) / (ex + 0.5), b = (y - my) / (ey + 0.5);
+      if (a * a + b * b <= 1.0) map[idx(x, y)] = FLOOR;
+    }
+    map[idx(r.cx, r.cy)] = FLOOR;
+  } else {
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) map[idx(x, y)] = FLOOR;
+  }
+}
+function corridor(map, a, b, rng) {
+  let x = a.cx, y = a.cy;
+  const tx = b.cx, ty = b.cy;
+  const carve = (x, y) => { if (map[idx(x, y)] === WALL) map[idx(x, y)] = FLOOR; };
+  if (rng.chance(0.5)) {
+    while (x !== tx) { carve(x, y); x += Math.sign(tx - x); }
+    while (y !== ty) { carve(x, y); y += Math.sign(ty - y); }
+  } else {
+    while (y !== ty) { carve(x, y); y += Math.sign(ty - y); }
+    while (x !== tx) { carve(x, y); x += Math.sign(tx - x); }
+  }
+  carve(tx, ty);
+}
+function tryGen(rng) {
+  const map = new Uint8Array(N);
+  const rooms = [];
+  const target = rng.int(9, 13);
+  for (let i = 0; i < 600 && rooms.length < target; i++) {
+    const w = rng.int(5, 12), h = rng.int(4, 8);
+    const x = rng.int(1, W - w - 1), y = rng.int(1, H - h - 1);
+    let ok = true;
+    for (const r of rooms) {
+      if (x <= r.x + r.w + 1 && x + w + 1 >= r.x && y <= r.y + r.h + 1 && y + h + 1 >= r.y) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const shape = (w >= 6 && h >= 5 && rng.chance(0.3)) ? 'cave' : 'rect';
+    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1), shape });
+  }
+  if (rooms.length < 7) return null;
+  for (const r of rooms) carveRoom(map, r);
+  // Minsta uppspännande träd (Prim) + några extra öglor
+  const n = rooms.length, inT = new Array(n).fill(false), edges = [];
+  const rd = (a, b) => Math.abs(a.cx - b.cx) + Math.abs(a.cy - b.cy);
+  inT[0] = true;
+  for (let k = 1; k < n; k++) {
+    let best = null, bd = 1e9;
+    for (let i = 0; i < n; i++) if (inT[i]) for (let j = 0; j < n; j++) if (!inT[j]) {
+      const d = rd(rooms[i], rooms[j]); if (d < bd) { bd = d; best = [i, j]; }
+    }
+    inT[best[1]] = true; edges.push(best);
+  }
+  const extra = rng.int(2, 4);
+  for (let e = 0; e < extra; e++) {
+    const i = rng.int(0, n - 1); let bj = -1, bd = 1e9;
+    for (let j = 0; j < n; j++) {
+      if (j === i || edges.some(([a, b]) => (a === i && b === j) || (a === j && b === i))) continue;
+      const d = rd(rooms[i], rooms[j]); if (d < bd) { bd = d; bj = j; }
+    }
+    if (bj >= 0 && bd < 34) edges.push([i, bj]);
+  }
+  for (const [a, b] of edges) corridor(map, rooms[a], rooms[b], rng);
+  // Pelare i stora rektangulära rum (ytterringen hålls fri → påverkar aldrig sammanhanget)
+  for (const r of rooms) {
+    if (r.shape === 'rect' && r.w >= 8 && r.h >= 6 && rng.chance(0.4)) {
+      for (const [px, py] of [[r.x + 2, r.y + 2], [r.x + r.w - 3, r.y + 2], [r.x + 2, r.y + r.h - 3], [r.x + r.w - 3, r.y + r.h - 3]]) {
+        if (px === r.cx && py === r.cy) continue;
+        map[idx(px, py)] = WALL;
+      }
+    }
+  }
+  const sr = rng.pick(rooms);
+  const start = { x: sr.cx, y: sr.cy };
+  if (map[idx(start.x, start.y)] !== FLOOR) return null;
+  const dist = bfs(map, start.x, start.y, new Int16Array(N));
+  for (let i = 0; i < N; i++) if (map[i] !== WALL && dist[i] < 0) map[i] = WALL;
+  let fr = null, fd = -1;
+  for (const r of rooms) {
+    if (r === sr) continue;
+    const d = dist[idx(r.cx, r.cy)];
+    if (d > fd) { fd = d; fr = r; }
+  }
+  if (!fr || fd < 14) return null;
+  const cand = [];
+  for (let y = fr.y + 1; y < fr.y + fr.h - 1; y++) for (let x = fr.x + 1; x < fr.x + fr.w - 1; x++) {
+    if (map[idx(x, y)] === FLOOR && dist[idx(x, y)] > 0) cand.push({ x, y });
+  }
+  if (!cand.length) cand.push({ x: fr.cx, y: fr.cy });
+  const stairs = rng.pick(cand);
+  if (dist[idx(stairs.x, stairs.y)] < 0) return null;
+  map[idx(stairs.x, stairs.y)] = STAIRS;
+  return { map, rooms, start, stairs, startRoom: sr, stairsRoom: fr };
+}
+function fallbackGen() {
+  const map = new Uint8Array(N);
+  const r = { x: 5, y: 5, w: 40, h: 20, cx: 25, cy: 15, shape: 'rect' };
+  carveRoom(map, r);
+  const stairs = { x: 43, y: 23 };
+  map[idx(stairs.x, stairs.y)] = STAIRS;
+  return { map, rooms: [r], start: { x: 7, y: 7 }, stairs, startRoom: { x: 5, y: 5, w: 8, h: 6 }, stairsRoom: r };
+}
+
+let MID = 1;
+function mkMonster(type, x, y, depth, rng) {
+  const t = MT[type];
+  let hpm, atkb, armb, xpm;
+  if (t.boss) {
+    const cyc = Math.max(0, Math.floor((depth / 5 - 1) / 3));
+    hpm = 1 + 0.6 * cyc + 0.03 * depth; atkb = Math.floor(depth * 0.7) + cyc * 4; armb = cyc * 2; xpm = 1 + cyc;
+  } else {
+    const ld = Math.max(0, depth - t.min);
+    hpm = 1 + 0.16 * ld + (depth > 8 ? 0.06 * (depth - 8) : 0); atkb = Math.floor(ld * 0.7 + depth * 0.7); armb = Math.floor(ld / 4); xpm = 1 + 0.1 * ld;
+  }
+  const hp = Math.round(t.hp * hpm);
+  return {
+    id: MID++, type, t, x, y, hp, maxHp: hp, atk: t.atk + atkb, arm: t.arm + armb, speed: t.speed,
+    rdmg: t.ranged ? t.ranged.dmg + atkb : 0, bdmg: t.breath ? t.breath.dmg + atkb : 0,
+    xp: Math.round(t.xp * xpm), energy: rng.int(0, 90), state: t.boss ? 'sleep' : (rng.chance(0.55) ? 'sleep' : 'wander'),
+    lastSeen: -999, cd: 0, timer: 0, fear: 0, gen: 0, summoned: false, summons: 0, seen: false, flash: 0,
+    ox: x, oy: y, mt: 0, bt: 0, bdx: 0, bdy: 0, wmap: null, wt: null, stuck: 0, charge: 0, target: null, zph: rng.n() * 6
+  };
+}
+function pickType(depth, rng) {
+  const pool = [];
+  for (const k in MT) {
+    const t = MT[k];
+    if (t.boss || depth < t.min) continue;
+    let w = t.w;
+    if (t.max && depth > t.max) w *= 0.25;
+    if (depth - t.min < 1) w *= 0.6; // nya monster dyker upp försiktigt
+    pool.push([k, w]);
+  }
+  return rng.weighted(pool);
+}
+
+function generateLevel(depth, seed) {
+  const rng = new RNG(seed);
+  let L = null;
+  for (let a = 0; a < 40 && !L; a++) L = tryGen(rng);
+  if (!L) L = fallbackGen();
+  populate(L, depth, rng);
+  return L;
+}
+function populate(L, depth, rng) {
+  const map = L.map;
+  L.noise = new Uint8Array(N);
+  L.deco = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    L.noise[i] = (rng.n() * 256) | 0;
+    if (map[i] === FLOOR && rng.chance(0.07)) L.deco[i] = rng.int(1, 4);
+  }
+  const startVis = new Uint8Array(N);
+  fovInto(map, L.start.x, L.start.y, 10, startVis);
+  const sr = L.startRoom;
+  const nearStart = (x, y) => (x >= sr.x - 1 && x <= sr.x + sr.w && y >= sr.y - 1 && y <= sr.y + sr.h) || cheb(x, y, L.start.x, L.start.y) < 8;
+  const floors = [];
+  for (let i = 0; i < N; i++) if (map[i] === FLOOR) floors.push(i);
+  const occ = new Uint8Array(N);   // monster
+  const occI = new Uint8Array(N);  // föremål/fällor
+  occ[idx(L.start.x, L.start.y)] = 1;
+  occI[idx(L.start.x, L.start.y)] = 1;
+  occI[idx(L.stairs.x, L.stairs.y)] = 1;
+  const far = rng.shuffle(floors.filter(i => !startVis[i] && !nearStart(i % W, (i / W) | 0)));
+
+  L.monsters = [];
+  const isBoss = depth % 5 === 0;
+  let count = Math.min(22, 5 + Math.floor(depth * 1.4));
+  if (isBoss) {
+    count = Math.round(count * 0.55);
+    const bt = BOSSES[(depth / 5 - 1) % 3];
+    const cand = [];
+    for (const [dx, dy] of D8) {
+      const x = L.stairs.x + dx, y = L.stairs.y + dy;
+      if (inb(x, y) && map[idx(x, y)] === FLOOR && !startVis[idx(x, y)]) cand.push(idx(x, y));
+    }
+    const pool = cand.length ? cand : far;
+    const bi = rng.pick(pool);
+    L.monsters.push(mkMonster(bt, bi % W, (bi / W) | 0, depth, rng));
+    occ[bi] = 1;
+  }
+  let fi = 0;
+  const total = count + (isBoss ? 1 : 0);
+  while (L.monsters.length < total && fi < far.length) {
+    const i = far[fi++];
+    if (occ[i]) continue;
+    const type = pickType(depth, rng);
+    const x = i % W, y = (i / W) | 0;
+    const m = mkMonster(type, x, y, depth, rng);
+    L.monsters.push(m); occ[i] = 1;
+    if (MT[type].pack && depth >= 2 && rng.chance(0.45)) {
+      let extra = rng.int(1, MT[type].pack - 1);
+      for (const [dx, dy] of D8) {
+        if (extra <= 0) break;
+        const nx = x + dx, ny = y + dy, ni = idx(nx, ny);
+        if (inb(nx, ny) && map[ni] === FLOOR && !occ[ni] && !startVis[ni] && !nearStart(nx, ny)) {
+          const pm = mkMonster(type, nx, ny, depth, rng); pm.state = m.state;
+          L.monsters.push(pm); occ[ni] = 1; extra--;
+        }
+      }
+    }
+  }
+
+  L.items = [];
+  L.features = [];
+  L.specials = [];
+  // Specialrum: skattkammare, källa och offeraltare
+  const roomTiles = r => {
+    const out = [];
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) { const i = idx(x, y); if (map[i] === FLOOR && !occI[i] && !startVis[i]) out.push(i); }
+    return out;
+  };
+  const specialRooms = rng.shuffle(L.rooms.filter(r => r !== L.startRoom && r !== L.stairsRoom && r.w * r.h >= 20));
+  if (depth >= 2 && !isBoss && specialRooms.length && rng.chance(0.4)) {
+    const r = specialRooms.pop();
+    const tiles = rng.shuffle(roomTiles(r));
+    if (tiles.length >= 8) {
+      L.specials.push({ type: 'vault', x: r.x, y: r.y, w: r.w, h: r.h, seen: false });
+      let t = 0;
+      const nG = rng.int(3, 5);
+      for (let n = 0; n < nG; n++) { const i = tiles[t++]; occI[i] = 1; L.items.push({ x: i % W, y: (i / W) | 0, it: mkGold(goldAmount(depth, rng)) }); }
+      const ti = tiles[t++]; occI[ti] = 1;
+      L.items.push({ x: ti % W, y: (ti / W) | 0, it: rng.chance(0.45) ? mkArtifact(depth, rng) : randomGear(depth, rng, 1) });
+      const nM = rng.int(2, 3);
+      for (let n = 0; n < nM && t < tiles.length; n++) {
+        const i = tiles[t++]; if (occ[i]) continue;
+        const m = mkMonster(pickType(depth + 1, rng), i % W, (i / W) | 0, depth + 1, rng);
+        m.state = 'sleep';
+        L.monsters.push(m); occ[i] = 1;
+      }
+    }
+  }
+  const placeFeature = (type) => {
+    const r = specialRooms.pop(); if (!r) return;
+    const c = idx(r.cx, r.cy);
+    const tiles = roomTiles(r);
+    const i = (map[c] === FLOOR && !occI[c] && !startVis[c]) ? c : (tiles.length ? rng.pick(tiles) : -1);
+    if (i < 0) return;
+    occI[i] = 1;
+    L.features.push({ x: i % W, y: (i / W) | 0, type, used: false });
+  };
+  if (depth >= 2 && rng.chance(0.4)) placeFeature('fountain');
+  if (depth >= 3 && rng.chance(0.35)) placeFeature('altar');
+
+  const free = rng.shuffle(floors.slice());
+  let k = 0;
+  const nextFree = () => { while (k < free.length && occI[free[k]]) k++; if (k >= free.length) return -1; const i = free[k++]; occI[i] = 1; return i; };
+  const nItems = 5 + rng.int(0, 2) + (depth >= 3 ? 1 : 0);
+  for (let n = 0; n < nItems; n++) {
+    const i = nextFree(); if (i < 0) break;
+    const it = (n === 0 && depth <= 3) ? mkPotion('small') : randomItem(depth, rng);
+    L.items.push({ x: i % W, y: (i / W) | 0, it });
+  }
+  const nGold = 3 + rng.int(0, 3);
+  for (let n = 0; n < nGold; n++) {
+    const i = nextFree(); if (i < 0) break;
+    L.items.push({ x: i % W, y: (i / W) | 0, it: mkGold(goldAmount(depth, rng)) });
+  }
+
+  L.traps = [];
+  const nTraps = Math.min(9, 1 + Math.floor(depth * 0.7));
+  const tp = [['spike', 4], ['poison', 3], ['tele', 2], ['alarm', 2]];
+  if (depth >= 2 && !isBoss) tp.push(['pit', 1]);
+  let tries = 0;
+  while (L.traps.length < nTraps && tries++ < 400) {
+    const i = floors[rng.int(0, floors.length - 1)];
+    const x = i % W, y = (i / W) | 0;
+    if (occI[i] || startVis[i] || nearStart(x, y)) continue;
+    occI[i] = 1;
+    L.traps.push({ x, y, type: rng.weighted(tp), known: false });
+  }
+}
+
+/* =====================================================================
+ *  Speltillstånd
+ * ===================================================================== */
+let G = null;
+const hooks = { levelUp: null, died: null, newLevel: null, log: null };
+
+function xpNeed(l) { return Math.floor(10 * Math.pow(l, 1.55)); }
+function pAtk() { const p = G.player; return p.baseAtk + p.bonusAtk + (p.weapon ? p.weapon.val : 0); }
+function pDef() { const p = G.player; return p.bonusDef + (p.armor ? p.armor.val : 0); }
+function hasArt(id) { const p = G.player; return (p.weapon && p.weapon.art === id) || (p.armor && p.armor.art === id); }
+function pDodge() { return G.player.dodge + (hasArt('shadow') ? 0.12 : 0); }
+// Monstrens rustning dämpar med K=12, spelarens försvar med K=DEF_K (mjukare – annars blir spelaren osårbar djupt ned).
+const DEF_K = 20;
+function mitigate(raw, arm) { return Math.max(1, Math.round(raw * 12 / (12 + Math.max(0, arm)))); }
+function mitigateP(raw, def) { return Math.max(1, Math.round(raw * DEF_K / (DEF_K + Math.max(0, def)))); }
+function defPct(def) { return Math.round(100 - 100 * DEF_K / (DEF_K + def)); }
+function rollDmg(atk) { return G.rng.int(Math.ceil(atk * 0.5), Math.max(1, atk)); }
+function healAmount(sub) {
+  const p = G.player;
+  const base = sub === 'large' ? Math.round(p.maxHp * 0.75) + 10 : Math.round(p.maxHp * 0.35) + 8;
+  return Math.round(base * p.alch);
+}
+function regenRate() { const p = G.player; return (0.06 + p.maxHp * 0.003) * p.regenMul * (hasArt('troll') ? 2 : 1); }
+function score() { return G.stats.maxDepth * 100 + G.stats.gold + G.stats.kills * 10; }
+
+function newGame(seed) {
+  if (seed == null) seed = (Math.random() * 4294967296) >>> 0;
+  G = {
+    seed: seed >>> 0, rng: new RNG(hashSeed(seed, 9999)), depth: 0, turn: 0,
+    player: {
+      x: 0, y: 0, hp: 30, maxHp: 30, baseAtk: 2, bonusAtk: 0, bonusDef: 0, crit: 0.05, dodge: 0, vamp: 0,
+      regenMul: 1, regenAcc: 0, sight: 8, trapSense: 0, greed: 1, alch: 1, level: 1, xp: 0,
+      poison: 0, poisonDmg: 0, poisonSrc: '', weapon: mkWeapon(0, 0), armor: mkArmor(0, 0), inv: [mkPotion('small')],
+      ox: 0, oy: 0, mt: 0, bt: 0, bdx: 0, bdy: 0, hurtT: 0
+    },
+    stats: { kills: 0, gold: 0, maxDepth: 1, dealt: 0, taken: 0, potions: 0, bosses: 0, steps: 0 },
+    logs: [], particles: [], dead: false, cause: '', pendingLvl: 0, submitted: false,
+    interrupt: false, visIds: new Set(), auto: null, logDirty: true
+  };
+  enterLevel(1);
+  log('Du kliver ned i Grottkrypet. Hitta trappan ⬇️ för att gå djupare.', 'info');
+  return G;
+}
+
+function enterLevel(d) {
+  G.depth = d;
+  G.stats.maxDepth = Math.max(G.stats.maxDepth, d);
+  const L = generateLevel(d, hashSeed(G.seed, d));
+  G.map = L.map; G.noise = L.noise; G.deco = L.deco; G.rooms = L.rooms; G.stairs = L.stairs;
+  G.monsters = L.monsters; G.items = L.items; G.traps = L.traps; G.features = L.features; G.specials = L.specials;
+  G.levelTurns = 0; G.theme = themeFor(d);
+  G.interrupt = true; // en nedhållen tangent ska inte fortsätta gå på det nya djupet
+  G.explored = new Uint8Array(N); G.vis = new Uint8Array(N);
+  G.pdist = new Int16Array(N);
+  G.floorList = [];
+  for (let i = 0; i < N; i++) if (G.map[i] !== WALL) G.floorList.push(i);
+  const p = G.player;
+  p.x = L.start.x; p.y = L.start.y; p.mt = 0; p.bt = 0;
+  G.particles.length = 0;
+  G.visIds = new Set();
+  G.auto = null;
+  computeFOV();
+  computePdist();
+  for (const m of G.monsters) if (G.vis[idx(m.x, m.y)]) { m.seen = true; G.visIds.add(m.id); }
+  G.mapDirty = true;
+  if (hooks.newLevel) hooks.newLevel(d);
+}
+
+function computeFOV() {
+  G.vis.fill(0);
+  fovInto(G.map, G.player.x, G.player.y, G.player.sight, G.vis);
+  for (let i = 0; i < N; i++) if (G.vis[i]) G.explored[i] = 1;
+  G.mapDirty = true;
+}
+function computePdist() { bfs(G.map, G.player.x, G.player.y, G.pdist); }
+
+function log(text, cls) {
+  G.logs.push({ text, cls: cls || 'info', t: now() });
+  if (G.logs.length > 60) G.logs.splice(0, G.logs.length - 60);
+  G.logDirty = true;
+}
+
+/* ---------- Partiklar / effekter (bara visuellt) ---------- */
+function fx(p) { if (HEADLESS) return; p.t0 = now(); G.particles.push(p); if (G.particles.length > 120) G.particles.shift(); }
+function floatText(x, y, text, color, big) {
+  if (HEADLESS) return;
+  const t = now();
+  let stack = 0;
+  for (const q of G.particles) if (q.kind === 'text' && q.x === x && q.y === y && t - q.t0 < 450) stack++;
+  fx({ kind: 'text', x, y, text, color, dur: 900, big: !!big, off: stack * 0.38 });
+}
+function burst(x, y, color, n) { fx({ kind: 'burst', x, y, color, dur: 450, n: n || 10 }); }
+function projectile(x0, y0, x1, y1, color, kind) { fx({ kind: 'proj', x0, y0, x1, y1, color, pk: kind || 'bolt', dur: 160 + 25 * cheb(x0, y0, x1, y1) }); }
+function ring(x, y, color, r) { fx({ kind: 'ring', x, y, color, dur: 500, r: r || 1 }); }
+
+function setPos(e, x, y, anim) {
+  if (anim && !HEADLESS) {
+    const t = now(); const rp = rpos(e, t);
+    e.ox = rp[0]; e.oy = rp[1]; e.mt = t;
+  } else e.mt = 0;
+  e.x = x; e.y = y;
+}
+function bump(e, dx, dy) { if (HEADLESS) return; e.bt = now(); e.bdx = Math.sign(dx); e.bdy = Math.sign(dy); }
+const MOVE_MS = 110, BUMP_MS = 150;
+function rpos(e, t) {
+  if (!e.mt) return [e.x, e.y];
+  const k = (t - e.mt) / MOVE_MS;
+  if (k >= 1 || k < 0) { e.mt = 0; return [e.x, e.y]; }
+  const q = 1 - (1 - k) * (1 - k);
+  return [e.ox + (e.x - e.ox) * q, e.oy + (e.y - e.oy) * q];
+}
+function bumpOff(e, t) {
+  if (!e.bt) return [0, 0];
+  const k = (t - e.bt) / BUMP_MS;
+  if (k >= 1 || k < 0) { e.bt = 0; return [0, 0]; }
+  const s = Math.sin(k * Math.PI) * 0.3;
+  return [e.bdx * s, e.bdy * s];
+}
+
+/* ---------- Hjälpfunktioner för kartan ---------- */
+function monsterAt(x, y) {
+  for (const m of G.monsters) if (m.x === x && m.y === y && m.hp > 0) return m;
+  return null;
+}
+function passable(x, y) { return inb(x, y) && G.map[idx(x, y)] !== WALL; }
+function freeFor(x, y) { return passable(x, y) && !(G.player.x === x && G.player.y === y) && !monsterAt(x, y); }
+function trapAt(x, y) { for (const t of G.traps) if (t.x === x && t.y === y) return t; return null; }
+function itemsAt(x, y) { return G.items.filter(o => o.x === x && o.y === y); }
+function isVisible(x, y) { return G.vis[idx(x, y)] === 1; }
+function lineClear(ax, ay, bx, by, ignoreMonsters) {
+  let x = ax, y = ay;
+  const dx = Math.abs(bx - ax), dy = -Math.abs(by - ay), sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    if (x === bx && y === by) return true;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+    if (x === bx && y === by) return true;
+    if (G.map[idx(x, y)] === WALL) return false;
+    if (!ignoreMonsters && monsterAt(x, y)) return false;
+  }
+}
+function dropNear(x, y, it) {
+  const spots = [[0, 0]].concat(D8, [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [2, -2], [-2, 2]]);
+  for (const [dx, dy] of spots) {
+    const nx = x + dx, ny = y + dy;
+    if (passable(nx, ny) && G.map[idx(nx, ny)] !== STAIRS && !itemsAt(nx, ny).length && !trapAt(nx, ny)) { G.items.push({ x: nx, y: ny, it }); return; }
+  }
+  G.items.push({ x, y, it });
+}
+function randomFloorFar(fromX, fromY, minDist) {
+  for (let tries = 0; tries < 400; tries++) {
+    const i = G.floorList[G.rng.int(0, G.floorList.length - 1)];
+    const x = i % W, y = (i / W) | 0;
+    if (G.map[i] !== FLOOR || monsterAt(x, y) || trapAt(x, y)) continue;
+    if (G.player.x === x && G.player.y === y) continue;
+    if (cheb(x, y, fromX, fromY) < minDist) continue;
+    let safe = true;
+    for (const m of G.monsters) if (m.state === 'hunt' && cheb(m.x, m.y, x, y) < 5) { safe = false; break; }
+    if (!safe && tries < 300) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+/* =====================================================================
+ *  Spelarens handlingar
+ * ===================================================================== */
+function playerMove(dx, dy) {
+  if (G.dead) return false;
+  const p = G.player, nx = p.x + dx, ny = p.y + dy;
+  if (!inb(nx, ny)) return false;
+  const m = monsterAt(nx, ny);
+  G.interrupt = false;
+  if (m) { playerAttack(m); endTurn(); return true; }
+  if (G.map[idx(nx, ny)] === WALL) return false;
+  setPos(p, nx, ny, true);
+  G.stats.steps++;
+  sfx('step');
+  if (afterStep()) return true;
+  endTurn();
+  return true;
+}
+function playerWait() {
+  if (G.dead) return false;
+  G.interrupt = false;
+  G.searching = true;
+  endTurn();
+  G.searching = false;
+  return true;
+}
+function afterStep() {
+  const p = G.player;
+  // guld plockas automatiskt
+  for (const o of itemsAt(p.x, p.y)) {
+    if (o.it.kind === 'gold') {
+      const amt = Math.round(o.it.amount * p.greed);
+      G.stats.gold += amt;
+      G.items.splice(G.items.indexOf(o), 1);
+      log(`Du plockar upp ${amt} guld.`, 'gold');
+      floatText(p.x, p.y, '+' + amt + ' 💰', '#ffcc33');
+      sfx('coin');
+    }
+  }
+  const here = itemsAt(p.x, p.y);
+  if (here.length) {
+    const it = here[here.length - 1].it;
+    const c = cmpInfo(it);
+    const more = here.length > 1 ? ` (+${here.length - 1} till)` : '';
+    const hint = c && c.d > 0 && !c.txt.includes('förlorar') ? (isTouch() ? 'Tryck ✋ Plocka för att ta och utrusta.' : 'Tryck G för att ta och utrusta.') : pickHint();
+    log(`Här ligger: ${itemLabel(it)} – ${itemStats(it)}${c ? ' (' + c.txt + ')' : ''}${more}. ${hint}`, 'gold');
+  }
+  if (G.map[idx(p.x, p.y)] === STAIRS) log(`Här är trappan ned. ${stairHint()}`, 'warn');
+  const f = featureAt(p.x, p.y);
+  if (f) {
+    if (f.used) log(FEATURES[f.type].dry, 'info');
+    else if (f.type === 'fountain') log(`En källa med klart, läkande vatten. Den läker allt – men bara en gång. ${isTouch() ? 'Tryck ✋ Plocka för att dricka.' : 'Tryck G för att dricka.'}`, 'magic');
+    else log(`Ett offeraltare: offra ${altarCost()} guld – och lika många poäng – för en välsignelse. ${isTouch() ? 'Tryck ✋ Plocka.' : 'Tryck G.'}`, 'magic');
+  }
+  for (const sp of G.specials) {
+    if (sp.seen || p.x < sp.x || p.y < sp.y || p.x >= sp.x + sp.w || p.y >= sp.y + sp.h) continue;
+    sp.seen = true;
+    log('Du har hittat en skattkammare! Guld och en fin skatt – men vakterna sover lätt.', 'gold');
+    if (hooks.banner) hooks.banner('Skattkammare', 'Smyg – vakterna sover');
+  }
+  const tr = trapAt(p.x, p.y);
+  if (tr) {
+    if (tr.known) { log(`Du kliver försiktigt förbi ${TRAPS[tr.type].name.toLowerCase()}n.`, 'info'); }
+    else return triggerTrapPlayer(tr);
+  }
+  return false;
+}
+function featureAt(x, y) { for (const f of G.features) if (f.x === x && f.y === y) return f; return null; }
+function altarCost() { return 50 + G.depth * 20; }
+function useFeature(f) {
+  const p = G.player;
+  if (f.used) { log(FEATURES[f.type].dry, 'info'); return false; }
+  if (f.type === 'fountain') {
+    f.used = true;
+    const h = p.maxHp - p.hp;
+    p.hp = p.maxHp; p.poison = 0;
+    log(`Du dricker ur källan – det kalla vattnet läker ${h} HP.`, 'good');
+    floatText(p.x, p.y, '+' + h, '#4ade80', true);
+    ring(p.x, p.y, '#39d5ff', 1.5);
+    sfx('power');
+    G.mapDirty = true;
+    endTurn();
+    return true;
+  }
+  const cost = altarCost();
+  if (G.stats.gold < cost) { log(`Altaret kräver ${cost} guld – du har bara ${G.stats.gold}.`, 'info'); return false; }
+  if (hooks.altar) { hooks.altar(f, cost); return false; }
+  const pool = UPGRADES.filter(u => !u.ok || u.ok(p));
+  blessAltar(f, cost, G.rng.pick(pool));
+  return true;
+}
+function blessAltar(f, cost, u) {
+  const p = G.player;
+  G.stats.gold -= cost; G.stats.offered = (G.stats.offered || 0) + cost;
+  f.used = true;
+  u.apply(p);
+  log(`Du offrar ${cost} guld. Altaret välsignar dig med ${u.name}: ${u.desc}`, 'magic');
+  floatText(p.x, p.y, u.icon + ' ' + u.name, '#d0b2ff', true);
+  ring(p.x, p.y, '#b083ff', 2);
+  sfx('win');
+  G.mapDirty = true;
+}
+function pickHint() { return isTouch() ? 'Tryck ✋ Plocka.' : 'Tryck G för att plocka upp.'; }
+function stairHint() { return isTouch() ? 'Tryck ⬇️ Ned.' : 'Tryck Enter eller > för att gå ned.'; }
+function isTouch() { return !HEADLESS && window.matchMedia && window.matchMedia('(pointer: coarse)').matches; }
+
+function playerAttack(m) {
+  const p = G.player;
+  bump(p, m.x - p.x, m.y - p.y);
+  const sneak = m.state !== 'hunt';
+  const hit = sneak || G.rng.chance(0.9);
+  if (!hit) {
+    log(`Du missar ${m.t.def}.`, 'info');
+    floatText(m.x, m.y, 'miss', '#9aa6cf');
+    wake(m, true);
+    return;
+  }
+  let raw = rollDmg(pAtk()), crit = false;
+  if (sneak) raw *= 2;
+  else if (G.rng.chance(p.crit)) { raw *= 2; crit = true; }
+  const dmg = mitigate(raw, m.arm);
+  sfx('hit');
+  damageMonster(m, dmg, { sneak, crit, src: 'melee' });
+  if (hasArt('leech')) {
+    const h = Math.min(Math.ceil(dmg * 0.25), p.maxHp - p.hp);
+    if (h > 0) { p.hp += h; floatText(p.x, p.y, '+' + h, '#4ade80'); }
+  }
+  if (hasArt('cleave')) {
+    for (const o of G.monsters.slice()) {
+      if (o !== m && o.hp > 0 && cheb(o.x, o.y, p.x, p.y) === 1) damageMonster(o, mitigate(Math.ceil(raw * 0.6), o.arm), { src: 'cleave' });
+    }
+  }
+  noise(p.x, p.y, 4, 0.25);
+}
+function damageMonster(m, dmg, opt) {
+  opt = opt || {};
+  m.hp -= dmg;
+  m.flash = now();
+  G.stats.dealt += dmg;
+  floatText(m.x, m.y, String(dmg), opt.crit || opt.sneak ? '#ffcc33' : '#ffffff', opt.crit || opt.sneak);
+  if (m.hp <= 0) { killMonster(m, opt); return; }
+  if (opt.src === 'melee') {
+    const pre = opt.sneak ? 'Smygattack! ' : opt.crit ? 'Kritisk träff! ' : '';
+    log(`${pre}Du träffar ${m.t.def} för ${dmg} skada.`, opt.sneak || opt.crit ? 'gold' : 'info');
+  } else if (opt.src === 'fire') {
+    log(`Eldbollen bränner ${m.t.def} för ${dmg} skada.`, 'magic');
+  } else if (opt.src === 'trap') {
+    if (isVisible(m.x, m.y)) log(`${cap(m.t.def)} tar ${dmg} skada av fällan.`, 'info');
+  } else if (opt.src === 'thorns') {
+    log(`Törnen river ${m.t.def} för ${dmg} skada.`, 'good');
+  } else if (opt.src === 'cleave') {
+    log(`Klyvyxan träffar även ${m.t.def} för ${dmg} skada.`, 'info');
+  }
+  wake(m, true);
+  if (m.t.split && m.gen < 2 && m.hp >= 3) splitSlime(m);
+}
+function splitSlime(m) {
+  const spots = G.rng.shuffle(D8.slice());
+  for (const [dx, dy] of spots) {
+    const x = m.x + dx, y = m.y + dy;
+    if (!freeFor(x, y)) continue;
+    const half = Math.floor(m.hp / 2);
+    const c = mkMonster('slime', x, y, G.depth, G.rng);
+    c.hp = half; m.hp -= half;
+    c.maxHp = m.maxHp = Math.max(m.hp, Math.ceil(m.maxHp / 2));
+    c.maxHp = Math.max(c.maxHp, c.hp);
+    c.atk = m.atk; c.arm = m.arm;
+    c.gen = m.gen = m.gen + 1;
+    c.xp = m.xp = Math.max(1, Math.ceil(m.xp / 2));
+    c.state = 'hunt'; c.lastSeen = G.turn; c.energy = 0; c.seen = true; c.summoned = m.summoned;
+    c.ox = m.x; c.oy = m.y; c.mt = HEADLESS ? 0 : now();
+    G.monsters.push(c);
+    G.visIds.add(c.id);
+    if (isVisible(m.x, m.y)) log(`${cap(m.t.def)} delar sig!`, 'warn');
+    return;
+  }
+}
+function killMonster(m, opt) {
+  opt = opt || {};
+  m.hp = 0; m.dead = true;
+  const i = G.monsters.indexOf(m); if (i >= 0) G.monsters.splice(i, 1);
+  G.visIds.delete(m.id);
+  const p = G.player;
+  if (!m.summoned) G.stats.kills++;
+  const unseen = opt.src === 'trap' && !isVisible(m.x, m.y);
+  const how = opt.src === 'fire' ? `Eldbollen dödar ${m.t.def}!` : opt.src === 'thorns' ? `Törnen dödar ${m.t.def}!` : unseen ? 'Något skriker till i mörkret…' : opt.src === 'trap' ? `${cap(m.t.def)} dör i fällan!` : `Du dödar ${m.t.def}!`;
+  log(`${how} (+${m.xp} XP)`, 'good');
+  burst(m.x, m.y, m.t.boss ? '#ff9a3d' : '#ff5a6e', m.t.boss ? 28 : 12);
+  if (p.vamp && !G.dead) { const h = Math.min(p.vamp, p.maxHp - p.hp); if (h > 0) { p.hp += h; floatText(p.x, p.y, '+' + h, '#4ade80'); } }
+  if (m.t.boss) {
+    G.stats.bosses++;
+    sfx('win');
+    log(`${cap(m.t.def)} är besegrad! Skatter regnar ned över golvet.`, 'gold');
+    dropNear(m.x, m.y, G.rng.chance(0.5) ? mkArtifact(G.depth, G.rng) : randomGear(G.depth, G.rng, 1));
+    dropNear(m.x, m.y, mkPotion('large'));
+    dropNear(m.x, m.y, mkScroll(G.rng.weighted(SCROLL_W)));
+    dropNear(m.x, m.y, mkGold(40 * G.depth + G.rng.int(0, 40)));
+    if (hooks.banner) hooks.banner(`${m.t.name} besegrad!`, 'Trappan ned väntar.');
+  } else if (!m.summoned && !m.wanderer) {
+    const r = G.rng.n();
+    if (r < 0.09 + G.depth * 0.004) dropNear(m.x, m.y, randomItem(G.depth, G.rng));
+    else if (r < 0.32) dropNear(m.x, m.y, mkGold(Math.max(2, Math.round(goldAmount(G.depth, G.rng) * 0.6))));
+  }
+  gainXp(m.xp);
+}
+function gainXp(x) {
+  const p = G.player;
+  if (G.dead) return;
+  p.xp += x;
+  while (p.xp >= xpNeed(p.level)) {
+    p.xp -= xpNeed(p.level);
+    p.level++;
+    p.maxHp += 4;
+    const atkUp = p.level % 2 === 0;
+    if (atkUp) p.baseAtk += 1;
+    p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25) + 4);
+    G.pendingLvl++;
+    log(`Du når nivå ${p.level}! +4 max-HP${atkUp ? ' och +1 attack' : ''}.`, 'good');
+    floatText(p.x, p.y, 'NIVÅ ' + p.level + '!', '#ffcc33', true);
+    ring(p.x, p.y, '#ffcc33', 2);
+    sfx('power');
+  }
+}
+function wake(m, hunt) {
+  if (m.state === 'hunt') { m.lastSeen = G.turn; return; }
+  m.state = hunt ? 'hunt' : 'wander';
+  m.lastSeen = G.turn;
+  m.energy = Math.min(m.energy, 0);
+}
+function noise(x, y, r, p) {
+  for (const m of G.monsters) {
+    if (m.state === 'sleep' && cheb(m.x, m.y, x, y) <= r && G.rng.chance(p)) {
+      m.state = 'hunt'; m.lastSeen = G.turn; m.energy = -m.speed;
+      if (isVisible(m.x, m.y)) floatText(m.x, m.y, '!', '#ffcc33', true);
+    }
+  }
+}
+
+// Visa kvarvarande HP i loggen när det börjar bli farligt – då förstår man varför man dog.
+function hpLeft(dmg) { const p = G.player, r = p.hp - dmg; return r > 0 && r <= p.maxHp * 0.5 ? ` (${r} HP kvar)` : ''; }
+function damagePlayer(dmg, cause, quiet) {
+  const p = G.player;
+  p.hp -= dmg;
+  G.stats.taken += dmg;
+  p.hurtT = now();
+  if (!quiet) G.interrupt = true;
+  floatText(p.x, p.y, '-' + dmg, '#ff5a6e', dmg >= 8);
+  sfx('hurt');
+  if (hooks.shake) hooks.shake(Math.min(9, 2 + dmg * 0.6));
+  if (p.hp <= 0) { p.hp = 0; die(cause); }
+}
+function die(cause) {
+  if (G.dead) return;
+  G.dead = true;
+  G.cause = `${cause} på djup ${G.depth}`;
+  log(G.cause + '.', 'bad');
+  sfx('lose');
+  if (hooks.died) hooks.died();
+}
+function poisonPlayer(turns, dmg, src) {
+  const p = G.player;
+  p.poison = Math.max(p.poison, turns);
+  p.poisonDmg = Math.max(p.poisonDmg, dmg);
+  p.poisonSrc = src;
+  log('Du är förgiftad! 🤢', 'bad');
+}
+
+/* ---------- Fällor ---------- */
+function triggerTrapPlayer(tr) {
+  const p = G.player, T = TRAPS[tr.type];
+  tr.known = true;
+  G.interrupt = true;
+  ring(tr.x, tr.y, T.color, 1);
+  switch (tr.type) {
+    case 'spike': {
+      const d = 4 + Math.round(G.depth * 1.5) + G.rng.int(0, 3);
+      log(`Klick! Spjut skjuter upp ur golvet – du tar ${d} skada${hpLeft(d)}.`, 'bad');
+      damagePlayer(d, 'Dödad av ' + T.indef);
+      break;
+    }
+    case 'poison':
+      log('Aj! En giftnål sticker dig i foten.', 'bad');
+      poisonPlayer(6, 1 + Math.floor(G.depth / 4), 'en giftnål');
+      break;
+    case 'tele': {
+      const s = randomFloorFar(p.x, p.y, 12);
+      log('Golvet glöder lila – du slungas iväg!', 'magic');
+      if (s) { ring(p.x, p.y, T.color, 1); setPos(p, s.x, s.y, false); ring(s.x, s.y, T.color, 1); sfx('zap'); }
+      break;
+    }
+    case 'alarm':
+      log('En gäll klocka ljuder genom grottan! Monster vaknar.', 'warn');
+      for (const m of G.monsters) if (cheb(m.x, m.y, p.x, p.y) <= 18) { if (m.state !== 'hunt') { m.state = 'hunt'; m.energy = Math.min(m.energy, 0); } m.lastSeen = G.turn; }
+      sfx('hurt');
+      break;
+    case 'pit': {
+      const d = 3 + G.rng.int(0, 2);
+      log(`Golvet ger vika! Du faller ned till djup ${G.depth + 1} och tar ${d} skada.`, 'bad');
+      damagePlayer(d, 'Dödad av ett fall');
+      if (!G.dead) {
+        enterLevel(G.depth + 1);
+        const boss = G.depth % 5 === 0;
+        if (boss) log('En kuslig närvaro fyller grottan. Något stort lurar här nere...', 'bad');
+        if (hooks.banner) hooks.banner('Djup ' + G.depth, boss ? '⚠️ Du föll rakt ned till ett bossdjup!' : 'Du föll genom en fallucka!');
+      }
+      return true;
+    }
+  }
+  return false;
+}
+function triggerTrapMonster(m, tr) {
+  const T = TRAPS[tr.type];
+  const seen = isVisible(tr.x, tr.y);
+  if (seen) { tr.known = true; ring(tr.x, tr.y, T.color, 1); }
+  switch (tr.type) {
+    case 'spike': case 'poison': {
+      const d = (tr.type === 'spike' ? 6 : 4) + Math.round(G.depth * 1.5);
+      if (seen) log(`${cap(m.t.def)} kliver på ${T.indef}!`, 'good');
+      damageMonster(m, d, { src: 'trap' });
+      break;
+    }
+    case 'tele': {
+      const s = randomFloorFar(m.x, m.y, 8);
+      if (s) { if (seen) log(`${cap(m.t.def)} försvinner i ett lila sken.`, 'magic'); setPos(m, s.x, s.y, false); }
+      break;
+    }
+    case 'alarm':
+      if (seen) log(`${cap(m.t.def)} utlöser en larmfälla!`, 'warn');
+      for (const o of G.monsters) if (cheb(o.x, o.y, m.x, m.y) <= 14) { o.state = 'hunt'; o.lastSeen = G.turn; }
+      break;
+    case 'pit': {
+      if (seen) log(`${cap(m.t.def)} faller genom en fallucka och försvinner!`, 'good');
+      m.hp = 0; m.dead = true;
+      const i = G.monsters.indexOf(m); if (i >= 0) G.monsters.splice(i, 1);
+      break;
+    }
+  }
+}
+function detectTraps() {
+  const p = G.player;
+  const r = 2 + Math.floor(p.trapSense * 10);
+  const base = (G.searching ? 0.35 : 0.1) + p.trapSense;
+  for (const t of G.traps) {
+    if (t.known || !isVisible(t.x, t.y)) continue;
+    const d = cheb(t.x, t.y, p.x, p.y);
+    if (d > r) continue;
+    if (G.rng.chance(base * (d <= 1 ? 1.6 : 1))) {
+      t.known = true;
+      log(`Du upptäcker ${TRAPS[t.type].indef}!`, 'warn');
+      ring(t.x, t.y, TRAPS[t.type].color, 1);
+      G.interrupt = true;
+    }
+  }
+}
+
+/* ---------- Föremål ---------- */
+function itemLabel(it) { return it.count > 1 ? `${it.name} ×${it.count}` : it.name; }
+function itemStats(it) {
+  switch (it.kind) {
+    case 'potion': return `läker ${healAmount(it.sub)} HP och botar gift`;
+    case 'scroll': return SCROLLS[it.sub].desc.charAt(0).toLowerCase() + SCROLLS[it.sub].desc.slice(1).replace(/\.$/, '');
+    case 'weapon': return `attack +${it.val}${artTxt(it)}`;
+    case 'armor': return `försvar +${it.val}${artTxt(it)}`;
+    case 'gold': return `${it.amount} guld`;
+  }
+  return '';
+}
+function artTxt(it) { const a = it.art && ARTIFACTS.find(x => x.id === it.art); return a ? ' · ✨ ' + a.desc : ''; }
+function cmpInfo(it) {
+  if (it.kind !== 'weapon' && it.kind !== 'armor') return null;
+  const cur = it.kind === 'weapon' ? G.player.weapon : G.player.armor;
+  if (cur === it) return null;
+  const d = it.val - (cur ? cur.val : 0);
+  const lose = cur && cur.art && cur.art !== it.art ? ' – men du förlorar din unika kraft' : '';
+  return { d, txt: (d > 0 ? `▲ +${d} mot nuvarande` : d < 0 ? `▼ −${-d} mot nuvarande` : '= samma som nuvarande') + lose, cls: d > 0 ? 'up' : d < 0 ? 'down' : 'same' };
+}
+function stackable(it) { return it.kind === 'potion' || it.kind === 'scroll'; }
+function giveItem(it) {
+  const p = G.player;
+  if (stackable(it)) {
+    const s = p.inv.find(o => o.kind === it.kind && o.sub === it.sub);
+    if (s) { s.count += it.count; return true; }
+  }
+  if (p.inv.length >= 10) { dropNear(p.x, p.y, it); log(`Packningen är full – ${it.name} hamnar på golvet.`, 'warn'); return false; }
+  p.inv.push(it);
+  return true;
+}
+function playerPickup() {
+  if (G.dead) return false;
+  const p = G.player;
+  const here = itemsAt(p.x, p.y);
+  const f = featureAt(p.x, p.y);
+  if (!here.length && f) return useFeature(f);
+  if (!here.length) { log('Det finns inget att plocka upp här.', 'info'); return false; }
+  const o = here[here.length - 1];
+  const it = o.it;
+  const fits = (stackable(it) && p.inv.some(s => s.kind === it.kind && s.sub === it.sub)) || p.inv.length < 10;
+  if (!fits) {
+    const c0 = cmpInfo(it), cur0 = c0 && p[it.kind];
+    if (c0 && c0.d > 0 && !(cur0.art && cur0.art !== it.art)) {
+      // Full packning men klar uppgradering: byt direkt, det gamla läggs på golvet.
+      o.it = cur0; p[it.kind] = it;
+      log(`Du byter till ${it.name} (${it.kind === 'weapon' ? 'attack' : 'försvar'} +${it.val}) och lägger ${cur0.name} på golvet.`, 'good');
+      sfx('coin'); G.interrupt = false; endTurn();
+      return true;
+    }
+    log('Packningen är full (10/10). Släng något först.', 'warn'); return false;
+  }
+  G.items.splice(G.items.indexOf(o), 1);
+  const c = cmpInfo(it);
+  giveItem(it);
+  const slot = it.kind;
+  const cur = c && p[slot];
+  const ii = p.inv.indexOf(it);
+  if (c && c.d > 0 && ii >= 0 && !(cur && cur.art && cur.art !== it.art)) {
+    // Klar uppgradering: utrusta direkt, det gamla hamnar i packningen.
+    p[slot] = it; p.inv[ii] = cur;
+    log(`Du plockar upp och utrustar ${it.name} (${slot === 'weapon' ? 'attack' : 'försvar'} +${it.val}). ${cur.name} ligger i packningen.`, 'good');
+  } else log(`Du plockar upp ${itemLabel(it)}.`, 'gold');
+  sfx('coin');
+  G.interrupt = false;
+  endTurn();
+  return true;
+}
+function useItem(i, opt) {
+  const p = G.player, it = p.inv[i];
+  if (!it || G.dead) return false;
+  if (it.kind === 'weapon' || it.kind === 'armor') {
+    const slot = it.kind;
+    const old = p[slot];
+    p[slot] = it;
+    if (old) p.inv[i] = old; else p.inv.splice(i, 1);
+    log(`Du utrustar ${it.name} (${it.kind === 'weapon' ? 'attack' : 'försvar'} +${it.val}).`, 'good');
+    sfx('select');
+    endTurn();
+    return true;
+  }
+  if (it.kind === 'potion') {
+    const h = Math.min(healAmount(it.sub), p.maxHp - p.hp);
+    p.hp += h; p.poison = 0;
+    G.stats.potions++;
+    consume(i);
+    log(`Du dricker ${it.sub === 'large' ? 'en stor' : 'en liten'} hälsodryck och läker ${h} HP.`, 'good');
+    floatText(p.x, p.y, '+' + h, '#4ade80', true);
+    ring(p.x, p.y, '#4ade80', 1);
+    sfx('power');
+    endTurn();
+    return true;
+  }
+  if (it.kind === 'scroll') {
+    if (it.sub === 'fire') {
+      // Närmaste vakna fiende i första hand – sovande bara om inga vakna syns.
+      let best = null, bd = 1e9;
+      for (const m of G.monsters) {
+        if (!isVisible(m.x, m.y)) continue;
+        const d = cheb(m.x, m.y, p.x, p.y) + (m.state === 'sleep' ? 100 : 0);
+        if (d < bd) { bd = d; best = m; }
+      }
+      if (!best) { log('Det finns inga fiender i sikte – du sparar rullen.', 'info'); return false; }
+      consume(i);
+      const dmgBase = 10 + G.depth * 3;
+      log('Du läser eldbollsrullen – en eldklot susar iväg! 🔥', 'magic');
+      projectile(p.x, p.y, best.x, best.y, '#ff8a3d', 'fire');
+      const tx = best.x, ty = best.y;
+      burst(tx, ty, '#ff8a3d', 24); ring(tx, ty, '#ff8a3d', 1.6);
+      sfx('boom');
+      for (const m of G.monsters.slice()) {
+        if (cheb(m.x, m.y, tx, ty) <= 1) damageMonster(m, mitigate(dmgBase + G.rng.int(0, 6), Math.floor(m.arm / 2)), { src: 'fire' });
+      }
+      noise(tx, ty, 6, 0.6);
+      endTurn();
+      return true;
+    }
+    if (it.sub === 'teleport') {
+      const s = randomFloorFar(p.x, p.y, 14) || randomFloorFar(p.x, p.y, 5);
+      if (!s) { log('Rullen fräser – men det finns ingenstans att ta vägen. Du sparar den.', 'info'); return false; }
+      consume(i);
+      log('Du läser teleportrullen och försvinner i ett lila ljussken!', 'magic');
+      if (s) { ring(p.x, p.y, '#b083ff', 1); setPos(p, s.x, s.y, false); ring(s.x, s.y, '#b083ff', 1.5); }
+      sfx('zap');
+      endTurn();
+      return true;
+    }
+    if (it.sub === 'enchant') {
+      let slot = opt && opt.slot;
+      if (!slot) {
+        if (hooks.pickSlot) { hooks.pickSlot(i); return false; }
+        slot = (p.weapon.ench || 0) <= (p.armor.ench || 0) ? 'weapon' : 'armor';
+      }
+      const g = p[slot];
+      consume(i);
+      g.ench = (g.ench || 0) + 1; g.val += 1;
+      g.name = g.name.replace(/ \+\d+$/, '') + ' +' + g.ench;
+      log(`${cap(g.name.replace(/ \+\d+$/, ''))} glimmar i guld – nu ${g.name} (${slot === 'weapon' ? 'attack' : 'försvar'} +${g.val})!`, 'magic');
+      ring(p.x, p.y, '#ffcc33', 1.4);
+      sfx('power');
+      endTurn();
+      return true;
+    }
+    if (it.sub === 'fear') {
+      const vis = G.monsters.filter(m => isVisible(m.x, m.y));
+      if (!vis.length) { log('Det finns inga fiender i sikte – du sparar rullen.', 'info'); return false; }
+      consume(i);
+      log('Du läser skräckrullen – ett kusligt skrik ekar och fienderna flyr i panik!', 'magic');
+      for (const m of vis) {
+        m.fear = m.t.boss ? 3 : 10;
+        if (m.state === 'sleep') m.state = 'hunt';
+        m.lastSeen = G.turn;
+        floatText(m.x, m.y, '!!', '#ff5a6e', true);
+      }
+      ring(p.x, p.y, '#ff5a6e', 3);
+      sfx('zap');
+      endTurn();
+      return true;
+    }
+    if (it.sub === 'map') {
+      consume(i);
+      for (let k = 0; k < N; k++) {
+        if (G.map[k] !== WALL) { G.explored[k] = 1; continue; }
+        const x = k % W, y = (k / W) | 0;
+        for (const [dx, dy] of D8) { if (passable(x + dx, y + dy)) { G.explored[k] = 1; break; } }
+      }
+      G.mapDirty = true;
+      log('Kartan över djupet uppenbarar sig! Trappan syns nu på minikartan.', 'magic');
+      sfx('power');
+      endTurn();
+      return true;
+    }
+  }
+  return false;
+}
+function consume(i) { const it = G.player.inv[i]; it.count--; if (it.count <= 0) G.player.inv.splice(i, 1); }
+function dropItem(i) {
+  const p = G.player, it = p.inv[i];
+  if (!it) return false;
+  p.inv.splice(i, 1);
+  G.items.push({ x: p.x, y: p.y, it });
+  log(`Du slänger ${itemLabel(it)}.`, 'info');
+  sfx('step');
+  return true;
+}
+function descend() {
+  if (G.dead) return false;
+  const p = G.player;
+  if (G.map[idx(p.x, p.y)] !== STAIRS) { log('Det finns ingen trappa här. Leta efter ⬇️.', 'info'); return false; }
+  enterLevel(G.depth + 1);
+  const boss = G.depth % 5 === 0;
+  log(`Du kliver ned i mörkret... Djup ${G.depth}.`, 'warn');
+  if (boss) log('En kuslig närvaro fyller grottan. Något stort lurar här nere...', 'bad');
+  sfx(boss ? 'lose' : 'select');
+  const newZone = G.depth % 5 === 1;
+  if (newZone) log(`Väggarna skiftar färg – du har nått ${G.theme.name}.`, 'magic');
+  if (hooks.banner) hooks.banner('Djup ' + G.depth, boss ? '⚠️ Bossdjup – något stort väntar' : newZone ? G.theme.name : '');
+  return true;
+}
+
+/* =====================================================================
+ *  Turordning
+ * ===================================================================== */
+function endTurn() {
+  const p = G.player;
+  G.turn++;
+  computeFOV();
+  computePdist();
+  checkVisibility();
+  monstersPhase();
+  if (G.dead) return;
+  // Grottan är levande: den som dröjer sig kvar (t.ex. vilar länge) får besök.
+  G.levelTurns++;
+  if (G.levelTurns > 150 && G.monsters.length < 28 && G.rng.chance(1 / 90)) spawnWanderer();
+  if (p.poison > 0) {
+    p.poison--;
+    damagePlayer(p.poisonDmg, 'Dödad av gift från ' + p.poisonSrc, true);
+    if (!G.dead && p.poison > 0 && p.hp <= p.poisonDmg * p.poison) { G.interrupt = true; log('Giftet kan döda dig – drick en hälsodryck!', 'bad'); }
+    if (G.dead) return;
+    if (p.poison === 0) log('Giftet har gått ur kroppen.', 'good');
+  } else if (p.hp < p.maxHp) {
+    p.regenAcc += regenRate();
+    while (p.regenAcc >= 1 && p.hp < p.maxHp) { p.hp++; p.regenAcc -= 1; }
+  } else p.regenAcc = 0;
+  detectTraps();
+  checkVisibility();
+  G.mapDirty = true;
+  if (G.pendingLvl > 0 && hooks.levelUp) hooks.levelUp();
+}
+function spawnWanderer() {
+  const p = G.player;
+  for (let tries = 0; tries < 60; tries++) {
+    const i = G.floorList[G.rng.int(0, G.floorList.length - 1)];
+    const x = i % W, y = (i / W) | 0;
+    if (G.vis[i] || G.map[i] !== FLOOR || monsterAt(x, y) || cheb(x, y, p.x, p.y) < 12) continue;
+    const m = mkMonster(pickType(G.depth, G.rng), x, y, G.depth, G.rng);
+    m.wanderer = true; m.xp = Math.max(1, Math.round(m.xp * 0.5)); m.lastSeen = G.turn;
+    m.state = G.rng.chance(0.4) ? 'hunt' : 'wander';
+    G.monsters.push(m);
+    if (m.state === 'hunt') { log('Ett avlägset skrapande hörs i mörkret… något har fått upp din doft.', 'warn'); G.interrupt = true; }
+    return m;
+  }
+  return null;
+}
+function checkVisibility() {
+  const newly = [], ids = new Set();
+  for (const m of G.monsters) {
+    if (!isVisible(m.x, m.y)) continue;
+    ids.add(m.id);
+    if (!G.visIds.has(m.id)) {
+      G.interrupt = true;
+      if (!m.seen) newly.push(m);
+    }
+    m.seen = true;
+  }
+  G.visIds = ids;
+  if (newly.length) {
+    // Gruppera: "två råttor (sover) och ett troll"
+    const groups = [];
+    for (const m of newly) {
+      const sl = m.state === 'sleep';
+      const g = groups.find(q => q.type === m.type && q.sl === sl);
+      if (g) g.n++; else groups.push({ type: m.type, t: m.t, sl, n: 1 });
+    }
+    const NUM = ['', 'en', 'två', 'tre', 'fyra', 'fem', 'sex', 'sju', 'åtta', 'nio', 'tio'];
+    const parts = groups.slice(0, 4).map(g => (g.t.boss ? g.t.name : g.n === 1 ? g.t.indef : `${NUM[g.n] || g.n} ${g.t.pl}`) + (g.sl ? ' (sover)' : ''));
+    if (groups.length > 4) parts.push('fler');
+    const txt = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' och ' + parts[parts.length - 1] : parts[0];
+    log('Du ser ' + txt + '.', newly.some(m => m.t.boss) ? 'bad' : 'warn');
+  }
+}
+function monstersPhase() {
+  const list = G.monsters.slice();
+  for (const m of list) {
+    if (m.hp <= 0 || m.dead || G.dead) continue;
+    if (m.t.regen && m.hp < m.maxHp) m.hp = Math.min(m.maxHp, m.hp + m.t.regen);
+    m.energy += m.speed;
+    let guard = 0;
+    while (m.energy >= 100 && !m.dead && !G.dead && guard++ < 4) {
+      m.energy -= 100;
+      monsterAct(m);
+    }
+  }
+}
+function alert(m) {
+  m.state = 'hunt'; m.lastSeen = G.turn;
+  floatText(m.x, m.y, '!', '#ffcc33', true);
+  if (m.t.boss) {
+    log(`${cap(m.t.def)} vaknar! ${m.t.desc.replace('Boss. ', '')}`, 'bad');
+    if (hooks.banner) hooks.banner(m.t.name, 'har vaknat!');
+  }
+}
+function monsterAct(m) {
+  const t = m.t, p = G.player;
+  if (m.cd > 0) m.cd--;
+  const vis = isVisible(m.x, m.y);
+  const d = cheb(m.x, m.y, p.x, p.y);
+  if (m.fear > 0) {
+    m.fear--;
+    if (m.fear === 0 && vis) log(`${cap(t.def)} hämtar sig från skräcken.`, 'info');
+    if (!stepAway(m)) { if (d === 1 && G.rng.chance(0.5)) melee(m); else randomStep(m); }
+    return;
+  }
+  if (m.state === 'sleep') {
+    if (vis && d <= p.sight) {
+      let chance = d <= 1 ? 0.6 : d <= 3 ? 0.25 : 0.1;
+      if (hasArt('shadow')) chance *= 0.5;
+      if (G.rng.chance(t.boss ? Math.max(chance, 0.35) : chance)) alert(m);
+    }
+    return;
+  }
+  if (m.state === 'wander') {
+    if (vis && d <= 9) { alert(m); return; }
+    if (G.rng.chance(0.65)) wanderStep(m);
+    return;
+  }
+  // jakt
+  if (vis) m.lastSeen = G.turn;
+  else if (G.turn - m.lastSeen > (t.track || 15)) { m.state = 'wander'; m.wmap = null; return; }
+
+  // Drakens eldandning (förvarnas två drag i förväg)
+  if (t.breath) {
+    if (m.charge > 0) {
+      m.charge--;
+      if (m.charge === 0) { doBreath(m); return; }
+      return;
+    }
+    if (m.cd <= 0 && vis && d >= 1 && d <= t.breath.range && lineClear(m.x, m.y, p.x, p.y, true)) {
+      m.charge = 2; m.target = { x: p.x, y: p.y };
+      log(`${cap(t.def)} drar ett djupt andetag... 🔥 Lämna det röda området!`, 'warn');
+      return;
+    }
+  }
+  if (t.summon && vis && m.summons < t.summon.total) {
+    m.timer++;
+    if (m.timer >= t.summon.every) {
+      const alive = G.monsters.filter(o => o.summoner === m.id).length;
+      if (alive < t.summon.max) { m.timer = 0; summon(m); return; }
+    }
+  }
+  if (t.blink && d === 1 && G.rng.chance(t.blink)) { if (blink(m)) return; }
+  if (t.ranged && m.cd <= 0 && vis && d >= 2 && d <= t.ranged.range && lineClear(m.x, m.y, p.x, p.y)) { shoot(m); return; }
+  if (t.erratic && G.rng.chance(t.erratic)) { randomStep(m); return; }
+  if (d === 1) {
+    if (t.kite && G.rng.chance(0.25) && stepAway(m)) return;
+    melee(m);
+    return;
+  }
+  if (t.kite && vis && d <= 2 && G.rng.chance(0.5) && stepAway(m)) return;
+  if (t.kite && vis && m.cd > 0 && d <= 4) { if (G.rng.chance(0.5)) return; }
+  stepToward(m);
+}
+function melee(m) {
+  const p = G.player;
+  bump(m, p.x - m.x, p.y - m.y);
+  const hitCh = (m.t.boss ? 0.92 : 0.85) - pDodge();
+  if (!G.rng.chance(hitCh)) {
+    log(`${cap(m.t.def)} missar dig.`, 'info');
+    floatText(p.x, p.y, 'miss', '#9aa6cf');
+    return;
+  }
+  const dmg = mitigateP(rollDmg(m.atk), pDef());
+  log(`${cap(m.t.def)} träffar dig för ${dmg} skada${hpLeft(dmg)}.`, 'bad');
+  damagePlayer(dmg, 'Dödad av ' + m.t.indef);
+  if (!G.dead && m.t.poison && G.rng.chance(m.t.poison)) poisonPlayer(4, 1 + Math.floor(G.depth / 4), m.t.indef);
+  if (!G.dead && hasArt('thorns')) damageMonster(m, 2 + Math.floor(G.depth / 2), { src: 'thorns' });
+}
+function shoot(m) {
+  const p = G.player, r = m.t.ranged;
+  m.cd = r.cd;
+  const col = r.kind === 'arrow' ? '#e8d9b0' : r.kind === 'fire' ? '#ff6a2a' : '#b083ff';
+  projectile(m.x, m.y, p.x, p.y, col, r.kind);
+  sfx(r.kind === 'arrow' ? 'shoot' : 'zap');
+  if (!G.rng.chance(0.82 - pDodge())) { log(`${cap(m.t.def)} ${r.verb}. ${r.miss}`, 'info'); floatText(p.x, p.y, 'miss', '#9aa6cf'); return; }
+  const dmg = mitigateP(rollDmg(m.rdmg), r.kind === 'arrow' ? pDef() : Math.floor(pDef() / 2));
+  log(`${cap(m.t.def)} ${r.verb} – du tar ${dmg} skada${hpLeft(dmg)}.`, 'bad');
+  damagePlayer(dmg, 'Dödad av ' + m.t.indef);
+}
+function doBreath(m) {
+  const p = G.player, tg = m.target;
+  m.cd = m.t.breath.every;
+  m.target = null;
+  const vis = isVisible(m.x, m.y);
+  projectile(m.x, m.y, tg.x, tg.y, '#ff6a2a', 'fire');
+  burst(tg.x, tg.y, '#ff6a2a', 30); ring(tg.x, tg.y, '#ff8a3d', 1.8);
+  sfx('boom');
+  for (const o of G.monsters.slice()) {
+    if (o !== m && cheb(o.x, o.y, tg.x, tg.y) <= 1) damageMonster(o, 10, { src: 'trap' });
+  }
+  if (cheb(p.x, p.y, tg.x, tg.y) <= 1) {
+    const dmg = mitigateP(G.rng.int(Math.ceil(m.bdmg * 0.7), m.bdmg), Math.floor(pDef() / 2));
+    log(`${cap(m.t.def)} sprutar eld över dig – du tar ${dmg} skada${hpLeft(dmg)}!`, 'bad');
+    damagePlayer(dmg, 'Bränd av ' + m.t.indef);
+  } else if (vis) {
+    log(`${cap(m.t.def)} sprutar eld – men du är inte där längre!`, 'good');
+  }
+}
+function summon(m) {
+  const s = m.t.summon;
+  let made = 0;
+  for (const [dx, dy] of G.rng.shuffle(D8.slice())) {
+    if (made >= 2 || m.summons >= s.total) break;
+    const x = m.x + dx, y = m.y + dy;
+    if (!freeFor(x, y)) continue;
+    const c = mkMonster(s.type, x, y, Math.max(1, G.depth - 3), G.rng);
+    c.hp = c.maxHp = Math.max(4, Math.round(c.maxHp * 0.6));
+    c.summoned = true; c.summoner = m.id; c.state = 'hunt'; c.lastSeen = G.turn; c.energy = 0; c.xp = 2;
+    c.ox = m.x; c.oy = m.y; c.mt = HEADLESS ? 0 : now();
+    G.monsters.push(c);
+    ring(x, y, '#b083ff', 0.8);
+    made++; m.summons++;
+  }
+  if (made) { log(s.text, 'warn'); sfx('zap'); }
+}
+function blink(m) {
+  for (let tries = 0; tries < 60; tries++) {
+    const x = m.x + G.rng.int(-6, 6), y = m.y + G.rng.int(-6, 6);
+    if (!freeFor(x, y) || cheb(x, y, G.player.x, G.player.y) < 3 || trapAt(x, y)) continue;
+    if (isVisible(m.x, m.y)) { log(`${cap(m.t.def)} försvinner i en virvel av skugga!`, 'magic'); ring(m.x, m.y, '#b083ff', 1); }
+    setPos(m, x, y, false);
+    if (isVisible(x, y)) ring(x, y, '#b083ff', 1);
+    sfx('zap');
+    return true;
+  }
+  return false;
+}
+function moveMonster(m, x, y) {
+  setPos(m, x, y, true);
+  if (!m.t.flying) { const tr = trapAt(x, y); if (tr) triggerTrapMonster(m, tr); }
+}
+function stepToward(m) {
+  const pd = G.pdist, p = G.player;
+  const cur = pd[idx(m.x, m.y)];
+  let best = null, bs = 1e9, eq = [];
+  for (const [dx, dy] of D8) {
+    const x = m.x + dx, y = m.y + dy;
+    if (!freeFor(x, y)) continue;
+    const v = pd[idx(x, y)];
+    if (v < 0) continue;
+    const sc = v * 10 + Math.hypot(x - p.x, y - p.y);
+    if (v < cur && sc < bs) { bs = sc; best = [x, y]; }
+    else if (v === cur) eq.push([x, y]);
+  }
+  if (best) { moveMonster(m, best[0], best[1]); return true; }
+  if (eq.length && G.rng.chance(0.5)) { const e = G.rng.pick(eq); moveMonster(m, e[0], e[1]); return true; }
+  return false;
+}
+function stepAway(m) {
+  const pd = G.pdist, p = G.player;
+  const cur = pd[idx(m.x, m.y)];
+  let best = null, bs = -1;
+  for (const [dx, dy] of D8) {
+    const x = m.x + dx, y = m.y + dy;
+    if (!freeFor(x, y)) continue;
+    const v = pd[idx(x, y)];
+    if (v <= cur) continue;
+    const sc = v * 10 + Math.hypot(x - p.x, y - p.y);
+    if (sc > bs) { bs = sc; best = [x, y]; }
+  }
+  if (best) { moveMonster(m, best[0], best[1]); return true; }
+  return false;
+}
+function randomStep(m) {
+  const opts = D8.filter(([dx, dy]) => freeFor(m.x + dx, m.y + dy));
+  if (!opts.length) return false;
+  const [dx, dy] = G.rng.pick(opts);
+  moveMonster(m, m.x + dx, m.y + dy);
+  return true;
+}
+function wanderStep(m) {
+  if (!m.wmap || !m.wt || (m.x === m.wt.x && m.y === m.wt.y) || m.stuck > 3) {
+    const i = G.floorList[G.rng.int(0, G.floorList.length - 1)];
+    m.wt = { x: i % W, y: (i / W) | 0 };
+    m.wmap = bfs(G.map, m.wt.x, m.wt.y, m.wmap || new Int16Array(N));
+    m.stuck = 0;
+  }
+  const cur = m.wmap[idx(m.x, m.y)];
+  let best = null, bv = cur;
+  for (const [dx, dy] of D8) {
+    const x = m.x + dx, y = m.y + dy;
+    if (!freeFor(x, y)) continue;
+    const v = m.wmap[idx(x, y)];
+    if (v >= 0 && v < bv) { bv = v; best = [x, y]; }
+  }
+  if (best) { moveMonster(m, best[0], best[1]); m.stuck = 0; }
+  else m.stuck++;
+}
+
+/* ---------- Vägsökning för klick ---------- */
+const PATH_D = new Int16Array(N);
+function findPath(tx, ty) {
+  const p = G.player;
+  if (!inb(tx, ty) || !G.explored[idx(tx, ty)] || G.map[idx(tx, ty)] === WALL) return null;
+  // Försök först runt synliga monster; annars rakt fram (vandringen stannar då framför monstret).
+  for (let pass2 = 0; pass2 < 2; pass2++) {
+    const pass = i => {
+      if (!G.explored[i]) return false;
+      if (pass2 === 0 && G.vis[i] && monsterAt(i % W, (i / W) | 0)) return false;
+      return true;
+    };
+    bfs(G.map, tx, ty, PATH_D, pass);
+    if (PATH_D[idx(p.x, p.y)] >= 0) break;
+  }
+  if (PATH_D[idx(p.x, p.y)] < 0) return null;
+  const path = [];
+  let x = p.x, y = p.y, guard = 0;
+  while (!(x === tx && y === ty) && guard++ < 500) {
+    const cur = PATH_D[idx(x, y)];
+    let nx = -1, ny = -1, bs = 1e9;
+    for (const [dx, dy] of D8) {
+      const ax = x + dx, ay = y + dy;
+      if (!inb(ax, ay)) continue;
+      const v = PATH_D[idx(ax, ay)];
+      if (v < 0 || v >= cur) continue;
+      const sc = v * 10 + (dx && dy ? 1 : 0);
+      if (sc < bs) { bs = sc; nx = ax; ny = ay; }
+    }
+    if (nx < 0) return null;
+    path.push([nx, ny]); x = nx; y = ny;
+  }
+  return path;
+}
+
+/* =====================================================================
+ *  Huvudlös export (för tester i node)
+ * ===================================================================== */
+if (HEADLESS) {
+  globalThis.GROTT = {
+    W, H, N, WALL, FLOOR, STAIRS, MT, generateLevel, bfs, fovInto, newGame, playerMove, playerWait, playerPickup, useItem, descend,
+    findPath, hooks, UPGRADES, xpNeed, score, cmpInfo, pAtk, pDef, idx, cheb, mkArtifact, mkScroll, mkPotion, mkWeapon, mkArmor, giveItem,
+    featureAt, useFeature, spawnWanderer, enterLevel, hasArt, ARTIFACTS, SCROLLS, get G() { return G; }
+  };
+  return;
+}
+
+/* =====================================================================
+ *  Gränssnitt
+ * ===================================================================== */
+const $ = id => document.getElementById(id);
+const wrap = $('wrap'), cv = $('c'), ctx = cv.getContext('2d');
+const hudEl = $('hud');
+let VW = 800, VH = 560, DPR = 1, TS = 40, hudBottom = 50;
+let state = 'title';
+let camX = 0, camY = 0, shakeT = 0, shakeMag = 0;
+let hover = null, hoverPath = null, hoverKey = '';
+let held = null;
+let invSel = 0;
+let bannerTimer = 0;
+let deathTimer = 0;
+let lastState = '';
+// Pekkontrollerna (fasta i liggande läge) får aldrig ligga över paneler och val.
+function syncOverlayClass() { lastState = state; document.body.classList.toggle('ovl', state !== 'play' && state !== 'dying'); }
+
+const mm = document.createElement('canvas'); mm.width = W; mm.height = H;
+const mmCtx = mm.getContext('2d');
+const mmImg = mmCtx.createImageData(W, H);
+
+function resize() {
+  const wr = wrap.getBoundingClientRect();
+  const topOff = wr.top + window.scrollY;
+  const touchEl = $('touch');
+  const land = isTouch() && window.innerWidth > window.innerHeight * 1.15;
+  document.body.classList.toggle('land', land);
+  const tVisible = getComputedStyle(touchEl).display !== 'none' && !land;
+  const tH = tVisible ? touchEl.offsetHeight + 8 : 0;
+  const w = wrap.clientWidth;
+  let h = window.innerHeight - topOff - tH - 10;
+  h = Math.max(260, Math.min(h, 900, Math.round(w * 1.7)));
+  wrap.style.height = h + 'px';
+  VW = w; VH = h;
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  cv.width = Math.round(VW * DPR); cv.height = Math.round(VH * DPR);
+  TS = clamp(Math.floor(Math.min(VW / 17, VH / 12.5)), 28, 54);
+  spriteCache.clear();
+  measureHud();
+}
+function measureHud() { hudBottom = hudEl.offsetTop + hudEl.offsetHeight; $('bossBar').style.top = (hudBottom + 6) + 'px'; }
+
+/* ---------- Emoji-sprites (cache) ---------- */
+const spriteCache = new Map();
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
+function sprite(ch, size, flash) {
+  const px = Math.max(8, Math.round(size * DPR));
+  const key = ch + '|' + px + (flash ? '|f' : '');
+  let c = spriteCache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = c.height = Math.ceil(px * 1.35);
+  const g = c.getContext('2d');
+  if (flash) {
+    g.drawImage(sprite(ch, size, false), 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    g.fillRect(0, 0, c.width, c.height);
+  } else {
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `${px}px ${EMOJI_FONT}`;
+    g.fillText(ch, c.width / 2, c.height / 2 + px * 0.06);
+  }
+  spriteCache.set(key, c);
+  return c;
+}
+function drawGlyph(ch, cx, cy, size, flash) {
+  const s = sprite(ch, size, flash);
+  const w = s.width / DPR;
+  ctx.drawImage(s, cx - w / 2, cy - w / 2, w, w);
+}
+function ellipse(cx, cy, rx, ry) { ctx.beginPath(); ctx.ellipse(cx, cy, Math.max(0.1, rx), Math.max(0.1, ry), 0, 0, Math.PI * 2); ctx.fill(); }
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+
+
+/* ---------- Ritning av rutor ---------- */
+function drawFloor(sx, sy, i, ts) {
+  const n = G.noise[i];
+  ctx.fillStyle = G.theme.floor[n & 3];
+  ctx.fillRect(sx, sy, ts + 0.5, ts + 0.5);
+  ctx.strokeStyle = 'rgba(255,255,255,.035)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sx + 1.5, sy + 1.5, ts - 3, ts - 3);
+  if ((n & 12) === 0) { // spricka
+    ctx.strokeStyle = 'rgba(0,0,0,.35)';
+    ctx.beginPath(); ctx.moveTo(sx + ts * 0.2, sy + ts * 0.3); ctx.lineTo(sx + ts * 0.45, sy + ts * 0.5); ctx.lineTo(sx + ts * 0.4, sy + ts * 0.75); ctx.stroke();
+  }
+  const d = G.deco[i];
+  if (d === 1) { // ben
+    ctx.strokeStyle = 'rgba(220,215,200,.55)'; ctx.lineWidth = Math.max(1.5, ts * 0.05);
+    ctx.beginPath(); ctx.moveTo(sx + ts * 0.3, sy + ts * 0.65); ctx.lineTo(sx + ts * 0.62, sy + ts * 0.5); ctx.stroke();
+    ctx.fillStyle = 'rgba(220,215,200,.55)'; ellipse(sx + ts * 0.66, sy + ts * 0.62, ts * 0.07, ts * 0.06);
+  } else if (d === 2) { // mossa
+    ctx.fillStyle = 'rgba(80,150,70,.35)';
+    ellipse(sx + ts * 0.3, sy + ts * 0.7, ts * 0.12, ts * 0.06); ellipse(sx + ts * 0.62, sy + ts * 0.32, ts * 0.09, ts * 0.05);
+  } else if (d === 3) { // vattenpöl
+    ctx.fillStyle = 'rgba(60,110,170,.28)'; ellipse(sx + ts * 0.5, sy + ts * 0.55, ts * 0.28, ts * 0.14);
+    ctx.fillStyle = 'rgba(160,200,255,.18)'; ellipse(sx + ts * 0.42, sy + ts * 0.5, ts * 0.08, ts * 0.03);
+  } else if (d === 4) { // småsten
+    ctx.fillStyle = 'rgba(120,110,140,.5)';
+    ellipse(sx + ts * 0.25, sy + ts * 0.3, ts * 0.05, ts * 0.04); ellipse(sx + ts * 0.7, sy + ts * 0.66, ts * 0.06, ts * 0.045); ellipse(sx + ts * 0.58, sy + ts * 0.25, ts * 0.04, ts * 0.03);
+  }
+}
+function drawWall(sx, sy, x, y, i, ts) {
+  const n = G.noise[i];
+  ctx.fillStyle = G.theme.wall[n & 3];
+  ctx.fillRect(sx, sy, ts + 0.5, ts + 0.5);
+  ctx.strokeStyle = 'rgba(0,0,0,.3)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  const h2 = sy + Math.round(ts * 0.5) + 0.5;
+  ctx.moveTo(sx, h2); ctx.lineTo(sx + ts, h2);
+  const o1 = sx + Math.round(ts * ((n & 16) ? 0.3 : 0.62)) + 0.5, o2 = sx + Math.round(ts * ((n & 16) ? 0.75 : 0.22)) + 0.5;
+  ctx.moveTo(o1, sy); ctx.lineTo(o1, h2); ctx.moveTo(o2, h2); ctx.lineTo(o2, sy + ts);
+  ctx.stroke();
+  const below = y + 1 < H && G.map[idx(x, y + 1)] !== WALL;
+  const above = y > 0 && G.map[idx(x, y - 1)] !== WALL;
+  if (above) { ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(sx, sy, ts + 0.5, Math.max(2, ts * 0.08)); }
+  if (below) {
+    ctx.fillStyle = G.theme.face;
+    ctx.fillRect(sx, sy + ts * 0.66, ts + 0.5, ts * 0.34 + 0.5);
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillRect(sx, sy + ts - 2, ts + 0.5, 2);
+  }
+}
+function drawStairs(sx, sy, ts, t) {
+  const pad = ts * 0.14, w = ts - pad * 2;
+  ctx.fillStyle = '#07050c'; ctx.fillRect(sx + pad, sy + pad, w, w);
+  const shades = ['#6f6488', '#564c6e', '#3f3756', '#2a2440'];
+  for (let k = 0; k < 4; k++) {
+    ctx.fillStyle = shades[k];
+    const yy = sy + pad + k * w / 4;
+    ctx.fillRect(sx + pad + k * w * 0.06, yy, w - k * w * 0.12, w / 4 - 2);
+  }
+  const a = 0.45 + 0.25 * Math.sin(t / 400);
+  ctx.strokeStyle = `rgba(255,204,51,${a})`; ctx.lineWidth = 2;
+  ctx.strokeRect(sx + pad - 1, sy + pad - 1, w + 2, w + 2);
+}
+function drawTrap(tr, sx, sy, ts, t) {
+  const T = TRAPS[tr.type], cx = sx + ts / 2, cy = sy + ts / 2;
+  ctx.strokeStyle = 'rgba(255,90,110,.55)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, ts * 0.36, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = T.color;
+  if (tr.type === 'spike') {
+    for (let k = -1; k <= 1; k++) {
+      ctx.beginPath(); ctx.moveTo(cx + k * ts * 0.16 - ts * 0.07, cy + ts * 0.14); ctx.lineTo(cx + k * ts * 0.16, cy - ts * 0.16); ctx.lineTo(cx + k * ts * 0.16 + ts * 0.07, cy + ts * 0.14); ctx.fill();
+    }
+  } else if (tr.type === 'poison') {
+    ctx.beginPath(); ctx.moveTo(cx, cy - ts * 0.2); ctx.quadraticCurveTo(cx + ts * 0.16, cy + ts * 0.02, cx, cy + ts * 0.15); ctx.quadraticCurveTo(cx - ts * 0.16, cy + ts * 0.02, cx, cy - ts * 0.2); ctx.fill();
+  } else if (tr.type === 'tele') {
+    ctx.strokeStyle = T.color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, ts * (0.12 + 0.06 * Math.sin(t / 300)), 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, ts * 0.24, 0, Math.PI * 2); ctx.stroke();
+  } else if (tr.type === 'alarm') {
+    ctx.beginPath(); ctx.arc(cx, cy, ts * 0.14, Math.PI, 0); ctx.lineTo(cx + ts * 0.18, cy + ts * 0.1); ctx.lineTo(cx - ts * 0.18, cy + ts * 0.1); ctx.closePath(); ctx.fill();
+    ellipse(cx, cy + ts * 0.15, ts * 0.04, ts * 0.04);
+  } else if (tr.type === 'pit') {
+    ctx.fillStyle = '#000'; ellipse(cx, cy, ts * 0.26, ts * 0.18);
+    ctx.strokeStyle = T.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(cx, cy, ts * 0.26, ts * 0.18, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+function drawFeature(f, sx, sy, ts, t) {
+  const cx = sx + ts / 2, cy = sy + ts / 2;
+  if (f.type === 'fountain') {
+    ctx.fillStyle = '#5b566e'; ellipse(cx, cy + ts * 0.06, ts * 0.4, ts * 0.3);
+    ctx.fillStyle = '#2e2a3c'; ellipse(cx, cy + ts * 0.04, ts * 0.31, ts * 0.22);
+    if (!f.used) {
+      ctx.fillStyle = '#2f8fd6'; ellipse(cx, cy + ts * 0.05, ts * 0.28, ts * 0.19);
+      const a = 0.35 + 0.2 * Math.sin(t / 300);
+      ctx.fillStyle = `rgba(190,235,255,${a})`; ellipse(cx - ts * 0.08, cy, ts * 0.1, ts * 0.04);
+      ctx.strokeStyle = `rgba(160,220,255,${0.5 - 0.4 * ((t / 1200) % 1)})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(cx, cy + ts * 0.05, ts * 0.28 * ((t / 1200) % 1), ts * 0.19 * ((t / 1200) % 1), 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else {
+    if (!f.used) {
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ts * 0.7);
+      g.addColorStop(0, `rgba(176,131,255,${0.3 + 0.12 * Math.sin(t / 350)})`); g.addColorStop(1, 'rgba(176,131,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(sx - ts * 0.2, sy - ts * 0.2, ts * 1.4, ts * 1.4);
+    }
+    ctx.fillStyle = '#6a6380'; ctx.fillRect(sx + ts * 0.18, sy + ts * 0.34, ts * 0.64, ts * 0.46);
+    ctx.fillStyle = '#857d9e'; ctx.fillRect(sx + ts * 0.12, sy + ts * 0.28, ts * 0.76, ts * 0.12);
+    ctx.fillStyle = '#4a4460'; ctx.fillRect(sx + ts * 0.42, sy + ts * 0.46, ts * 0.16, ts * 0.22);
+    for (const k of [0.24, 0.76]) {
+      ctx.fillStyle = '#efe6d0'; ctx.fillRect(sx + ts * k - ts * 0.035, sy + ts * 0.12, ts * 0.07, ts * 0.16);
+      if (!f.used) { ctx.fillStyle = `rgba(255,${180 + 40 * Math.sin(t / 90 + k * 9) | 0},80,.95)`; ellipse(sx + ts * k, sy + ts * 0.09, ts * 0.035, ts * 0.06); }
+    }
+  }
+}
+
+/* ---------- Figurer ---------- */
+function drawPlayer(cx, cy, ts, t) {
+  const p = G.player, s = ts / 32;
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ellipse(cx, cy + 12 * s, 10 * s, 3.5 * s);
+  // fackelsken
+  const fl = 0.5 + 0.15 * Math.sin(t / 90) + 0.1 * Math.sin(t / 37);
+  const g = ctx.createRadialGradient(cx - 11 * s, cy - 6 * s, 0, cx - 11 * s, cy - 6 * s, 14 * s);
+  g.addColorStop(0, `rgba(255,190,90,${0.45 * fl})`); g.addColorStop(1, 'rgba(255,150,60,0)');
+  ctx.fillStyle = g; ctx.fillRect(cx - 26 * s, cy - 22 * s, 30 * s, 32 * s);
+  // mantel
+  ctx.fillStyle = '#8b1e3f';
+  ctx.beginPath(); ctx.moveTo(cx - 7 * s, cy - 4 * s); ctx.lineTo(cx - 10 * s, cy + 11 * s); ctx.lineTo(cx + 10 * s, cy + 11 * s); ctx.lineTo(cx + 7 * s, cy - 4 * s); ctx.closePath(); ctx.fill();
+  // kropp (färg efter rustning)
+  const tier = p.armor ? p.armor.tier : -1;
+  ctx.fillStyle = tier >= 3 ? '#a9b4d0' : tier >= 1 ? '#8a5a35' : '#6b4a32';
+  rrect(cx - 6 * s, cy - 4 * s, 12 * s, 13 * s, 3 * s); ctx.fill();
+  ctx.fillStyle = '#3b2617'; ctx.fillRect(cx - 6 * s, cy + 3 * s, 12 * s, 2 * s);
+  ctx.fillStyle = '#ffcc33'; ctx.fillRect(cx - 1.2 * s, cy + 3 * s, 2.4 * s, 2 * s);
+  // huvud
+  ctx.fillStyle = '#f0c9a0'; ctx.beginPath(); ctx.arc(cx, cy - 8 * s, 5 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#9aa6cf'; ctx.beginPath(); ctx.arc(cx, cy - 9 * s, 5.6 * s, Math.PI, 0); ctx.fill();
+  ctx.fillRect(cx - 0.8 * s, cy - 10 * s, 1.6 * s, 5 * s);
+  ctx.fillStyle = '#1a1020'; ctx.fillRect(cx - 3 * s, cy - 8 * s, 1.6 * s, 1.6 * s); ctx.fillRect(cx + 1.4 * s, cy - 8 * s, 1.6 * s, 1.6 * s);
+  // vapen
+  ctx.strokeStyle = '#dfe6f5'; ctx.lineWidth = 2.2 * s; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx + 9 * s, cy + 6 * s); ctx.lineTo(cx + 13 * s, cy - (6 + Math.min(8, (p.weapon ? p.weapon.tier : 0) * 1.2)) * s); ctx.stroke();
+  ctx.strokeStyle = '#ffcc33'; ctx.lineWidth = 2 * s;
+  ctx.beginPath(); ctx.moveTo(cx + 6.5 * s, cy + 4 * s); ctx.lineTo(cx + 11.5 * s, cy + 5.5 * s); ctx.stroke();
+  ctx.lineCap = 'butt';
+  // fackla
+  ctx.fillStyle = '#5b3a20'; ctx.fillRect(cx - 12 * s, cy - 4 * s, 2 * s, 9 * s);
+  ctx.fillStyle = `rgba(255,${170 + 50 * fl | 0},60,.95)`; ellipse(cx - 11 * s, cy - 6 * s, 2.4 * s, 3.4 * s * (0.9 + fl * 0.2));
+}
+function drawSlime(cx, cy, ts, t, m, flash) {
+  const sc = m.gen === 0 ? 1 : m.gen === 1 ? 0.8 : 0.62;
+  const wob = Math.sin(t / 220 + m.id) * 0.06;
+  const r = ts * 0.4 * sc;
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ellipse(cx, cy + ts * 0.3, r, r * 0.3);
+  ctx.fillStyle = flash ? '#ffffff' : '#56c95a';
+  ctx.beginPath(); ctx.ellipse(cx, cy + ts * 0.1, r * (1 + wob), r * (0.8 - wob), 0, Math.PI, 0); ctx.lineTo(cx + r * (1 + wob), cy + ts * 0.25); ctx.lineTo(cx - r * (1 + wob), cy + ts * 0.25); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.35)'; ellipse(cx - r * 0.35, cy - r * 0.25, r * 0.22, r * 0.14);
+  ctx.fillStyle = '#10200f'; ellipse(cx - r * 0.3, cy + ts * 0.05, r * 0.1, r * 0.15); ellipse(cx + r * 0.3, cy + ts * 0.05, r * 0.1, r * 0.15);
+}
+function drawCrown(cx, cy, ts) {
+  const s = ts / 32;
+  ctx.fillStyle = '#ffcc33'; ctx.strokeStyle = '#7a5200'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - 8 * s, cy); ctx.lineTo(cx - 8 * s, cy - 7 * s); ctx.lineTo(cx - 4 * s, cy - 3 * s); ctx.lineTo(cx, cy - 9 * s);
+  ctx.lineTo(cx + 4 * s, cy - 3 * s); ctx.lineTo(cx + 8 * s, cy - 7 * s); ctx.lineTo(cx + 8 * s, cy); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#ff3d6e'; ellipse(cx, cy - 3 * s, 1.6 * s, 1.6 * s);
+}
+function drawMonster(m, cx, cy, ts, t) {
+  const flash = t - m.flash < 130;
+  if (m.t.boss) {
+    const a = 0.25 + 0.12 * Math.sin(t / 250);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ts * 0.9);
+    g.addColorStop(0, `rgba(255,60,90,${a})`); g.addColorStop(1, 'rgba(255,60,90,0)');
+    ctx.fillStyle = g; ctx.fillRect(cx - ts, cy - ts, ts * 2, ts * 2);
+  }
+  if (m.charge > 0) {
+    const a = 0.4 + 0.3 * Math.sin(t / 80);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, ts);
+    g.addColorStop(0, `rgba(255,140,40,${a})`); g.addColorStop(1, 'rgba(255,140,40,0)');
+    ctx.fillStyle = g; ctx.fillRect(cx - ts, cy - ts, ts * 2, ts * 2);
+  }
+  if (m.t.draw === 'slime') { drawSlime(cx, cy, ts, t, m, flash); }
+  else {
+    const size = ts * (m.t.boss ? 1.12 : m.summoned ? 0.66 : 0.76);
+    ctx.fillStyle = 'rgba(0,0,0,.4)'; ellipse(cx, cy + ts * 0.32, size * 0.36, size * 0.11);
+    const bob = m.state === 'sleep' ? 0 : Math.sin(t / 260 + m.id) * ts * 0.025;
+    drawGlyph(m.t.glyph, cx, cy + bob, size, flash);
+    if (m.t.crown) drawCrown(cx, cy - size * 0.42, ts);
+  }
+  // sover?
+  if (m.state === 'sleep') {
+    const k = ((t / 1400) + m.zph) % 1;
+    ctx.globalAlpha = Math.sin(k * Math.PI);
+    ctx.fillStyle = '#b9c6ff';
+    ctx.font = `700 ${Math.round(ts * (0.26 + k * 0.12))}px Rubik, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('z', cx + ts * (0.25 + k * 0.15), cy - ts * (0.25 + k * 0.3));
+    ctx.globalAlpha = 1;
+  }
+  // HP-mätare
+  if (m.hp < m.maxHp || m.t.boss) {
+    const w = ts * 0.72, h = Math.max(3, ts * 0.08);
+    const x = cx - w / 2, y = cy - ts * (m.t.boss ? 0.68 : 0.52);
+    ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+    const f = clamp(m.hp / m.maxHp, 0, 1);
+    ctx.fillStyle = f > 0.5 ? '#4ade80' : f > 0.25 ? '#ffcc33' : '#ff5a6e';
+    ctx.fillRect(x, y, w * f, h);
+  }
+}
+function itemGlowColor(it) {
+  if (it.kind === 'scroll') return SCROLLS[it.sub].color;
+  if (it.kind === 'potion') return '#ff5a6e';
+  if (it.kind === 'gold') return '#ffcc33';
+  if (it.art) return '#d0b2ff';
+  if (it.ench) return '#39d5ff';
+  return 'rgba(220,220,240,.6)';
+}
+function drawItem(it, cx, cy, ts, t, dim) {
+  const g = ctx.createRadialGradient(cx, cy + ts * 0.1, 0, cx, cy + ts * 0.1, ts * 0.42);
+  const col = itemGlowColor(it);
+  g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = dim ? 0.15 : 0.32 + 0.08 * Math.sin(t / 300 + cx);
+  ctx.fillStyle = g; ctx.fillRect(cx - ts / 2, cy - ts / 2, ts, ts);
+  ctx.globalAlpha = dim ? 0.5 : 1;
+  drawGlyph(it.glyph, cx, cy + ts * 0.04, ts * (it.kind === 'gold' ? 0.56 : 0.6), false);
+  if (!dim) {
+    const c = cmpInfo(it);
+    if (c && c.d > 0) {
+      ctx.fillStyle = '#4ade80';
+      ctx.beginPath(); const ax = cx + ts * 0.3, ay = cy - ts * 0.3, r = ts * 0.11;
+      ctx.moveTo(ax, ay - r); ctx.lineTo(ax + r, ay + r * 0.7); ctx.lineTo(ax - r, ay + r * 0.7); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- Huvudritning ---------- */
+let lastT = 0;
+function render(t) {
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016); lastT = t;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#04060c'; ctx.fillRect(0, 0, VW, VH);
+  if (!G) return;
+  const p = G.player, ts = TS;
+  const pr = rpos(p, t), pb = bumpOff(p, t);
+  const k = 1 - Math.pow(0.0005, dt);
+  camX += (pr[0] - camX) * k; camY += (pr[1] - camY) * k;
+  if (Math.abs(pr[0] - camX) > 12 || Math.abs(pr[1] - camY) > 12) { camX = pr[0]; camY = pr[1]; }
+  let shx = 0, shy = 0;
+  if (t < shakeT) { const a = shakeMag * (shakeT - t) / 260; shx = (Math.random() - 0.5) * a; shy = (Math.random() - 0.5) * a; }
+  const ox = Math.round(VW / 2 - (camX + 0.5) * ts + shx), oy = Math.round(VH / 2 - (camY + 0.5) * ts + shy + (VH > 420 ? ts * 0.3 : 0));
+  const x0 = Math.max(0, Math.floor(-ox / ts)), x1 = Math.min(W - 1, Math.ceil((VW - ox) / ts));
+  const y0 = Math.max(0, Math.floor(-oy / ts)), y1 = Math.min(H - 1, Math.ceil((VH - oy) / ts));
+  const flick = 0.04 * Math.sin(t / 110) + 0.03 * Math.sin(t / 47);
+  const sight = p.sight + 0.5;
+
+  // Rutor
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = idx(x, y);
+    if (!G.explored[i]) continue;
+    const sx = ox + x * ts, sy = oy + y * ts;
+    const tile = G.map[i];
+    if (tile === WALL) drawWall(sx, sy, x, y, i, ts);
+    else { drawFloor(sx, sy, i, ts); if (tile === STAIRS) drawStairs(sx, sy, ts, t); }
+  }
+  // Fällor (kända)
+  for (const tr of G.traps) {
+    if (!tr.known || !G.explored[idx(tr.x, tr.y)]) continue;
+    if (tr.x < x0 || tr.x > x1 || tr.y < y0 || tr.y > y1) continue;
+    drawTrap(tr, ox + tr.x * ts, oy + tr.y * ts, ts, t);
+  }
+  // Källor och altare
+  for (const f of G.features) {
+    if (!G.explored[idx(f.x, f.y)] || f.x < x0 || f.x > x1 || f.y < y0 || f.y > y1) continue;
+    drawFeature(f, ox + f.x * ts, oy + f.y * ts, ts, t);
+  }
+  // Föremål
+  for (const o of G.items) {
+    if (o.x < x0 || o.x > x1 || o.y < y0 || o.y > y1) continue;
+    const i = idx(o.x, o.y);
+    if (!G.explored[i]) continue;
+    drawItem(o.it, ox + o.x * ts + ts / 2, oy + o.y * ts + ts / 2, ts, t, !G.vis[i]);
+  }
+  // Mörker / dimma
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = idx(x, y);
+    if (!G.explored[i]) continue;
+    const sx = ox + x * ts, sy = oy + y * ts;
+    if (G.vis[i]) {
+      const dd = Math.hypot(x - pr[0], y - pr[1]) / sight;
+      const a = clamp(dd * dd * 0.62 - flick, 0, 0.66);
+      if (a > 0.01) { ctx.fillStyle = `rgba(6,4,14,${a})`; ctx.fillRect(sx, sy, ts + 0.5, ts + 0.5); }
+    } else {
+      ctx.fillStyle = 'rgba(5,8,22,.7)'; ctx.fillRect(sx, sy, ts + 0.5, ts + 0.5);
+    }
+  }
+  // Varning för draketld
+  for (const m of G.monsters) {
+    if (m.charge > 0 && m.target) {
+      const a = 0.25 + 0.2 * Math.sin(t / 90);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const x = m.target.x + dx, y = m.target.y + dy;
+        if (!passable(x, y) || !G.explored[idx(x, y)]) continue;
+        ctx.fillStyle = `rgba(255,70,30,${a})`; ctx.fillRect(ox + x * ts + 1, oy + y * ts + 1, ts - 2, ts - 2);
+        ctx.strokeStyle = 'rgba(255,170,60,.8)'; ctx.lineWidth = 1.5; ctx.strokeRect(ox + x * ts + 2, oy + y * ts + 2, ts - 4, ts - 4);
+      }
+    }
+  }
+  // Klickväg
+  if (hoverPath && state === 'play' && !G.auto) {
+    ctx.fillStyle = 'rgba(57,213,255,.35)';
+    for (const [x, y] of hoverPath) ellipse(ox + x * ts + ts / 2, oy + y * ts + ts / 2, ts * 0.08, ts * 0.08);
+  }
+  if (G.auto && G.auto.type === 'path') {
+    ctx.fillStyle = 'rgba(255,204,51,.35)';
+    for (let k2 = G.auto.i; k2 < G.auto.path.length; k2++) { const [x, y] = G.auto.path[k2]; ellipse(ox + x * ts + ts / 2, oy + y * ts + ts / 2, ts * 0.07, ts * 0.07); }
+  }
+  // Monster (synliga)
+  const vm = G.monsters.filter(m => G.vis[idx(m.x, m.y)]).sort((a, b) => a.y - b.y);
+  for (const m of vm) {
+    const r = rpos(m, t), b = bumpOff(m, t);
+    drawMonster(m, ox + (r[0] + b[0]) * ts + ts / 2, oy + (r[1] + b[1]) * ts + ts / 2, ts, t);
+  }
+  // Spelaren
+  if (!G.dead || t - deathTimer < 600) {
+    const cx = ox + (pr[0] + pb[0]) * ts + ts / 2, cy = oy + (pr[1] + pb[1]) * ts + ts / 2;
+    if (G.dead) ctx.globalAlpha = Math.max(0, 1 - (t - deathTimer) / 600);
+    drawPlayer(cx, cy, ts, t);
+    if (t - p.hurtT < 160) { ctx.fillStyle = 'rgba(255,60,80,.45)'; ellipse(cx, cy, ts * 0.42, ts * 0.48); }
+    ctx.globalAlpha = 1;
+  }
+  // Partiklar
+  drawParticles(t, ox, oy, ts);
+  // Vinjett
+  const vg = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.35, VW / 2, VH / 2, Math.max(VW, VH) * 0.75);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
+  const lowHp = p.hp / p.maxHp;
+  const hurtA = Math.max(0, 1 - (t - p.hurtT) / 300) * 0.35 + (lowHp < 0.3 && !G.dead ? 0.18 + 0.1 * Math.sin(t / 200) : 0);
+  if (hurtA > 0.01) {
+    const rg = ctx.createRadialGradient(VW / 2, VH / 2, Math.min(VW, VH) * 0.3, VW / 2, VH / 2, Math.max(VW, VH) * 0.7);
+    rg.addColorStop(0, 'rgba(255,0,40,0)'); rg.addColorStop(1, `rgba(255,0,40,${hurtA})`);
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, VW, VH);
+  }
+  // Muspekare
+  if (hover && state === 'play' && inb(hover.x, hover.y) && G.explored[idx(hover.x, hover.y)]) {
+    ctx.strokeStyle = 'rgba(57,213,255,.7)'; ctx.lineWidth = 2;
+    ctx.strokeRect(ox + hover.x * ts + 1, oy + hover.y * ts + 1, ts - 2, ts - 2);
+  }
+  drawMinimap(t);
+  if (hover && state === 'play') drawTooltip(ox, oy, ts);
+}
+function drawParticles(t, ox, oy, ts) {
+  const ps = G.particles;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    const q = ps[i];
+    const a = (t - q.t0) / q.dur;
+    if (a >= 1) { ps.splice(i, 1); continue; }
+    if (a < 0) continue;
+    if (q.kind === 'text') {
+      const x = ox + q.x * ts + ts / 2, y = oy + q.y * ts + ts * 0.2 - a * ts * 0.9 - (q.off || 0) * ts;
+      ctx.globalAlpha = 1 - a * a;
+      ctx.font = `900 ${Math.round(ts * (q.big ? 0.52 : 0.4) * (1 + Math.max(0, 0.25 - a) * 1.2))}px Rubik, system-ui, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.strokeText(q.text, x, y);
+      ctx.fillStyle = q.color; ctx.fillText(q.text, x, y);
+      ctx.globalAlpha = 1;
+    } else if (q.kind === 'burst') {
+      ctx.fillStyle = q.color;
+      for (let k = 0; k < q.n; k++) {
+        const ang = k / q.n * Math.PI * 2 + q.t0;
+        const r = ts * (0.15 + a * 0.6);
+        ctx.globalAlpha = 1 - a;
+        ellipse(ox + q.x * ts + ts / 2 + Math.cos(ang) * r, oy + q.y * ts + ts / 2 + Math.sin(ang) * r, ts * 0.05 * (1 - a) + 1, ts * 0.05 * (1 - a) + 1);
+      }
+      ctx.globalAlpha = 1;
+    } else if (q.kind === 'ring') {
+      ctx.globalAlpha = 1 - a; ctx.strokeStyle = q.color; ctx.lineWidth = 3 * (1 - a) + 1;
+      ctx.beginPath(); ctx.arc(ox + q.x * ts + ts / 2, oy + q.y * ts + ts / 2, ts * (0.2 + a * q.r), 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (q.kind === 'proj') {
+      const x = ox + (q.x0 + (q.x1 - q.x0) * a) * ts + ts / 2, y = oy + (q.y0 + (q.y1 - q.y0) * a) * ts + ts / 2;
+      const ang = Math.atan2(q.y1 - q.y0, q.x1 - q.x0);
+      if (q.pk === 'arrow') {
+        ctx.strokeStyle = q.color; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x - Math.cos(ang) * ts * 0.3, y - Math.sin(ang) * ts * 0.3); ctx.lineTo(x, y); ctx.stroke();
+      } else {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, ts * 0.3);
+        g.addColorStop(0, '#fff'); g.addColorStop(0.35, q.color); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(x - ts * 0.3, y - ts * 0.3, ts * 0.6, ts * 0.6);
+      }
+    }
+  }
+}
+function updateMinimap() {
+  const d = mmImg.data, ex = G.explored, vis = G.vis, map = G.map;
+  for (let i = 0; i < N; i++) {
+    const o = i * 4;
+    if (!ex[i]) { d[o + 3] = 0; continue; }
+    let r, g, b;
+    if (map[i] === WALL) { r = G.theme.mm[0]; g = G.theme.mm[1]; b = G.theme.mm[2]; }
+    else if (map[i] === STAIRS) { r = 255; g = 204; b = 51; }
+    else if (vis[i]) { r = 150; g = 144; b = 178; }
+    else { r = 92; g = 88; b = 118; }
+    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+  }
+  for (const o of G.items) {
+    const i = idx(o.x, o.y); if (!ex[i]) continue;
+    const q = i * 4; d[q] = 255; d[q + 1] = 160; d[q + 2] = 210; d[q + 3] = 255;
+  }
+  for (const f of G.features) {
+    const i = idx(f.x, f.y); if (!ex[i] || f.used) continue;
+    const q = i * 4;
+    if (f.type === 'fountain') { d[q] = 57; d[q + 1] = 213; d[q + 2] = 255; } else { d[q] = 176; d[q + 1] = 131; d[q + 2] = 255; }
+    d[q + 3] = 255;
+  }
+  for (const m of G.monsters) {
+    const i = idx(m.x, m.y); if (!vis[i]) continue;
+    const q = i * 4; d[q] = 255; d[q + 1] = 60; d[q + 2] = 80; d[q + 3] = 255;
+  }
+  mmCtx.putImageData(mmImg, 0, 0);
+}
+function mmScale() { return (VW < 520 || VH < 480) ? 2 : 3; }
+function drawMinimap(t) {
+  if (G.mapDirty) { updateMinimap(); G.mapDirty = false; }
+  const s = mmScale();
+  const w = W * s, h = H * s;
+  const x = VW - w - 10, y = hudBottom + 8;
+  ctx.fillStyle = 'rgba(5,8,18,.72)'; ctx.fillRect(x - 4, y - 4, w + 8, h + 8);
+  ctx.strokeStyle = 'rgba(44,58,102,.9)'; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, y - 3.5, w + 7, h + 7);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(mm, x, y, w, h);
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
+  const p = G.player;
+  if (Math.floor(t / 350) % 2 === 0) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + p.x * s - 1, y + p.y * s - 1, s + 2, s + 2); }
+  else { ctx.fillStyle = '#39d5ff'; ctx.fillRect(x + p.x * s, y + p.y * s, s, s); }
+}
+function tooltipFor(x, y) {
+  if (!inb(x, y)) return null;
+  const i = idx(x, y);
+  if (!G.explored[i]) return null;
+  const p = G.player;
+  if (G.vis[i]) {
+    const m = monsterAt(x, y);
+    if (m) {
+      const st = m.fear > 0 ? 'flyr i panik' : m.state === 'sleep' ? 'sover 💤' : m.state === 'hunt' ? 'jagar dig!' : 'vandrar';
+      return [`${m.t.name}  ❤ ${m.hp}/${m.maxHp}`, `Attack ${m.atk} · Försvar ${m.arm} · ${st}`, m.t.desc];
+    }
+  }
+  if (x === p.x && y === p.y) return [`Du – nivå ${p.level}`, `Attack ${pAtk()} · Försvar ${pDef()}`];
+  const its = itemsAt(x, y);
+  if (its.length) {
+    const it = its[its.length - 1].it, c = cmpInfo(it);
+    const lines = [itemLabel(it), cap(itemStats(it))];
+    if (c) lines.push(c.txt);
+    return lines;
+  }
+  const tr = trapAt(x, y);
+  if (tr && tr.known) return [TRAPS[tr.type].name, TRAPS[tr.type].desc, 'Ofarlig för dig nu – men monster kan trampa i den.'];
+  const f = featureAt(x, y);
+  if (f) {
+    const F = FEATURES[f.type];
+    if (f.used) return [F.name, F.dry];
+    return [F.name, F.desc, f.type === 'altar' ? `Pris: ${fmt(altarCost())} guld` : 'Läker allt och botar gift.'];
+  }
+  if (G.map[i] === STAIRS) return ['Trappa ned ⬇️', 'Gå hit och tryck Enter för att gå djupare.'];
+  return null;
+}
+function drawTooltip(ox, oy, ts) {
+  const lines = tooltipFor(hover.x, hover.y);
+  if (!lines) return;
+  ctx.font = '500 13px Rubik, system-ui, sans-serif';
+  let w = 0;
+  for (const l of lines) w = Math.max(w, ctx.measureText(l).width);
+  w += 18; const h = lines.length * 18 + 10;
+  let x = ox + hover.x * ts + ts + 6, y = oy + hover.y * ts - 4;
+  if (x + w > VW - 6) x = ox + hover.x * ts - w - 6;
+  x = clamp(x, 6, VW - w - 6); y = clamp(y, 6, VH - h - 6);
+  ctx.fillStyle = 'rgba(12,17,34,.94)'; rrect(x, y, w, h, 8); ctx.fill();
+  ctx.strokeStyle = '#2c3a66'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  lines.forEach((l, k) => {
+    ctx.font = k === 0 ? '700 13px Rubik, system-ui, sans-serif' : '400 12px Rubik, system-ui, sans-serif';
+    ctx.fillStyle = k === 0 ? '#eef2ff' : (l.startsWith('▲') ? '#4ade80' : l.startsWith('▼') ? '#ff5a6e' : '#9aa6cf');
+    ctx.fillText(l, x + 9, y + 6 + k * 18);
+  });
+}
+
+/* ---------- HUD & logg ---------- */
+let hudCache = '';
+function refreshHud() {
+  if (!G) return;
+  const p = G.player;
+  const key = [p.hp, p.maxHp, p.level, p.xp, G.depth, G.stats.gold, G.stats.kills, p.poison, G.auto ? G.auto.type : ''].join('|');
+  if (key !== hudCache) {
+    hudCache = key;
+    const f = clamp(p.hp / p.maxHp, 0, 1);
+    $('hpFill').style.width = (f * 100) + '%';
+    $('hpText').textContent = `${p.hp}/${p.maxHp}`;
+    $('hpBar').classList.toggle('low', f < 0.3);
+    $('lvlText').textContent = p.level;
+    $('xpFill').style.width = clamp(p.xp / xpNeed(p.level) * 100, 0, 100) + '%';
+    $('depthText').textContent = G.depth;
+    $('goldText').textContent = fmt(G.stats.gold);
+    $('killText').textContent = G.stats.kills;
+    const sc = $('statusChip');
+    if (p.poison > 0) { sc.textContent = `🤢 Förgiftad (${p.poison})`; sc.className = 'chip status'; }
+    else if (G.auto && G.auto.type === 'rest') { sc.textContent = '💤 Vilar…'; sc.className = 'chip status rest'; }
+    else sc.className = 'chip status hide';
+    measureHud();
+  }
+  const onStairs = G.map[idx(p.x, p.y)] === STAIRS;
+  $('stairsBtn').classList.toggle('glow', onStairs);
+  $('stairsBtn').classList.toggle('hide', !onStairs);
+  $('tStairs').classList.toggle('glow', onStairs);
+  // boss
+  const boss = G.monsters.find(m => m.t.boss && m.seen && m.state === 'hunt');
+  const bb = $('bossBar');
+  if (boss) {
+    bb.classList.remove('hide');
+    $('bossName').textContent = `${boss.t.name} – ${boss.hp}/${boss.maxHp}`;
+    $('bossFill').style.width = clamp(boss.hp / boss.maxHp * 100, 0, 100) + '%';
+  } else bb.classList.add('hide');
+  if (G.logDirty) renderLog();
+}
+function renderLog() {
+  G.logDirty = false;
+  const n = window.innerWidth < 560 ? 4 : 6;
+  const last = G.logs.slice(-n);
+  const el = $('log');
+  el.textContent = '';
+  last.forEach((l, k) => {
+    const d = document.createElement('div');
+    d.className = l.cls;
+    d.textContent = l.text;
+    d.style.opacity = String(0.45 + 0.55 * ((k + 1) / last.length));
+    el.appendChild(d);
+  });
+}
+function showBanner(title, sub) {
+  $('bannerT').textContent = title;
+  $('bannerS').textContent = sub || '';
+  const b = $('banner');
+  b.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => b.classList.remove('show'), 2000);
+}
+
+/* ---------- Packning ---------- */
+function openInv() {
+  if (state !== 'play' || G.dead) return;
+  cancelAuto();
+  state = 'inv';
+  invSel = clamp(invSel, 0, Math.max(0, G.player.inv.length - 1));
+  renderInv();
+  $('invOverlay').classList.remove('hidden');
+  syncOverlayClass();
+  sfx('select');
+}
+function closeInv() {
+  if (state !== 'inv') return;
+  state = 'play';
+  $('invOverlay').classList.add('hidden');
+  syncOverlayClass();
+}
+function primaryLabel(it) { return it.kind === 'potion' ? 'Drick' : it.kind === 'scroll' ? 'Läs' : 'Utrusta'; }
+function renderInv() {
+  const p = G.player;
+  $('invCount').textContent = `(${p.inv.length}/10)`;
+  const red = defPct(pDef());
+  $('equipBox').innerHTML =
+    `<div>⚔️ Vapen: <b>${p.weapon.name}</b> <span class="same">(${itemStats(p.weapon)})</span></div>` +
+    `<div>🛡️ Rustning: <b>${p.armor.name}</b> <span class="same">(${itemStats(p.armor)})</span></div>` +
+    `<div class="stats">❤️ ${p.hp}/${p.maxHp} · Attack ${pAtk()} · Försvar ${pDef()} (−${red} % skada) · Krit ${Math.round(p.crit * 100)} % · Undvik ${Math.round(pDodge() * 100)} %</div>`;
+  const ul = $('invList');
+  ul.textContent = '';
+  if (!p.inv.length) {
+    const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'Packningen är tom.'; ul.appendChild(li);
+    return;
+  }
+  p.inv.forEach((it, i) => {
+    const li = document.createElement('li');
+    if (i === invSel) li.className = 'sel';
+    li.dataset.i = i;
+    const c = cmpInfo(it);
+    const dot = it.kind === 'scroll' ? `<i style="background:${SCROLLS[it.sub].color}"></i>` : '';
+    li.innerHTML =
+      `<span class="ic">${it.glyph}${dot}</span>` +
+      `<div class="info"><b${it.art ? ' class="art"' : ''}>${i < 10 ? `<span class="same no-touch">${(i + 1) % 10}.</span> ` : ''}${itemLabel(it)}</b>` +
+      `<small>${cap(itemStats(it))}${c ? ` · <span class="${c.cls}">${c.txt}</span>` : ''}</small></div>` +
+      `<div class="acts"><button class="btn small primary" data-a="use" data-i="${i}">${primaryLabel(it)}</button>` +
+      `<button class="btn small" data-a="drop" data-i="${i}" aria-label="Släng ${it.name}">Släng</button></div>`;
+    ul.appendChild(li);
+  });
+  const sel = ul.querySelector('li.sel');
+  if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+}
+function invUse(i) {
+  const it = G.player.inv[i];
+  if (!it) return;
+  const took = useItem(i);
+  if (took || it.kind === 'scroll') { closeInv(); afterAction(); }
+  else renderInv();
+  refreshHud();
+}
+function invDrop(i) {
+  if (dropItem(i)) {
+    invSel = clamp(invSel, 0, Math.max(0, G.player.inv.length - 1));
+    renderInv(); refreshHud();
+  }
+}
+$('invList').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) {
+    const i = +b.dataset.i;
+    if (b.dataset.a === 'use') invUse(i); else invDrop(i);
+    return;
+  }
+  const li = e.target.closest('li[data-i]');
+  if (li) { invSel = +li.dataset.i; renderInv(); }
+});
+$('invClose').addEventListener('click', () => closeInv());
+$('invOverlay').addEventListener('pointerdown', e => { if (e.target.id === 'invOverlay') closeInv(); });
+
+/* ---------- Val: nivå upp, altare, förtrollning ---------- */
+let choiceCtx = null; // { items: [{icon, name, desc, act}], cancel: bool }
+function openChoices(title, sub, items, cancel) {
+  cancelAuto();
+  held = null;
+  if (state === 'inv') $('invOverlay').classList.add('hidden');
+  state = 'levelup';
+  choiceCtx = { items, cancel: !!cancel };
+  $('chTitle').textContent = title;
+  $('chSub').textContent = sub;
+  const box = $('choices');
+  box.textContent = '';
+  items.forEach((u, k) => {
+    const b = document.createElement('button');
+    b.className = 'btn choice';
+    b.innerHTML = `<span class="ci">${u.icon}</span><span>${u.name}<br><small>${u.desc}</small></span><kbd>${k + 1}</kbd>`;
+    b.addEventListener('click', () => pickChoice(k));
+    box.appendChild(b);
+  });
+  $('chCancel').classList.toggle('hide', !cancel);
+  $('lvlOverlay').classList.remove('hidden');
+  syncOverlayClass();
+}
+function closeChoices() {
+  $('lvlOverlay').classList.add('hidden');
+  choiceCtx = null;
+  state = 'play';
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  syncOverlayClass();
+  refreshHud();
+}
+function pickChoice(k) {
+  if (state !== 'levelup' || !choiceCtx) return;
+  const u = choiceCtx.items[k];
+  if (!u) return;
+  closeChoices();
+  u.act();
+  refreshHud();
+  afterAction();
+  if (G.pendingLvl > 0 && !G.dead) setTimeout(openLevelUp, 150);
+}
+function cancelChoices() {
+  if (state !== 'levelup' || !choiceCtx || !choiceCtx.cancel) return;
+  closeChoices();
+  if (G.pendingLvl > 0 && !G.dead) setTimeout(openLevelUp, 150);
+}
+function openLevelUp() {
+  if (G.dead || G.pendingLvl <= 0 || (state !== 'play' && state !== 'inv')) return;
+  const p = G.player;
+  const pool = UPGRADES.filter(u => !u.ok || u.ok(p));
+  G.rng.shuffle(pool);
+  const items = pool.slice(0, 3).map(u => ({ icon: u.icon, name: u.name, desc: u.desc, act: () => {
+    u.apply(G.player);
+    G.pendingLvl--;
+    log(`Du väljer ${u.name}: ${u.desc}`, 'good');
+    sfx('select');
+  } }));
+  openChoices(`⭐ Nivå ${p.level - G.pendingLvl + 1}!`, 'Välj en förbättring:', items, false);
+}
+function openAltar(f, cost) {
+  const p = G.player;
+  // Erbjudandet låses första gången – avbryt + öppna igen ska inte ge nya alternativ.
+  if (!f.offer) {
+    const pool = UPGRADES.filter(u => !u.ok || u.ok(p));
+    G.rng.shuffle(pool);
+    f.offer = pool.slice(0, 3).map(u => u.id);
+  }
+  const offer = f.offer.map(id => UPGRADES.find(u => u.id === id)).filter(u => !u.ok || u.ok(p));
+  const items = offer.map(u => ({ icon: u.icon, name: u.name, desc: u.desc, act: () => blessAltar(f, cost, u) }));
+  openChoices('🕯️ Offeraltaret', `Offra ${fmt(cost)} guld (och lika många poäng) för en välsignelse – eller avbryt.`, items, true);
+}
+function openEnchant(i) {
+  const p = G.player;
+  const mk = (slot, g) => ({ icon: slot === 'weapon' ? '⚔️' : '🛡️', name: g.name.replace(/ \+\d+$/, '') + ' +' + ((g.ench || 0) + 1),
+    desc: `${slot === 'weapon' ? 'Attack' : 'Försvar'} +${g.val} → +${g.val + 1}`, act: () => { useItem(i, { slot }); } });
+  openChoices('📜 Förtrollningsrulle', 'Vad vill du förtrolla?', [mk('weapon', p.weapon), mk('armor', p.armor)], true);
+}
+
+/* ---------- Start / slut ---------- */
+function startGame() {
+  if (state !== 'title' && state !== 'over') return;
+  newGame(QS.has('seed') ? (parseInt(QS.get('seed'), 10) >>> 0) : null);
+  state = 'play';
+  held = null;
+  camX = G.player.x; camY = G.player.y;
+  hudCache = '';
+  ['startOverlay', 'overOverlay', 'invOverlay', 'lvlOverlay'].forEach(id => $(id).classList.add('hidden'));
+  choiceCtx = null;
+  syncOverlayClass();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  sfx('select');
+  showBanner('Djup 1', 'Hitta trappan ned');
+  refreshHud();
+}
+function onDied() {
+  state = 'dying';
+  deathTimer = now();
+  cancelAuto();
+  held = null;
+  refreshHud();
+  setTimeout(showGameOver, 1300);
+}
+function showGameOver() {
+  if (G.submitted) return;
+  G.submitted = true;
+  ['invOverlay', 'lvlOverlay'].forEach(id => $(id).classList.add('hidden'));
+  const sc = score();
+  const res = SH ? SH.submit('grottkrypet', sc) : { best: sc, isNew: false };
+  $('causeText').textContent = G.cause + '.';
+  const ll = $('lastLog');
+  ll.textContent = '';
+  const last = G.logs.slice(-5, -1);
+  if (last.length) {
+    const h = document.createElement('b'); h.textContent = 'Sista ögonblicken:'; ll.appendChild(h);
+    for (const l of last) { const d = document.createElement('div'); d.className = l.cls; d.textContent = l.text; ll.appendChild(d); }
+  }
+  $('scoreText').textContent = fmt(sc);
+  $('newRecord').classList.toggle('hide', !res.isNew);
+  $('breakdown').textContent = `Djup ${G.stats.maxDepth} × 100 = ${fmt(G.stats.maxDepth * 100)} · Guld ${fmt(G.stats.gold)}${G.stats.offered ? ` (${fmt(G.stats.offered)} offrat)` : ''} · Dödade ${G.stats.kills} × 10 = ${fmt(G.stats.kills * 10)}`;
+  const st = G.stats, p = G.player;
+  $('statsGrid').innerHTML =
+    `<div>Djup<b>${st.maxDepth}</b></div><div>Nivå<b>${p.level}</b></div><div>Dödade<b>${st.kills}</b></div>` +
+    `<div>Guld<b>${fmt(st.gold)}</b></div><div>Drag<b>${fmt(G.turn)}</b></div><div>Bossar<b>${st.bosses}</b></div>`;
+  $('bestOver').textContent = fmt(res.best);
+  state = 'over';
+  $('overOverlay').classList.remove('hidden');
+  syncOverlayClass();
+  setTimeout(() => { if (state === 'over') $('againBtn').focus({ preventScroll: true }); }, 50);
+}
+
+/* ---------- Handlingar från input ---------- */
+function canAct() { return state === 'play' && G && !G.dead; }
+function afterAction() {
+  refreshHud();
+  if (G.interrupt && held) held.blocked = true;
+}
+function doMove(dx, dy) {
+  if (!canAct()) return false;
+  const r = (dx === 0 && dy === 0) ? playerWait() : playerMove(dx, dy);
+  afterAction();
+  return r;
+}
+function doCmd(cmd) {
+  if (!canAct()) return;
+  cancelAuto();
+  if (cmd === 'pickup') playerPickup();
+  else if (cmd === 'inv') { openInv(); return; }
+  else if (cmd === 'stairs') descend();
+  else if (cmd === 'wait') playerWait();
+  else if (cmd === 'rest') startRest();
+  afterAction();
+}
+function startRest() {
+  const p = G.player;
+  if (G.monsters.some(m => isVisible(m.x, m.y) && m.state !== 'sleep')) { log('Du kan inte vila med fiender i närheten.', 'warn'); return; }
+  if (p.hp >= p.maxHp && p.poison === 0) { log('Du är redan vid full hälsa.', 'info'); return; }
+  log('Du sätter dig ned och vilar…', 'info');
+  G.auto = { type: 'rest', n: 0 };
+}
+function cancelAuto() { if (G && G.auto) { G.auto = null; hudCache = ''; } }
+function runAuto(t) {
+  const a = G.auto;
+  if (!a || state !== 'play' || G.dead) return;
+  if (a.type === 'rest') {
+    for (let k = 0; k < 2; k++) {
+      const p = G.player;
+      if (p.hp >= p.maxHp && p.poison === 0) { log('Du känner dig utvilad.', 'good'); cancelAuto(); break; }
+      if (a.n++ > 400) { cancelAuto(); break; }
+      playerWait();
+      if (G.dead || state !== 'play') { G.auto = null; break; }
+      if (G.interrupt || G.monsters.some(m => isVisible(m.x, m.y) && m.state === 'hunt')) { log('Du avbryts i din vila!', 'warn'); cancelAuto(); break; }
+    }
+    refreshHud();
+    return;
+  }
+  if (a.type === 'path') {
+    if (t < a.next) return;
+    a.next = t + 85;
+    if (a.i >= a.path.length) { cancelAuto(); return; }
+    const [nx, ny] = a.path[a.i++];
+    const p = G.player;
+    if (cheb(nx, ny, p.x, p.y) !== 1 || monsterAt(nx, ny)) { cancelAuto(); return; }
+    playerMove(nx - p.x, ny - p.y);
+    if (G.interrupt || G.dead || state !== 'play') cancelAuto();
+    // Stanna innan ett jagande monster hinner slå till.
+    else if (G.monsters.some(m => m.state === 'hunt' && !m.fear && isVisible(m.x, m.y) && cheb(m.x, m.y, p.x, p.y) <= 2)) cancelAuto();
+    if (G.auto && a.i >= a.path.length) cancelAuto();
+    refreshHud();
+  }
+}
+
+/* ---------- Tangentbord ---------- */
+const KEYDIR = {
+  arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0],
+  q: [-1, -1], e: [1, -1], z: [-1, 1], c: [1, 1], home: [-1, -1], pageup: [1, -1], end: [-1, 1], pagedown: [1, 1]
+};
+const NUMDIR = { Numpad8: [0, -1], Numpad2: [0, 1], Numpad4: [-1, 0], Numpad6: [1, 0], Numpad7: [-1, -1], Numpad9: [1, -1], Numpad1: [-1, 1], Numpad3: [1, 1], Numpad5: [0, 0] };
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Spacebar', 'PageUp', 'PageDown', 'Home', 'End']);
+
+function dirOf(e) {
+  if (NUMDIR[e.code]) return NUMDIR[e.code];
+  const k = (e.key || '').toLowerCase();
+  if (KEYDIR[k]) return KEYDIR[k];
+  if (e.key === ' ' || e.key === '.' || e.key === 'Clear') return [0, 0];
+  return null;
+}
+window.addEventListener('keydown', e => {
+  if (SCROLL_KEYS.has(e.key)) e.preventDefault();
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  if (state === 'title') {
+    if (k === 'Enter' || k === ' ') { e.preventDefault(); startGame(); }
+    return;
+  }
+  if (state === 'over') {
+    if (k === 'Enter' || k === 'r' || k === 'R') { e.preventDefault(); if (!e.repeat) startGame(); }
+    return;
+  }
+  if (state === 'dying') return;
+  if (state === 'levelup') {
+    if (e.repeat) return;
+    const n = { '1': 0, '2': 1, '3': 2 }[k];
+    if (n != null) { e.preventDefault(); pickChoice(n); }
+    else if (k === 'Escape') { e.preventDefault(); cancelChoices(); }
+    return;
+  }
+  if (state === 'inv') { invKey(e); return; }
+  if (state !== 'play') return;
+  if (e.repeat) { e.preventDefault(); return; }
+  if (G.auto) { cancelAuto(); refreshHud(); }
+  const dir = dirOf(e);
+  if (dir) {
+    e.preventDefault();
+    doMove(dir[0], dir[1]);
+    held = { code: e.code, dir, next: now() + 260, blocked: G.interrupt };
+    return;
+  }
+  const lk = k.toLowerCase();
+  if (lk === 'g' || k === ',') { e.preventDefault(); doCmd('pickup'); }
+  else if (lk === 'i') { e.preventDefault(); doCmd('inv'); }
+  else if (k === '>' || k === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); doCmd('stairs'); }
+  else if (lk === 'v') { e.preventDefault(); doCmd('rest'); }
+});
+window.addEventListener('keyup', e => { if (held && e.code === held.code) held = null; });
+window.addEventListener('blur', () => { held = null; });
+
+function invKey(e) {
+  const k = e.key, lk = k.toLowerCase();
+  const inv = G.player.inv;
+  if (k === 'Escape' || lk === 'i') { e.preventDefault(); if (!e.repeat) closeInv(); return; }
+  if (k === 'ArrowUp' || lk === 'w') { e.preventDefault(); invSel = (invSel - 1 + Math.max(1, inv.length)) % Math.max(1, inv.length); renderInv(); return; }
+  if (k === 'ArrowDown' || lk === 's') { e.preventDefault(); invSel = (invSel + 1) % Math.max(1, inv.length); renderInv(); return; }
+  if (e.repeat) return;
+  if (k === 'Enter' || k === ' ' || lk === 'e' || lk === 'u') { e.preventDefault(); invUse(invSel); return; }
+  if (lk === 'x' || k === 'Delete') { e.preventDefault(); invDrop(invSel); return; }
+  if (/^[0-9]$/.test(k)) { e.preventDefault(); const i = k === '0' ? 9 : +k - 1; if (inv[i]) { invSel = i; invUse(i); } }
+}
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && state === 'play' && G && G.auto) { cancelAuto(); refreshHud(); }
+});
+
+/* ---------- Mus / pek ---------- */
+function tileAt(e) {
+  const r = cv.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (VW / r.width), py = (e.clientY - r.top) * (VH / r.height);
+  const ts = TS;
+  const ox = Math.round(VW / 2 - (camX + 0.5) * ts), oy = Math.round(VH / 2 - (camY + 0.5) * ts + (VH > 420 ? ts * 0.3 : 0));
+  return { x: Math.floor((px - ox) / ts), y: Math.floor((py - oy) / ts), px, py };
+}
+function onMinimap(px, py) {
+  const s = mmScale();
+  const x = VW - W * s - 10, y = hudBottom + 8;
+  return px >= x - 4 && px <= x + W * s + 4 && py >= y - 4 && py <= y + H * s + 4;
+}
+let downInfo = null;
+cv.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'mouse') return;
+  const t = tileAt(e);
+  if (onMinimap(t.px, t.py)) { hover = null; hoverPath = null; hoverKey = ''; return; }
+  hover = { x: t.x, y: t.y };
+  const key = t.x + ',' + t.y + ',' + G.player.x + ',' + G.player.y + ',' + G.turn;
+  if (key !== hoverKey) {
+    hoverKey = key;
+    hoverPath = (state === 'play' && cheb(t.x, t.y, G.player.x, G.player.y) > 1) ? findPath(t.x, t.y) : null;
+    cv.style.cursor = (inb(t.x, t.y) && G.explored[idx(t.x, t.y)] && G.map[idx(t.x, t.y)] !== WALL) ? 'pointer' : 'default';
+  }
+});
+cv.addEventListener('pointerleave', () => { hover = null; hoverPath = null; hoverKey = ''; });
+cv.addEventListener('pointerdown', e => { downInfo = { x: e.clientX, y: e.clientY, t: now() }; });
+cv.addEventListener('pointerup', e => {
+  if (!downInfo) return;
+  const moved = Math.hypot(e.clientX - downInfo.x, e.clientY - downInfo.y);
+  downInfo = null;
+  if (moved > 14 || !canAct()) return;
+  const t = tileAt(e);
+  if (onMinimap(t.px, t.py)) return;
+  onTileClick(t.x, t.y);
+});
+function onTileClick(x, y) {
+  const p = G.player;
+  if (G.auto) { cancelAuto(); refreshHud(); return; }
+  if (!inb(x, y)) return;
+  const i = idx(x, y);
+  if (x === p.x && y === p.y) {
+    const f = featureAt(x, y);
+    if (G.map[i] === STAIRS) doCmd('stairs');
+    else if (itemsAt(x, y).length || (f && !f.used)) doCmd('pickup');
+    else doMove(0, 0);
+    return;
+  }
+  const m = G.vis[i] ? monsterAt(x, y) : null;
+  const d = cheb(x, y, p.x, p.y);
+  if (m && d > 1) {
+    const tl = tooltipFor(x, y);
+    if (tl) log(tl.join(' – '), 'info');
+    refreshHud();
+    return;
+  }
+  if (d === 1) { if (m || G.map[i] !== WALL) doMove(x - p.x, y - p.y); return; }
+  if (!G.explored[i] || G.map[i] === WALL) return;
+  const path = findPath(x, y);
+  if (!path || !path.length) { log('Du hittar ingen väg dit.', 'info'); refreshHud(); return; }
+  G.auto = { type: 'path', path, i: 0, next: 0 };
+  hoverPath = null;
+}
+
+/* ---------- Knappar ---------- */
+document.querySelectorAll('[data-act]').forEach(b => {
+  b.addEventListener('click', e => { e.preventDefault(); b.blur(); doCmd(b.dataset.act); });
+});
+document.querySelectorAll('#dpad .dbtn').forEach(b => {
+  const [dx, dy] = b.dataset.d.split(',').map(Number);
+  const start = e => {
+    e.preventDefault();
+    if (!canAct()) return;
+    if (G.auto) cancelAuto();
+    try { b.setPointerCapture(e.pointerId); } catch (_) { /* ignorera */ }
+    b.classList.add('on');
+    doMove(dx, dy);
+    held = { code: 'dpad', dir: [dx, dy], next: now() + 300, blocked: G.interrupt };
+  };
+  const stop = () => { b.classList.remove('on'); if (held && held.code === 'dpad') held = null; };
+  b.addEventListener('pointerdown', start);
+  b.addEventListener('pointerup', stop);
+  b.addEventListener('pointercancel', stop);
+  b.addEventListener('lostpointercapture', stop);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+});
+$('playBtn').addEventListener('click', () => startGame());
+$('chCancelBtn').addEventListener('click', () => cancelChoices());
+$('againBtn').addEventListener('click', () => startGame());
+
+/* ---------- Krokar från spellogiken ---------- */
+hooks.levelUp = () => { if (state === 'play' || state === 'inv') setTimeout(() => { if (G.pendingLvl > 0 && (state === 'play' || state === 'inv')) openLevelUp(); }, 250); };
+hooks.died = () => onDied();
+hooks.banner = (t, s) => showBanner(t, s);
+hooks.pickSlot = i => openEnchant(i);
+hooks.altar = (f, cost) => openAltar(f, cost);
+hooks.shake = m => { shakeT = now() + 260; shakeMag = m; };
+hooks.newLevel = () => { camX = G.player.x; camY = G.player.y; hoverPath = null; hoverKey = ''; };
+
+/* ---------- Huvudloop ---------- */
+function frame(t) {
+  requestAnimationFrame(frame);
+  if (state !== lastState) syncOverlayClass();
+  if (G && state === 'play') {
+    if (G.auto) runAuto(t);
+    else if (held && !held.blocked && t >= held.next) {
+      held.next = t + 135;
+      doMove(held.dir[0], held.dir[1]);
+    }
+  }
+  if (G && G.logDirty) refreshHud();
+  render(t);
+}
+
+/* ---------- Init ---------- */
+if (SH) SH.init('grottkrypet');
+// Felsökning/QA: ?seed=123 ger en bestämd grotta, ?debug exponerar tillståndet i konsolen.
+const QS = new URLSearchParams(location.search);
+if (QS.has('debug')) window.__grott = { get G() { return G; }, enterLevel, gainXp, giveItem, mkWeapon, mkArmor, mkScroll, mkPotion, refreshHud, computeFOV, render, get state() { return state; } };
+newGame();
+camX = G.player.x; camY = G.player.y;
+resize();
+refreshHud();
+window.addEventListener('resize', () => { resize(); });
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nordheim – Spelhallen</title>
+<meta name="description" content="Nordheim – bygg och försvara en nordisk bosättning på en vild ö. Stadsbyggare, realtidsstrategi och försvar i 3D.">
+<link rel="stylesheet" href="../../shared.css">
+<link rel="stylesheet" href="../../engine/kit.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.js", "three/addons/": "../../vendor/three/addons/" } }</script>
+</head>
+<body class="game3d">
+<div class="g3-root" id="root">
+  <canvas id="overlay"></canvas>
+  <div id="boxsel"></div>
+  <div class="g3-touch" id="touch"></div>
+
+  <!-- ================= HUD ================= -->
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div id="resbar"></div>
+      <div id="clock"></div>
+      <div id="speed" role="group" aria-label="Tidskontroll">
+        <button data-sp="0" title="Paus (mellanslag)">⏸</button><button data-sp="1" title="Normal hastighet">1×</button><button data-sp="2" title="Dubbel hastighet">2×</button><button data-sp="3" title="Trippel hastighet">3×</button>
+      </div>
+      <button id="btnMenu" class="ib" title="Meny (Esc)">☰</button>
+    </div>
+    <div id="raidbar" class="hidden"></div>
+    <div id="pausedTag" class="hidden">⏸ PAUSAT – tryck mellanslag</div>
+    <div id="leftcol"><div id="goals"></div><div id="notes"></div></div>
+    <div id="sideBtns">
+      <button id="btnAlarm" class="ib" title="Larmklocka (L) – invånarna söker skydd">🔔</button>
+      <button id="btnArmy" class="ib" title="Välj alla soldater (F)">⚔️</button>
+      <button id="btnHall" class="ib" title="Till hallen (H)">🏛️</button>
+      <button id="btnStats" class="ib" title="Statistik (T)">📈</button>
+    </div>
+    <div id="minimapWrap"><canvas id="minimap" aria-label="Minikarta"></canvas></div>
+    <div id="buildbar" class="open">
+      <button id="btnBuild" class="ib" title="Byggmeny (B)">🔨</button>
+      <div id="cats"></div>
+      <div id="cards"></div>
+      <div id="lineCost"></div>
+    </div>
+    <div id="info" class="hidden"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="respop" class="hidden"></div>
+    <div id="confirmBar" class="hidden"><button data-c="ok" class="btn primary">✔ Bygg här</button><button data-c="rot" class="btn">⟳ Vrid</button><button data-c="x" class="btn">✕</button></div>
+    <div id="tipbox" class="hidden">
+      <div class="tiphead"><b>💡 Handledning</b><span id="tipStep"></span></div>
+      <p id="tipText"></p>
+      <div class="tipbtns"><button id="tipSkip" class="btn small">Hoppa över</button><button id="tipNext" class="btn small">Nästa ›</button></div>
+    </div>
+    <div id="statsModal" class="hidden">
+      <div class="sm-head"><b>📈 Statistik</b><button id="statsClose" class="ib">✕</button></div>
+      <div id="statsTabs">
+        <button data-s="pop" class="on" style="--c:#fff">Invånare</button><button data-s="food" class="on" style="--c:#e0a040">Mat</button><button data-s="wood" class="on" style="--c:#b07a40">Trä</button><button data-s="stone" style="--c:#a0a0b0">Sten</button><button data-s="gold" style="--c:#ffd040">Guld</button><button data-s="happy" style="--c:#60e080">Glädje</button><button data-s="soldiers" style="--c:#4aa8ff">Soldater</button>
+      </div>
+      <canvas id="statsCanvas"></canvas>
+      <div id="statsTotals"></div>
+    </div>
+    <div id="gpcursor" class="hidden"></div>
+  </div>
+
+  <!-- ================= Laddning ================= -->
+  <div class="g3-screen hidden" id="loading">
+    <div class="g3-panel"><h2 class="g3-h2">Nordheim</h2><div class="g3-loadbar"><i></i></div><div class="g3-loadtext">Laddar…</div></div>
+  </div>
+
+  <!-- ================= Huvudmeny ================= -->
+  <div class="g3-screen" id="menu">
+    <a class="g3-back" href="../../index.html">← Spelhallen</a>
+    <div class="g3-panel">
+      <h1 class="g3-title">Nordheim</h1>
+      <p class="g3-sub">Grunda en nordisk by på en vild ö. Hugg skog, bärga skörden före vintern, håll folket nöjt – och försvara er när drakskeppen siktas vid horisonten.</p>
+      <div class="g3-btns">
+        <button class="btn primary hidden" id="btnContinue">Fortsätt <small></small></button>
+        <button class="btn" id="btnCampaign">⚔️ Kampanj</button>
+        <button class="btn" id="btnFree">🌲 Fritt spel</button>
+        <button class="btn" id="btnSurvival">🛡️ Överlevnad</button>
+        <button class="btn" id="btnLoad">💾 Ladda spel</button>
+        <div class="g3-row"><button class="btn" id="btnSettings">⚙️ Inställningar</button><button class="btn" id="btnHelp">❓ Hur man spelar</button></div>
+      </div>
+      <p class="menubest" id="menuBest"></p>
+    </div>
+  </div>
+
+  <!-- Kampanj -->
+  <div class="g3-screen hidden" id="campaign">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">⚔️ Kampanj</h2>
+      <p class="g3-sub">Sju sagor från Nordheim. Varje scenario introducerar något nytt.</p>
+      <div id="campList"></div>
+      <p class="menubest" id="campTotal"></p>
+      <button class="btn" data-back="menu">← Tillbaka</button>
+    </div>
+  </div>
+
+  <!-- Fritt spel / Överlevnad -->
+  <div class="g3-screen hidden" id="setup">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="setupTitle">Fritt spel</h2>
+      <p class="g3-sub" id="setupDesc"></p>
+      <div class="g3-settings">
+        <div class="g3-set"><label for="setSize">Öns storlek</label><div class="ctl"><select id="setSize"></select></div></div>
+        <div class="g3-set"><label for="setDiff">Svårighet</label><div class="ctl"><select id="setDiff"></select></div></div>
+        <div class="g3-set" id="rowRaids"><label for="setRaids">Räder</label><div class="ctl"><input type="checkbox" id="setRaids" checked></div></div>
+        <div class="g3-set"><label for="setSeed">Frö (valfritt)</label><div class="ctl"><input type="text" id="setSeed" maxlength="24" placeholder="slumpas" class="seed"></div></div>
+      </div>
+      <div class="g3-row"><button class="btn" data-back="menu">← Tillbaka</button><button class="btn primary" id="setupGo">Starta ▶</button></div>
+    </div>
+  </div>
+
+  <!-- Ladda -->
+  <div class="g3-screen hidden" id="loadgame">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2" id="loadTitle">Ladda spel</h2>
+      <div id="slotList"></div>
+      <button class="btn" data-back="auto">← Tillbaka</button>
+    </div>
+  </div>
+
+  <!-- Inställningar -->
+  <div class="g3-screen hidden" id="settings">
+    <div class="g3-panel">
+      <h2 class="g3-h2">⚙️ Inställningar</h2>
+      <div id="setBody"></div>
+      <button class="btn primary" id="settingsBack">Klar</button>
+    </div>
+  </div>
+
+  <!-- Hjälp -->
+  <div class="g3-screen hidden" id="help">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">❓ Hur man spelar</h2>
+      <div class="g3-tabs" id="helpTabs"><button class="on" data-page="basics">Grunder</button><button data-page="keys">Styrning</button><button data-page="eco">Ekonomi</button><button data-page="war">Strid</button></div>
+      <div class="helppage" data-page="basics">
+        <p>Du styr en nybyggd vikingaby. Invånarna sköter sig själva – du bestämmer <b>vad</b> som byggs och <b>var</b>.</p>
+        <ul>
+          <li>🪵 <b>Trä</b> från huggarstugor, 🪨 <b>sten</b> från stenhuggerier, ⛓️ <b>järn</b> från gruvor, 🍖 <b>mat</b> från fiske, jakt, bär och åkrar.</li>
+          <li>Lediga invånare blir <b>byggare</b>. När något byggs håller byn automatiskt några invånare lediga, och arbetare som saknar sysslor hjälper till. Går det trögt: minska antalet arbetare någonstans.</li>
+          <li>Håll muspekaren över (eller tryck på) en resurs högst upp för att se <b>varför</b> den ökar eller minskar.</li>
+          <li>Byn växer när det finns <b>bostäder</b>, <b>mat</b> och god <b>glädje</b>. Hov, marknad, brunnar och låg skatt gör folk gladare.</li>
+          <li>Årstider: på <b>vintern</b> växer inget, fisket går långsamt och alla äter mer. Fyll lagren på hösten!</li>
+          <li>På natten sover invånarna. Räder kan komma när som helst – håll ett öga på varningen överst.</li>
+        </ul>
+      </div>
+      <div class="helppage hidden" data-page="keys">
+        <div class="g3-keys">
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / pilar</span><span>Panorera (även mittenknapp-drag och skärmkanten)</span>
+          <span><kbd>Q</kbd> <kbd>E</kbd> / högerdrag</span><span>Vrid kameran</span>
+          <span>Mushjul / <kbd>+</kbd> <kbd>−</kbd></span><span>Zooma</span>
+          <span>Vänsterklick</span><span>Välj / placera byggnad</span>
+          <span>Vänsterdrag</span><span>Ram-markering av soldater</span>
+          <span>Högerklick</span><span>Flytta / anfall med valda soldater, avbryt bygge</span>
+          <span><kbd>B</kbd>, <kbd>1</kbd>–<kbd>5</kbd></span><span>Byggmeny och kategorier</span>
+          <span><kbd>R</kbd></span><span>Vrid byggnaden vid placering</span>
+          <span><kbd>U</kbd> / <kbd>Delete</kbd></span><span>Uppgradera / riv vald byggnad (riv: tryck två gånger)</span>
+          <span><kbd>F</kbd> / <kbd>H</kbd> / <kbd>L</kbd> / <kbd>T</kbd></span><span>Alla soldater / till hallen / larm / statistik</span>
+          <span><kbd>Mellanslag</kbd>, <kbd>,</kbd> <kbd>.</kbd></span><span>Paus och tidshastighet</span>
+          <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>Avbryt / pausmeny</span>
+        </div>
+        <p class="dim"><b>Pekskärm:</b> tryck för att välja, dra för att panorera, nyp för att zooma och vrid med två fingrar. Med soldater valda: tryck på marken för att flytta, på en fiende för att anfalla. Håll fingret för att kommendera. Vid byggande: tryck där byggnaden ska stå och bekräfta med ✔.</p>
+        <p class="dim"><b>Handkontroll:</b> vänster spak flyttar markören, A väljer/klickar, B kommenderar/avbryter, höger spak panorerar, LB/RB vrider, LT/RT zoomar, X öppnar byggmenyn, Y byter hastighet, Start pausar.</p>
+      </div>
+      <div class="helppage hidden" data-page="eco">
+        <ul>
+          <li><b>Lager:</b> hallen och lagerboden rymmer alla resurser, ladan mat. Fullt lager = arbetarna väntar.</li>
+          <li><b>Åkrar</b> sås vår/sommar och skördas när de mognat. De behöver en <b>lada</b> inom räckhåll. Ängsmark ger större skörd.</li>
+          <li><b>Smedjan</b> gör vapen av 2 järn + 1 trä. Vapen behövs för krigare och sköldmör.</li>
+          <li><b>Marknaden</b> låter dig köpa och sälja mot guld. <b>Hamnen</b> ger mycket fisk och lockar handelsskepp med bättre priser.</li>
+          <li>Skatt ger guld varje dag. Sätt skattenivån i hallens panel.</li>
+          <li>Klicka på en byggnad och använd − / + för att flytta arbetare dit de behövs mest.</li>
+          <li>Vägar och murar byggs genom att dra. Verktyget <b>Riv väg/mur</b> under Bas tar bort dem igen.</li>
+          <li>Fiskarhyddor och hamnar måste ligga nära fiskevatten – det visas blått när du placerar dem.</li>
+        </ul>
+      </div>
+      <div class="helppage hidden" data-page="war">
+        <ul>
+          <li>Räder kommer från havet (drakskepp) eller skogen. En varning visas i förväg – vakttorn ger längre varsel.</li>
+          <li>Fiender: <b>plundrare</b> stjäl och tänder eld, <b>bärsärkar</b> är snabba och farliga, <b>bågskyttar</b> skjuter på avstånd, <b>stegbärare</b> tar sig över murar, <b>murbräckor</b> krossar portar och <b>troll</b> tål enormt mycket.</li>
+          <li>Träna <b>krigare</b>, <b>bågskyttar</b> och <b>sköldmör</b> i kasernen. Välj med klick eller ram, högerklicka för att flytta eller anfalla. Välj formation i panelen.</li>
+          <li><b>Bågskyttetorn</b> skjuter automatiskt. <b>Palissader</b> och <b>portar</b> stoppar fiender – dina egna går igenom portar.</li>
+          <li>Brinnande hus släcks av invånare – snabbast med en <b>brunn</b> i närheten. Skadade byggnader repareras av lediga invånare.</li>
+          <li>Skadade soldater läker mellan striderna – snabbast nära kasernen eller hallen.</li>
+          <li>Förlorar du hövdingahallen är spelet slut.</li>
+        </ul>
+      </div>
+      <button class="btn primary" id="helpBack">Klar</button>
+    </div>
+  </div>
+
+  <!-- Paus -->
+  <div class="g3-screen hidden" id="pause">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Paus</h2>
+      <div class="g3-btns">
+        <button class="btn primary" id="pResume">▶ Fortsätt</button>
+        <button class="btn" id="pSave">💾 Spara / ladda</button>
+        <button class="btn" id="pSettings">⚙️ Inställningar</button>
+        <button class="btn" id="pHelp">❓ Hur man spelar</button>
+        <button class="btn" id="pGiveUp">🏳️ Ge upp</button>
+        <button class="btn" id="pQuit">🏠 Spara och gå till huvudmenyn</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Berättelse -->
+  <div class="g3-screen hidden" id="story">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="storyTitle"></h2>
+      <p class="g3-sub" id="storyText"></p>
+      <p class="newstuff" id="storyNew"></p>
+      <div class="goalbox"><b>Mål</b><ul id="storyGoals"></ul></div>
+      <button class="btn primary" id="storyGo">Till verket! ▶</button>
+    </div>
+  </div>
+
+  <!-- Slut -->
+  <div class="g3-screen hidden" id="end">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="endTitle">Seger!</h2>
+      <div id="endBody"></div>
+      <div class="g3-btns">
+        <button class="btn primary hidden" id="endNext">Nästa scenario ▶</button>
+        <button class="btn hidden" id="endContinue">Fortsätt spela</button>
+        <button class="btn" id="endRetry">↻ Spela igen</button>
+        <button class="btn" id="endMenu">🏠 Huvudmeny</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../../shared.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>

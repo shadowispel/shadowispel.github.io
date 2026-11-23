@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spelhallen</title>
+<meta name="description" content="Spelhallen – fem stora 3D-spel och fem arkadspel direkt i webbläsaren: blockvärld, racing, rymdstrid, plattformsäventyr, strategi och mer.">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .hero {
+    max-width: 1100px; margin: 0 auto; padding: 56px 16px 28px; text-align: center; position: relative;
+  }
+  .logo {
+    font-size: clamp(2.6rem, 9vw, 5rem); font-weight: 900; margin: 0; letter-spacing: 1px; line-height: 1;
+    background: linear-gradient(90deg, #ffd85c, #ff8a5c 35%, #b083ff 65%, #39d5ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 6px 24px rgba(176, 131, 255, .35));
+  }
+  .tagline { color: var(--muted); font-size: clamp(1rem, 2.6vw, 1.2rem); margin: 14px auto 0; max-width: 620px; line-height: 1.5; }
+  .stats { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 22px; }
+  .stats .chip { font-weight: 500; color: var(--muted); }
+  .stats .chip b { color: var(--text); }
+
+  #stars { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+
+  .grid {
+    max-width: 1100px; margin: 0 auto; padding: 8px 16px 40px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 18px;
+  }
+  .grid .card { flex: 1 1 300px; max-width: 350px; }
+  @media (max-width: 700px) { .grid .card { max-width: none; } }
+  .card {
+    position: relative; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, var(--panel), var(--bg-2));
+    border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+    text-decoration: none; color: inherit;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    box-shadow: var(--shadow);
+  }
+  .card:hover, .card:focus-visible { transform: translateY(-4px); border-color: var(--c); box-shadow: 0 16px 40px rgba(0,0,0,.5), 0 0 0 1px var(--c), 0 0 30px -6px var(--c); outline: none; }
+  .card:active { transform: translateY(-1px); }
+  .art { height: 160px; position: relative; overflow: hidden; background: var(--artbg); }
+  .art canvas { width: 100%; height: 100%; display: block; }
+  .art .emoji {
+    position: absolute; right: 14px; bottom: 10px; font-size: 44px;
+    filter: drop-shadow(0 4px 10px rgba(0,0,0,.6));
+    transition: transform .25s ease;
+  }
+  .card:hover .emoji { transform: scale(1.15) rotate(-6deg); }
+  .genre {
+    position: absolute; left: 12px; top: 12px; font-size: .75rem; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+    background: rgba(5,8,18,.7); border: 1px solid var(--c); color: var(--c); padding: 4px 9px; border-radius: 999px;
+  }
+  .body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .body h2 { margin: 0; font-size: 1.45rem; font-weight: 900; }
+  .body p { margin: 0; color: var(--muted); line-height: 1.5; font-size: .96rem; flex: 1; }
+  .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .meta .rec { font-size: .9rem; color: var(--muted); }
+  .meta .rec b { color: var(--accent); }
+  .play {
+    background: var(--c); color: #071022; font-weight: 900; border-radius: 10px; padding: 8px 16px; font-size: .95rem;
+    white-space: nowrap;
+  }
+  .section-head { max-width: 1100px; margin: 0 auto; padding: 18px 16px 6px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .section-head h2 { margin: 0; font-size: clamp(1.4rem, 3.6vw, 2rem); font-weight: 900; }
+  .section-head p { margin: 0; color: var(--muted); }
+  .big-grid {
+    max-width: 1100px; margin: 0 auto; padding: 8px 16px 30px;
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 18px;
+  }
+  .big-grid .card { grid-column: span 2; }
+  .big-grid .card.hero-card { grid-column: span 4; grid-row: span 2; }
+  .big-grid .card.hero-card .art { height: auto; flex: 1; min-height: 260px; }
+  .big-grid .card.hero-card .body h2 { font-size: 2rem; }
+  .big-grid .card.hero-card .body { flex: 0 0 auto; }
+  .big-grid .card.hero-card .body p { flex: 0 0 auto; }
+  .big-grid .art { height: 170px; }
+  .badge3d { position: absolute; right: 12px; top: 12px; font-size: .72rem; font-weight: 900; letter-spacing: .8px;
+    background: linear-gradient(90deg, #ffd85c, #ffb31f); color: #2a1a00; padding: 4px 8px; border-radius: 8px; }
+  .feat { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .feat li { font-size: .78rem; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px; }
+  @media (max-width: 900px) {
+    .big-grid { grid-template-columns: repeat(2, 1fr); }
+    .big-grid .card, .big-grid .card.hero-card { grid-column: span 1; grid-row: auto; }
+    .big-grid .card.hero-card { grid-column: span 2; }
+    .big-grid .card.hero-card .art { min-height: 220px; }
+  }
+  @media (max-width: 620px) {
+    .big-grid { grid-template-columns: 1fr; }
+    .big-grid .card.hero-card { grid-column: span 1; }
+  }
+  .grid.small .art { height: 120px; }
+  .grid.small .body h2 { font-size: 1.2rem; }
+  .grid.small .body p { font-size: .9rem; }
+  .grid.small .card { flex: 1 1 200px; max-width: 210px; }
+  @media (max-width: 700px) { .grid.small .card { max-width: none; flex-basis: 240px; } }
+  footer { text-align: center; color: var(--muted); font-size: .85rem; padding: 10px 16px 30px; }
+  footer button { background: none; border: none; color: var(--muted); text-decoration: underline; cursor: pointer; font-size: .85rem; }
+  .topbar .spacer { width: 38px; }
+  @media (max-width: 560px) { .hero { padding-top: 32px; } .art { height: 130px; } }
+</style>
+</head>
+<body>
+<canvas id="stars" aria-hidden="true"></canvas>
+
+<header class="topbar">
+  <span class="spacer" aria-hidden="true"></span>
+  <h1>🎮 Spelhallen</h1>
+  <div class="topbar-right"><button class="icon-btn" data-mute aria-label="Ljud">🔊</button></div>
+</header>
+
+<section class="hero">
+  <p class="logo">Spelhallen</p>
+  <p class="tagline">Fem stora 3D-spel och fem klassiska arkadspel direkt i webbläsaren. Inga nedladdningar, inga konton. Välj ett spel och slå ditt eget rekord!</p>
+  <div class="stats">
+    <span class="chip">🏆 Spel med rekord: <b id="totalBest">0</b> av 10</span>
+    <span class="chip">🕹️ Spelade omgångar: <b id="totalPlays">0</b></span>
+  </div>
+</section>
+
+<main>
+  <div class="section-head"><h2>Stora 3D-spel</h2><p>Hela spel med kampanjer, sparning och inställningar.</p></div>
+  <section class="big-grid" id="grid3d" aria-label="3D-spel"></section>
+  <div class="section-head"><h2>Arkadhörnan</h2><p>Snabba klassiker i 2D – perfekta för en kort paus.</p></div>
+  <section class="grid small" id="grid" aria-label="Arkadspel"></section>
+</main>
+
+<footer>
+  Fungerar med tangentbord, mus och pekskärm · <kbd>M</kbd> stänger av eller slår på ljudet i alla spel
+  <br><button id="reset" type="button">Nollställ alla rekord och framsteg</button>
+</footer>
+
+<script src="shared.js"></script>
+<script>
+(function () {
+  'use strict';
+  const GAMES = [
+    { id: 'stjarnstorm', name: 'Stjärnstorm', genre: 'Rymdskjutare', emoji: '🚀', c: '#39d5ff', bg: '#050a1e',
+      desc: 'Överlev våg efter våg av fiender i en neonlysande arena. Samla krafter, bygg upp kombos och fäll bossarna.' },
+    { id: 'ravens-resa', name: 'Rävens resa', genre: 'Plattformsspel', emoji: '🦊', c: '#ff9b4a', bg: '#10251c',
+      desc: 'Hoppa genom skog, grottor och snö som en modig liten räv. Åtta banor med stjärnor att samla.' },
+    { id: 'ljusbrytaren', name: 'Ljusbrytaren', genre: 'Pusselspel', emoji: '💎', c: '#b083ff', bg: '#120a24',
+      desc: 'Vrid speglar, dela och blanda ljusstrålar så att varje kristall får rätt färg. Trettio kluriga banor.' },
+    { id: 'borgvakt', name: 'Borgvakt', genre: 'Tornförsvar', emoji: '🏰', c: '#4ade80', bg: '#0e1a10',
+      desc: 'Bygg och uppgradera torn längs stigen och stoppa horderna innan de når borgen. Tre kartor, trettio vågor och bossar.' },
+    { id: 'grottkrypet', name: 'Grottkrypet', genre: 'Grottäventyr', emoji: '⚔️', c: '#ff5a6e', bg: '#160c0e',
+      desc: 'Utforska slumpade grottor drag för drag. Hitta vapen, drycker och rullar, och se hur djupt du kommer.' }
+  ];
+
+  const GAMES3D = [
+    { id: 'kubvarld', name: 'Kubvärld', genre: 'Sandlåda', emoji: '⛏️', c: '#7bd88f', bg: '#0d1f2e', hero: true,
+      desc: 'En oändlig värld av block att utforska, bryta och bygga i. Överlev nätterna, tillverka verktyg och skapa vad du vill – eller flyg fritt i kreativt läge.',
+      feat: ['Oändlig värld', 'Överlevnad & kreativt', 'Tillverkning', 'Äventyrsdagbok', 'Dag och natt', 'Sparade världar'] },
+    { id: 'fjallracet', name: 'Fjällracet', genre: 'Racing', emoji: '🏎️', c: '#ff7a59', bg: '#1a1420',
+      desc: 'Drifta genom fjällpass, skärgård och neonstad mot sju motståndare. Mästerskap, tidskörning och spökbilar.',
+      feat: ['6 banor', '6 bilar', 'Mästerskap', 'Spökbil'] },
+    { id: 'rymdjakt', name: 'Rymdjakt', genre: 'Rymdstrid', emoji: '🛰️', c: '#39d5ff', bg: '#050818',
+      desc: 'Flyg med Nordstjärneflottan i en kampanj full av luftstrider, eskorter och jättekryssare. Uppgradera ditt skepp mellan uppdragen.',
+      feat: ['12 uppdrag', 'Hangar', 'Överlevnad'] },
+    { id: 'ravens-aventyr', name: 'Rävens äventyr', genre: 'Plattformsäventyr', emoji: '🦊', c: '#ffb04a', bg: '#10251c',
+      desc: 'Spring, hoppa och snurra dig genom fem världar som räven Ylva och hämta tillbaka de stulna norrskensstenarna.',
+      feat: ['5 världar', '32 stenar', '5 bossar'] },
+    { id: 'nordheim', name: 'Nordheim', genre: 'Strategi', emoji: '🛖', c: '#c9a2ff', bg: '#141026',
+      desc: 'Bygg en nordisk by på en vild ö, håll invånarna nöjda och försvara er mot räder från havet.',
+      feat: ['7 scenarier', 'Fritt spel', 'Överlevnad'] }
+  ];
+
+  const grid3d = document.getElementById('grid3d');
+  const grid = document.getElementById('grid');
+  let totalBest = 0, totalPlays = 0;
+
+  GAMES3D.forEach(g => {
+    const best = Spelhallen.best(g.id), plays = Spelhallen.plays(g.id);
+    if (best > 0) totalBest++; totalPlays += plays;
+    const a = document.createElement('a');
+    a.className = 'card' + (g.hero ? ' hero-card' : '');
+    a.href = 'games3d/' + g.id + '/index.html';
+    a.style.setProperty('--c', g.c);
+    a.style.setProperty('--artbg', g.bg);
+    a.innerHTML = `
+      <div class="art"><canvas data-game="${g.id}"></canvas><span class="genre">${g.genre}</span><span class="badge3d">3D</span><span class="emoji" aria-hidden="true">${g.emoji}</span></div>
+      <div class="body">
+        <h2>${g.name}</h2>
+        <p>${g.desc}</p>
+        <ul class="feat">${g.feat.map(f => '<li>' + f + '</li>').join('')}</ul>
+        <div class="meta">
+          <span class="rec">${best > 0 ? 'Ditt rekord: <b>' + Spelhallen.fmt(best) + '</b>' : 'Inte spelat än'}</span>
+          <span class="play">Spela ▶</span>
+        </div>
+      </div>`;
+    a.addEventListener('click', () => Spelhallen.sfx('select'));
+    grid3d.appendChild(a);
+  });
+
+  GAMES.forEach(g => {
+    const best = Spelhallen.best(g.id), plays = Spelhallen.plays(g.id);
+    if (best > 0) totalBest++; totalPlays += plays;
+    const a = document.createElement('a');
+    a.className = 'card';
+    a.href = 'games/' + g.id + '.html';
+    a.style.setProperty('--c', g.c);
+    a.style.setProperty('--artbg', g.bg);
+    a.innerHTML = `
+      <div class="art"><canvas data-game="${g.id}"></canvas><span class="genre">${g.genre}</span><span class="emoji" aria-hidden="true">${g.emoji}</span></div>
+      <div class="body">
+        <h2>${g.name}</h2>
+        <p>${g.desc}</p>
+        <div class="meta">
+          <span class="rec">${best > 0 ? 'Ditt rekord: <b>' + Spelhallen.fmt(best) + '</b>' : 'Inte spelat än'}</span>
+          <span class="play">Spela ▶</span>
+        </div>
+      </div>`;
+    a.addEventListener('click', () => Spelhallen.sfx('select'));
+    grid.appendChild(a);
+  });
+  document.getElementById('totalBest').textContent = Spelhallen.fmt(totalBest);
+  document.getElementById('totalPlays').textContent = Spelhallen.fmt(totalPlays);
+
+  // Tvåstegsbekräftelse direkt på sidan (webbläsarens confirm() fungerar inte överallt)
+  const resetBtn = document.getElementById('reset');
+  const resetText = resetBtn.textContent;
+  let resetArmed = 0;
+  resetBtn.addEventListener('click', () => {
+    if (!resetArmed) {
+      resetBtn.textContent = 'Säker? Klicka igen för att radera alla rekord, framsteg och sparade världar. Det går inte att ångra.';
+      resetBtn.style.color = 'var(--bad)';
+      resetArmed = setTimeout(() => { resetArmed = 0; resetBtn.textContent = resetText; resetBtn.style.color = ''; }, 5000);
+      return;
+    }
+    clearTimeout(resetArmed);
+    resetBtn.textContent = 'Nollställer …';
+    try {
+      Object.keys(localStorage).filter(k => (k.startsWith('spelhallen:') && k !== 'spelhallen:muted' && !k.startsWith('spelhallen:settings3d')) || k.startsWith('spelhallen3d:')).forEach(k => localStorage.removeItem(k));
+    } catch (e) {}
+    try { const r = indexedDB.deleteDatabase('spelhallen3d'); r.onsuccess = r.onerror = r.onblocked = () => location.reload(); setTimeout(() => location.reload(), 1500); }
+    catch (e) { location.reload(); }
+  });
+
+  Spelhallen.init();
+
+  // ---------- Små animerade förhandsvisningar på korten ----------
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const arts = [...document.querySelectorAll('.art canvas')].map(cv => ({ cv, ctx: cv.getContext('2d'), id: cv.dataset.game, w: 0, h: 0 }));
+  function sizeArts() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    arts.forEach(a => {
+      const r = a.cv.getBoundingClientRect();
+      a.w = r.width; a.h = r.height;
+      a.cv.width = Math.round(r.width * dpr); a.cv.height = Math.round(r.height * dpr);
+      a.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+  }
+  const rnd = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(42);
+  const dots = Array.from({ length: 60 }, () => ({ x: rnd(), y: rnd(), z: rnd() }));
+
+  const draw = {
+    stjarnstorm(c, w, h, t) {
+      dots.forEach(d => { const x = (d.x * w - t * 30 * (d.z + .2)) % w; c.fillStyle = `rgba(200,230,255,${.3 + d.z * .7})`; c.fillRect((x + w) % w, d.y * h, 1 + d.z * 1.5, 1 + d.z * 1.5); });
+      const px = w * .3, py = h * .5 + Math.sin(t * 2) * 18;
+      for (let i = 0; i < 4; i++) { const bx = (px + 20 + ((t * 260 + i * 70) % (w * .7))); c.fillStyle = '#ffe27a'; c.shadowColor = '#ffcc33'; c.shadowBlur = 10; c.fillRect(bx, py - 1.5, 10, 3); }
+      c.shadowBlur = 14; c.shadowColor = '#39d5ff'; c.strokeStyle = '#39d5ff'; c.lineWidth = 2.5;
+      c.beginPath(); c.moveTo(px + 16, py); c.lineTo(px - 10, py - 10); c.lineTo(px - 4, py); c.lineTo(px - 10, py + 10); c.closePath(); c.stroke();
+      [[.72, .35, '#ff5a6e'], [.82, .62, '#b083ff'], [.62, .7, '#ff5a6e']].forEach(([ex, ey, col], i) => {
+        const x = ex * w + Math.cos(t * 1.5 + i) * 10, y = ey * h + Math.sin(t * 1.7 + i) * 10;
+        c.strokeStyle = col; c.shadowColor = col; c.beginPath();
+        for (let k = 0; k < 6; k++) { const a = t * 2 + k * Math.PI / 3; c.lineTo(x + Math.cos(a) * 10, y + Math.sin(a) * 10); }
+        c.closePath(); c.stroke();
+      });
+      c.shadowBlur = 0;
+    },
+    'ravens-resa'(c, w, h, t) {
+      c.fillStyle = '#1b3a2a'; for (let i = -1; i < 8; i++) { const x = ((i * 60 - t * 15) % (w + 60) + w + 60) % (w + 60) - 30; c.beginPath(); c.moveTo(x, h * .78); c.lineTo(x + 26, h * .2); c.lineTo(x + 52, h * .78); c.fill(); }
+      c.fillStyle = '#2f5f3a'; c.fillRect(0, h * .78, w, h);
+      c.fillStyle = '#5b3b22'; c.fillRect(0, h * .84, w, h);
+      const fx = w * .35, jump = Math.abs(Math.sin(t * 2.6)) * 40, fy = h * .78 - jump;
+      c.fillStyle = '#ff8c3a'; c.beginPath(); c.ellipse(fx, fy - 11, 16, 11, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.moveTo(fx + 10, fy - 18); c.lineTo(fx + 24, fy - 14); c.lineTo(fx + 12, fy - 6); c.fill();
+      c.beginPath(); c.moveTo(fx + 10, fy - 20); c.lineTo(fx + 14, fy - 30); c.lineTo(fx + 17, fy - 19); c.fill();
+      c.fillStyle = '#fff'; c.beginPath(); c.ellipse(fx - 18, fy - 14, 9, 5, -.5, 0, Math.PI * 2); c.fill();
+      for (let i = 0; i < 3; i++) { const cx = w * .55 + i * 34, cy = h * .45 + Math.sin(t * 3 + i) * 4; c.fillStyle = '#ffcc33'; c.beginPath(); c.ellipse(cx, cy, 5 * Math.abs(Math.cos(t * 3 + i)) + 1, 7, 0, 0, Math.PI * 2); c.fill(); }
+    },
+    ljusbrytaren(c, w, h, t) {
+      const s = 26; c.strokeStyle = 'rgba(176,131,255,.12)'; c.lineWidth = 1;
+      for (let x = 0; x < w; x += s) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); }
+      for (let y = 0; y < h; y += s) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+      const p = (Math.sin(t * 2) + 1) / 2;
+      c.globalCompositeOperation = 'lighter'; c.lineWidth = 3; c.shadowBlur = 12;
+      c.strokeStyle = c.shadowColor = '#ff4d6d'; c.beginPath(); c.moveTo(0, h * .3); c.lineTo(w * .45, h * .3); c.lineTo(w * .45, h * .85); c.stroke();
+      c.strokeStyle = c.shadowColor = '#3d8bff'; c.beginPath(); c.moveTo(w, h * .55); c.lineTo(w * .45, h * .55); c.stroke();
+      c.globalCompositeOperation = 'source-over';
+      c.fillStyle = `rgba(200,120,255,${.5 + p * .5})`; c.shadowColor = '#c77dff'; c.shadowBlur = 20 + p * 20;
+      c.beginPath(); c.moveTo(w * .45, h * .78); c.lineTo(w * .45 + 12, h * .88); c.lineTo(w * .45, h * .98); c.lineTo(w * .45 - 12, h * .88); c.fill();
+      c.shadowBlur = 0; c.strokeStyle = '#e8e8ff'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(w * .45 - 10, h * .3 - 10); c.lineTo(w * .45 + 10, h * .3 + 10); c.stroke();
+    },
+    borgvakt(c, w, h, t) {
+      c.fillStyle = '#1d3a1f'; c.fillRect(0, 0, w, h);
+      c.strokeStyle = '#8a6a43'; c.lineWidth = 22; c.lineJoin = 'round';
+      c.beginPath(); c.moveTo(-10, h * .3); c.lineTo(w * .45, h * .3); c.lineTo(w * .45, h * .72); c.lineTo(w + 10, h * .72); c.stroke();
+      const path = q => { const L1 = w * .45 + 10, L2 = h * .42, L3 = w * .55 + 10, T = L1 + L2 + L3, d = q * T; if (d < L1) return [d - 10, h * .3]; if (d < L1 + L2) return [w * .45, h * .3 + (d - L1)]; return [w * .45 + (d - L1 - L2), h * .72]; };
+      for (let i = 0; i < 5; i++) { const q = ((t * .08 + i * .12) % 1); const [x, y] = path(q); c.fillStyle = i % 2 ? '#ff5a6e' : '#c084fc'; c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2); c.fill(); }
+      [[w * .3, h * .58], [w * .62, h * .48]].forEach(([x, y], i) => {
+        c.fillStyle = '#9aa6cf'; c.fillRect(x - 9, y - 9, 18, 18); c.fillStyle = i ? '#39d5ff' : '#ffcc33'; c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 1; c.beginPath(); c.arc(x, y, 46, 0, Math.PI * 2); c.stroke();
+      });
+    },
+    kubvarld(c, w, h, t) {
+      // himmel som skiftar mellan dag och skymning
+      const k = (Math.sin(t * .25) + 1) / 2;
+      const g = c.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, `rgb(${60 + k * 60},${110 + k * 70},${190 + k * 40})`); g.addColorStop(1, `rgb(${200 + k * 30},${170 + k * 50},${150 + k * 70})`);
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+      c.fillStyle = 'rgba(255,240,200,.9)'; c.fillRect(w * .78, h * .12 + (1 - k) * 30, 26, 26);
+      c.fillStyle = 'rgba(255,255,255,.85)';
+      for (let i = 0; i < 4; i++) { const x = ((i * 170 + t * 12) % (w + 160)) - 80; c.fillRect(x, h * .1 + i * 9, 70, 12); c.fillRect(x + 14, h * .1 + i * 9 - 8, 40, 10); }
+      // isometriska block
+      const S = Math.max(12, Math.min(30, Math.min(w / 22, h / 16)));
+      const ox = w * .5, oy = h * .5 - S * 2.6;
+      const top = ['#6fcf5a', '#5fbf4c', '#e8d9a0', '#f4f7ff'], side = ['#7a5536', '#6a4a2e', '#cdb67a', '#b8c4d8'];
+      const hgt = (x, z) => Math.max(0, Math.round(2.2 + Math.sin(x * .7) * 1.3 + Math.cos(z * .6 + 1) * 1.4));
+      const cube = (x, y, z, ti, col) => {
+        const px = ox + (x - z) * S * .9, py = oy + (x + z) * S * .45 - y * S * .95;
+        c.fillStyle = col || top[ti]; c.beginPath(); c.moveTo(px, py); c.lineTo(px + S * .9, py + S * .45); c.lineTo(px, py + S * .9); c.lineTo(px - S * .9, py + S * .45); c.fill();
+        c.fillStyle = col ? 'rgba(0,0,0,.25)' : side[ti]; c.beginPath(); c.moveTo(px - S * .9, py + S * .45); c.lineTo(px, py + S * .9); c.lineTo(px, py + S * 1.85); c.lineTo(px - S * .9, py + S * 1.4); c.fill();
+        c.fillStyle = col ? 'rgba(0,0,0,.4)' : 'rgba(0,0,0,.22)'; c.beginPath(); c.moveTo(px + S * .9, py + S * .45); c.lineTo(px, py + S * .9); c.lineTo(px, py + S * 1.85); c.lineTo(px + S * .9, py + S * 1.4); c.fill();
+        if (col) { c.fillStyle = 'rgba(0,0,0,.18)'; c.beginPath(); c.moveTo(px - S * .9, py + S * .45); c.lineTo(px, py + S * .9); c.lineTo(px, py + S * 1.85); c.lineTo(px - S * .9, py + S * 1.4); c.fill(); }
+      };
+      const N = 6;
+      for (let d = -2 * N; d <= 2 * N; d++) for (let x = -N; x <= N; x++) {
+        const z = d - x; if (z < -N || z > N) continue;
+        const y = hgt(x, z), ti = y >= 4 ? 3 : y <= 1 ? 2 : (x + z) % 5 === 0 ? 1 : 0;
+        if (y <= 0) { cube(x, 0, z, 0, 'rgba(70,140,220,.85)'); continue; }
+        for (let yy = 1; yy < y; yy++) cube(x, yy, z, y - yy > 2 ? 3 : 0, y - yy > 1 ? '#7d7f86' : '#7a5536');
+        cube(x, y, z, ti);
+        if (ti === 0 && (x * 3 + z * 7) % 11 === 0) { cube(x, y + 1, z, 0, '#6b4a2b'); cube(x, y + 2, z, 0, '#6b4a2b'); cube(x, y + 3, z, 0, '#2f7d3a'); }
+      }
+      // block som placeras
+      const ph = (t * .8) % 1;
+      if (ph < .7) cube(1, hgt(1, 2) + 1 + Math.max(0, (.35 - ph)) * 4, 2, 0, '#c9a46a');
+    },
+    fjallracet(c, w, h, t) {
+      const sky = c.createLinearGradient(0, 0, 0, h * .5); sky.addColorStop(0, '#2b3f7a'); sky.addColorStop(1, '#f0a070');
+      c.fillStyle = sky; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#3b4c6e'; c.beginPath(); c.moveTo(0, h * .5);
+      for (let x = 0; x <= w; x += 20) c.lineTo(x, h * .5 - 30 - Math.abs(Math.sin(x * .013 + 1)) * 50 - Math.sin(x * .05) * 8);
+      c.lineTo(w, h * .5); c.fill();
+      c.fillStyle = '#eef3ff'; c.beginPath(); c.moveTo(0, h * .5);
+      for (let x = 0; x <= w; x += 20) c.lineTo(x, h * .5 - 25 - Math.abs(Math.sin(x * .013 + 1)) * 50 - Math.sin(x * .05) * 8 + 22);
+      c.lineTo(w, h * .5); c.fill();
+      c.fillStyle = '#2d5a36'; c.fillRect(0, h * .5, w, h);
+      // väg i perspektiv med kurva
+      const hor = h * .5, curve = Math.sin(t * .7) * w * .18;
+      for (let i = 0; i < 40; i++) {
+        const z0 = i / 40, z1 = (i + 1) / 40;
+        const y0 = hor + (h - hor) * z0 * z0, y1 = hor + (h - hor) * z1 * z1;
+        const cx0 = w / 2 + curve * (1 - z0) * (1 - z0), cx1 = w / 2 + curve * (1 - z1) * (1 - z1);
+        const hw0 = 4 + z0 * z0 * w * .42, hw1 = 4 + z1 * z1 * w * .42;
+        const stripe = Math.floor(z0 * z0 * 30 + t * 14) % 2;
+        c.fillStyle = stripe ? '#d33' : '#eee';
+        c.beginPath(); c.moveTo(cx0 - hw0 * 1.1, y0); c.lineTo(cx0 + hw0 * 1.1, y0); c.lineTo(cx1 + hw1 * 1.1, y1); c.lineTo(cx1 - hw1 * 1.1, y1); c.fill();
+        c.fillStyle = stripe ? '#4a4d55' : '#52555e';
+        c.beginPath(); c.moveTo(cx0 - hw0, y0); c.lineTo(cx0 + hw0, y0); c.lineTo(cx1 + hw1, y1); c.lineTo(cx1 - hw1, y1); c.fill();
+        if (stripe) { c.fillStyle = '#f4f4f4'; c.fillRect(cx0 - hw0 * .02, y0, Math.max(1, hw0 * .04), y1 - y0); }
+      }
+      // granar längs vägen
+      for (let i = 0; i < 6; i++) {
+        const z = ((i / 6 + t * .5) % 1), zz = z * z, y = hor + (h - hor) * zz, cx = w / 2 + curve * (1 - z) * (1 - z), hw = 4 + zz * w * .42;
+        [-1, 1].forEach(sd => { const x = cx + sd * hw * 1.6, s2 = 6 + zz * 60; c.fillStyle = '#1f4a2a'; c.beginPath(); c.moveTo(x, y - s2 * 1.8); c.lineTo(x - s2 * .5, y); c.lineTo(x + s2 * .5, y); c.fill(); });
+      }
+      // bil bakifrån
+      const bx = w / 2 + Math.sin(t * .7 + .4) * -w * .06, by = h * .86;
+      c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(bx, by + 14, 46, 8, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ff5a3c'; c.beginPath(); c.roundRect(bx - 40, by - 16, 80, 28, 8); c.fill();
+      c.fillStyle = '#c8402a'; c.beginPath(); c.roundRect(bx - 26, by - 32, 52, 20, 7); c.fill();
+      c.fillStyle = '#9fd0ff'; c.beginPath(); c.roundRect(bx - 21, by - 28, 42, 12, 4); c.fill();
+      c.fillStyle = '#ff2020'; c.shadowColor = '#ff2020'; c.shadowBlur = 10; c.fillRect(bx - 36, by - 8, 14, 6); c.fillRect(bx + 22, by - 8, 14, 6); c.shadowBlur = 0;
+      c.fillStyle = '#111'; c.fillRect(bx - 42, by + 4, 14, 12); c.fillRect(bx + 28, by + 4, 14, 12);
+      if (Math.sin(t * 3) > .3) { c.fillStyle = 'rgba(120,200,255,.8)'; c.beginPath(); c.moveTo(bx - 8, by + 10); c.lineTo(bx, by + 26 + Math.random() * 8); c.lineTo(bx + 8, by + 10); c.fill(); }
+    },
+    rymdjakt(c, w, h, t) {
+      dots.forEach(d => { c.fillStyle = `rgba(220,235,255,${.25 + d.z * .7})`; c.fillRect(d.x * w, d.y * h, 1 + d.z, 1 + d.z); });
+      const ng = c.createRadialGradient(w * .25, h * .3, 5, w * .25, h * .3, w * .45); ng.addColorStop(0, 'rgba(160,80,255,.35)'); ng.addColorStop(1, 'rgba(160,80,255,0)'); c.fillStyle = ng; c.fillRect(0, 0, w, h);
+      // planet
+      const px = w * .82, py = h * .95, pr = h * .7;
+      const pg = c.createRadialGradient(px - pr * .3, py - pr * .4, pr * .1, px, py, pr); pg.addColorStop(0, '#5fb3ff'); pg.addColorStop(.7, '#1d4f9a'); pg.addColorStop(1, '#0a1a3a');
+      c.fillStyle = pg; c.beginPath(); c.arc(px, py, pr, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(120,200,255,.5)'; c.lineWidth = 3; c.beginPath(); c.arc(px, py, pr + 2, Math.PI * 1.05, Math.PI * 1.7); c.stroke();
+      // fiendeskepp + laser
+      const ex = w * .7 + Math.cos(t * 1.3) * 30, ey = h * .35 + Math.sin(t * 1.7) * 18;
+      c.fillStyle = '#ff5a6e'; c.beginPath(); c.moveTo(ex, ey - 8); c.lineTo(ex + 14, ey + 6); c.lineTo(ex, ey + 2); c.lineTo(ex - 14, ey + 6); c.fill();
+      const sx = w * .32 + Math.sin(t) * 12, sy = h * .62 + Math.cos(t * 1.4) * 8, roll = Math.sin(t * 1.1) * .35;
+      const ph = (t * 1.6) % 1;
+      if (ph < .45) { c.strokeStyle = '#7ff9ff'; c.shadowColor = '#39d5ff'; c.shadowBlur = 12; c.lineWidth = 3; c.beginPath(); const q = ph / .45; c.moveTo(sx + (ex - sx) * q, sy + (ey - sy) * q); c.lineTo(sx + (ex - sx) * Math.min(1, q + .15), sy + (ey - sy) * Math.min(1, q + .15)); c.stroke(); c.shadowBlur = 0; }
+      if (ph > .4 && ph < .6) { c.fillStyle = 'rgba(255,200,80,.8)'; c.beginPath(); c.arc(ex, ey, 6 + (ph - .4) * 60, 0, Math.PI * 2); c.fill(); }
+      // eget skepp bakifrån
+      c.save(); c.translate(sx, sy); c.rotate(roll);
+      c.fillStyle = '#c9d4ea'; c.beginPath(); c.moveTo(0, -22); c.lineTo(10, 6); c.lineTo(46, 14); c.lineTo(46, 20); c.lineTo(8, 18); c.lineTo(0, 24); c.lineTo(-8, 18); c.lineTo(-46, 20); c.lineTo(-46, 14); c.lineTo(-10, 6); c.closePath(); c.fill();
+      c.fillStyle = '#39d5ff'; c.shadowColor = '#39d5ff'; c.shadowBlur = 16; c.beginPath(); c.arc(-7, 20, 4 + Math.random(), 0, Math.PI * 2); c.arc(7, 20, 4 + Math.random(), 0, Math.PI * 2); c.fill(); c.shadowBlur = 0;
+      c.fillStyle = '#ffcc33'; c.fillRect(-2, -10, 4, 10);
+      c.restore();
+    },
+    'ravens-aventyr'(c, w, h, t) {
+      const sky = c.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#7cc6ff'); sky.addColorStop(1, '#d9f1ff'); c.fillStyle = sky; c.fillRect(0, 0, w, h);
+      c.fillStyle = 'rgba(255,255,255,.9)';
+      [[.15, .18], [.6, .1], [.85, .25]].forEach(([x, y], i) => { const cx = ((x * w + t * 8 * (i + 1)) % (w + 80)) - 40; c.beginPath(); c.arc(cx, y * h, 14, 0, 7); c.arc(cx + 16, y * h - 6, 18, 0, 7); c.arc(cx + 34, y * h, 13, 0, 7); c.fill(); });
+      // svävande öar
+      const island = (x, y, r, col) => {
+        c.fillStyle = '#8a5a35'; c.beginPath(); c.moveTo(x - r, y); c.lineTo(x + r, y); c.lineTo(x + r * .2, y + r * .9); c.lineTo(x - r * .3, y + r * .7); c.fill();
+        c.fillStyle = col; c.beginPath(); c.ellipse(x, y, r, r * .28, 0, 0, Math.PI * 2); c.fill();
+        c.fillStyle = 'rgba(255,255,255,.18)'; c.beginPath(); c.ellipse(x - r * .2, y - r * .08, r * .6, r * .1, 0, 0, Math.PI * 2); c.fill();
+      };
+      const bob = Math.sin(t * 1.2) * 4;
+      island(w * .2, h * .78, w * .16, '#5cc15a'); island(w * .55, h * .58 + bob, w * .12, '#62c96a'); island(w * .85, h * .42 - bob, w * .1, '#6fd47a');
+      // norrskenssten på sista ön
+      const gx = w * .85, gy = h * .42 - bob - 26 + Math.sin(t * 3) * 4;
+      c.save(); c.translate(gx, gy); c.rotate(t);
+      c.fillStyle = '#7dffcf'; c.shadowColor = '#7dffcf'; c.shadowBlur = 20;
+      c.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, rr = i % 2 ? 6 : 13; c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } c.fill(); c.restore(); c.shadowBlur = 0;
+      // räv som hoppar mellan öarna i en båge
+      const ph = (t * .45) % 1, a0 = [w * .2, h * .78], a1 = [w * .55, h * .58 + bob];
+      const fx = a0[0] + (a1[0] - a0[0]) * ph, fy = a0[1] + (a1[1] - a0[1]) * ph - Math.sin(ph * Math.PI) * h * .3 - 12;
+      c.fillStyle = 'rgba(0,0,0,.2)'; c.beginPath(); c.ellipse(fx, a0[1] + (a1[1] - a0[1]) * ph, 10, 3, 0, 0, 7); c.fill();
+      c.save(); c.translate(fx, fy); c.rotate(Math.sin(ph * Math.PI * 2) * .3);
+      c.fillStyle = '#ff8c3a'; c.beginPath(); c.ellipse(0, 0, 14, 10, 0, 0, 7); c.fill();
+      c.beginPath(); c.arc(12, -8, 8, 0, 7); c.fill();
+      c.beginPath(); c.moveTo(8, -14); c.lineTo(10, -24); c.lineTo(14, -14); c.fill(); c.beginPath(); c.moveTo(14, -14); c.lineTo(18, -23); c.lineTo(19, -12); c.fill();
+      c.fillStyle = '#fff'; c.beginPath(); c.arc(18, -6, 3.5, 0, 7); c.fill();
+      c.fillStyle = '#ff8c3a'; c.beginPath(); c.ellipse(-16, -6, 10, 6, -.6 + Math.sin(t * 8) * .2, 0, 7); c.fill();
+      c.fillStyle = '#fff'; c.beginPath(); c.ellipse(-23, -11, 4, 3, -.6, 0, 7); c.fill();
+      c.fillStyle = '#222'; c.beginPath(); c.arc(15, -10, 1.6, 0, 7); c.fill();
+      c.restore();
+    },
+    nordheim(c, w, h, t) {
+      const sky = c.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#26324f'); sky.addColorStop(.6, '#6a5b7a'); sky.addColorStop(1, '#e0a37a'); c.fillStyle = sky; c.fillRect(0, 0, w, h);
+      // hav
+      c.fillStyle = '#1f3d5a'; c.fillRect(0, h * .55, w, h);
+      c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = 1.5;
+      for (let i = 0; i < 8; i++) { const y = h * .6 + i * 10; c.beginPath(); for (let x = 0; x <= w; x += 10) c.lineTo(x, y + Math.sin(x * .05 + t * 2 + i) * 2); c.stroke(); }
+      // ö
+      c.fillStyle = '#4f7a3a'; c.beginPath(); c.ellipse(w * .5, h * .72, w * .42, h * .2, 0, Math.PI, 0); c.fill();
+      c.fillStyle = '#d8c48a'; c.beginPath(); c.ellipse(w * .5, h * .72, w * .42, h * .04, 0, 0, Math.PI * 2); c.fill();
+      // långhus
+      const house = (x, y, s) => {
+        c.fillStyle = '#6b4428'; c.fillRect(x - s, y - s * .5, s * 2, s * .5);
+        c.fillStyle = '#3d2a1b'; c.beginPath(); c.moveTo(x - s * 1.15, y - s * .45); c.quadraticCurveTo(x, y - s * 1.35, x + s * 1.15, y - s * .45); c.fill();
+        c.fillStyle = 'rgba(255,190,90,.9)'; c.fillRect(x - s * .12, y - s * .35, s * .24, s * .35);
+        const sm = (t * 20 + x) % 40; c.fillStyle = `rgba(200,200,210,${.5 - sm / 80})`; c.beginPath(); c.arc(x + s * .5 + sm * .3, y - s * 1.1 - sm, 3 + sm * .2, 0, 7); c.fill();
+      };
+      house(w * .38, h * .66, 22); house(w * .58, h * .63, 18); house(w * .7, h * .69, 15);
+      // träd
+      for (let i = 0; i < 9; i++) { const x = w * (.12 + i * .03) + (i % 2) * 6, y = h * .66 + (i % 3) * 4; c.fillStyle = '#244a2a'; c.beginPath(); c.moveTo(x, y - 22); c.lineTo(x - 8, y); c.lineTo(x + 8, y); c.fill(); }
+      // vakttorn med fackla
+      c.fillStyle = '#5a3a22'; c.fillRect(w * .8, h * .5, 10, h * .16); c.fillRect(w * .8 - 4, h * .5 - 6, 18, 8);
+      c.fillStyle = `rgba(255,${150 + Math.random() * 60},40,.95)`; c.beginPath(); c.arc(w * .8 + 5, h * .5 - 10, 4 + Math.random() * 1.5, 0, 7); c.fill();
+      // långskepp som närmar sig
+      const sx = ((t * 18) % (w * .6)) - 60, sy = h * .82 + Math.sin(t * 2) * 2;
+      c.fillStyle = '#4a2e1a'; c.beginPath(); c.moveTo(sx - 30, sy); c.quadraticCurveTo(sx, sy + 12, sx + 30, sy); c.lineTo(sx + 36, sy - 8); c.lineTo(sx + 26, sy - 2); c.lineTo(sx - 26, sy - 2); c.lineTo(sx - 36, sy - 8); c.fill();
+      c.fillStyle = '#b8323a'; c.fillRect(sx - 2, sy - 30, 3, 28); c.fillRect(sx - 14, sy - 28, 26, 18);
+      c.fillStyle = 'rgba(255,255,255,.5)'; c.fillRect(sx - 14, sy - 22, 26, 3);
+    },
+    grottkrypet(c, w, h, t) {
+      const s = 24, cols = Math.ceil(w / s) + 1, rows = Math.ceil(h / s) + 1;
+      const px = Math.floor(cols * .38), py = Math.floor(rows * .5);
+      const isWall = (x, y) => y <= 0 || y >= rows - 2 || ((x * 7 + y * 13) % 17 === 0) || (x === px + 5 && y !== py) || (y === 1 && x % 3 === 0);
+      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+        const wall = isWall(x, y);
+        c.fillStyle = wall ? '#4a3a34' : '#2a2224';
+        c.fillRect(x * s, y * s, s - 1, s - 1);
+        if (wall) { c.fillStyle = 'rgba(255,255,255,.06)'; c.fillRect(x * s, y * s, s - 1, 4); }
+      }
+      const cx = px * s + s / 2, cy = py * s + s / 2, flick = 1 + Math.sin(t * 9) * .03 + Math.sin(t * 5.3) * .03;
+      const g = c.createRadialGradient(cx, cy, s * .5, cx, cy, s * 5.5 * flick);
+      g.addColorStop(0, 'rgba(255,190,110,.28)'); g.addColorStop(.55, 'rgba(10,4,6,.35)'); g.addColorStop(1, 'rgba(10,4,6,.92)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+      c.font = '20px serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText('🧙', cx, cy);
+      c.fillText('🧪', cx - 2 * s, cy + s);
+      c.fillText('💰', cx + s, cy - 2 * s);
+      c.globalAlpha = .75 + Math.sin(t * 4) * .25; c.fillText('💀', cx + 3 * s, cy + (Math.sin(t * 1.5) > 0 ? 0 : s)); c.globalAlpha = 1;
+    }
+  };
+
+  let visible = true;
+  document.addEventListener('visibilitychange', () => { visible = !document.hidden; if (visible) requestAnimationFrame(frame); });
+  function frame(ms) {
+    const t = reduce ? 1.2 : ms / 1000;
+    arts.forEach(a => { a.ctx.clearRect(0, 0, a.w, a.h); a.ctx.save(); draw[a.id](a.ctx, a.w, a.h, t); a.ctx.restore(); });
+    drawStars(t);
+    if (visible && !reduce) requestAnimationFrame(frame);
+  }
+
+  // ---------- Bakgrundsstjärnor ----------
+  const sc = document.getElementById('stars'), sctx = sc.getContext('2d');
+  const bgStars = Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + .2, p: Math.random() * 6 }));
+  function sizeStars() { const dpr = Math.min(2, window.devicePixelRatio || 1); sc.width = innerWidth * dpr; sc.height = innerHeight * dpr; sc.style.width = innerWidth + 'px'; sc.style.height = innerHeight + 'px'; sctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  function drawStars(t) {
+    sctx.clearRect(0, 0, innerWidth, innerHeight);
+    bgStars.forEach(s => { sctx.globalAlpha = .25 + .35 * (Math.sin(t * 1.3 + s.p) + 1) / 2; sctx.fillStyle = '#cfe0ff'; sctx.beginPath(); sctx.arc(s.x * innerWidth, s.y * innerHeight, s.r, 0, Math.PI * 2); sctx.fill(); });
+    sctx.globalAlpha = 1;
+  }
+
+  function resize() { sizeArts(); sizeStars(); if (reduce) frame(0); }
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

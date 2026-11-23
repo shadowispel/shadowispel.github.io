@@ -1,0 +1,114 @@
+/* Spelhallen 3D – gemensam stil för fullskärms-3D-spel. Bygger på ../shared.css-tokens. */
+html, body.game3d { height: 100%; overflow: hidden; }
+body.game3d { background: #000; overscroll-behavior: none; }
+
+.g3-root { position: fixed; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.g3-root > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; outline: none; }
+
+/* ---------- Skärmar (laddning, meny, paus) ---------- */
+.g3-screen {
+  position: absolute; inset: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background: radial-gradient(900px 500px at 50% 30%, rgba(40, 60, 120, .55), rgba(5, 8, 18, .88));
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  transition: opacity .25s ease;
+  overflow-y: auto;
+}
+.g3-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+.g3-screen.clear { background: rgba(5, 8, 18, .55); }
+
+.g3-panel {
+  width: min(560px, 100%);
+  background: linear-gradient(180deg, rgba(31, 43, 80, .92), rgba(18, 26, 51, .94));
+  border: 1px solid var(--line); border-radius: 20px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6);
+  padding: 26px 26px 22px; text-align: center;
+  max-height: calc(100% - 8px); overflow-y: auto;
+}
+.g3-panel.wide { width: min(860px, 100%); }
+.g3-title {
+  font-size: clamp(2.2rem, 7vw, 3.6rem); font-weight: 900; margin: 0 0 4px; line-height: 1.05; letter-spacing: .5px;
+  background: linear-gradient(90deg, var(--g3-c1, #ffd85c), var(--g3-c2, #39d5ff));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.g3-sub { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+.g3-h2 { font-size: 1.6rem; font-weight: 900; margin: 0 0 14px; }
+.g3-btns { display: flex; flex-direction: column; gap: 10px; align-items: stretch; max-width: 340px; margin: 0 auto; }
+.g3-btns .btn { width: 100%; font-size: 1.05rem; }
+.g3-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.g3-back {
+  position: absolute; top: 14px; left: 14px; z-index: 31;
+  color: var(--muted); text-decoration: none; font-weight: 500; padding: 8px 12px; border-radius: 10px;
+  background: rgba(10, 15, 30, .6); border: 1px solid var(--line);
+}
+.g3-back:hover { color: var(--text); }
+
+/* Laddning */
+.g3-loadbar { width: min(360px, 80vw); height: 10px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; margin: 18px auto 8px; border: 1px solid var(--line); }
+.g3-loadbar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--g3-c1, #ffd85c), var(--g3-c2, #39d5ff)); transition: width .2s ease; }
+.g3-loadtext { color: var(--muted); font-size: .9rem; min-height: 1.2em; }
+
+/* ---------- Inställningar ---------- */
+.g3-settings { text-align: left; display: grid; gap: 12px; margin: 8px 0 18px; }
+.g3-set { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; }
+.g3-set label { font-weight: 500; }
+.g3-set .val { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; display: inline-block; }
+.g3-set .ctl { display: flex; align-items: center; gap: 10px; }
+.g3-set input[type=range] { width: min(220px, 42vw); accent-color: var(--accent); }
+.g3-set select {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: inherit;
+}
+.g3-set input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); }
+.g3-tabs { display: flex; gap: 6px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+.g3-tabs button { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; font-weight: 700; }
+.g3-tabs button.on { background: var(--panel-2); color: var(--text); border-color: var(--accent-2); }
+.g3-keys { text-align: left; display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; align-items: center; margin: 0 auto 16px; max-width: 460px; color: var(--muted); }
+.g3-keys > span:nth-child(odd) { text-align: right; white-space: nowrap; }
+
+/* ---------- HUD ---------- */
+.g3-hud { position: absolute; inset: 0; z-index: 10; pointer-events: none; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+.g3-hud .chip { pointer-events: none; }
+.g3-crosshair {
+  position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); z-index: 11; pointer-events: none;
+}
+.g3-crosshair::before, .g3-crosshair::after { content: ''; position: absolute; background: rgba(255,255,255,.9); box-shadow: 0 0 3px rgba(0,0,0,.8); }
+.g3-crosshair::before { left: 10px; top: 2px; width: 2px; height: 18px; }
+.g3-crosshair::after { top: 10px; left: 2px; height: 2px; width: 18px; }
+.g3-fps { position: absolute; right: 10px; bottom: 10px; z-index: 12; font: 600 12px ui-monospace, Menlo, monospace; color: #9f9; background: rgba(0,0,0,.5); padding: 3px 7px; border-radius: 6px; pointer-events: none; }
+.g3-fps.hidden { display: none; }
+
+/* Toast-meddelanden */
+.g3-toasts { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); z-index: 25; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.g3-toast {
+  background: rgba(10, 15, 30, .82); border: 1px solid var(--line); color: var(--text);
+  padding: 10px 18px; border-radius: 12px; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  animation: g3-in .25s ease both; max-width: 86vw; text-align: center;
+}
+.g3-toast.big { font-size: clamp(1.4rem, 4vw, 2.2rem); font-weight: 900; padding: 14px 26px; }
+.g3-toast.out { animation: g3-out .35s ease both; }
+@keyframes g3-in { from { opacity: 0; transform: translateY(-10px) scale(.96); } }
+@keyframes g3-out { to { opacity: 0; transform: translateY(-10px); } }
+
+/* Klicka-för-att-fånga-musen */
+.g3-lockhint { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); z-index: 20; background: rgba(10,15,30,.8); border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; font-weight: 700; pointer-events: none; }
+.g3-lockhint.hidden { display: none; }
+
+/* ---------- Pekkontroller ---------- */
+.g3-touch { position: absolute; inset: 0; z-index: 15; pointer-events: none; display: none; }
+.g3-touch.on { display: block; }
+.g3-stick {
+  position: absolute; width: 130px; height: 130px; border-radius: 50%;
+  background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.18); pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.g3-stick > i { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.35); }
+.g3-tbtn {
+  position: absolute; width: 64px; height: 64px; border-radius: 50%; pointer-events: auto;
+  background: rgba(255,255,255,.1); border: 2px solid rgba(255,255,255,.28); color: #fff;
+  font: 800 13px var(--font); display: grid; place-items: center; text-align: center; line-height: 1.1;
+  touch-action: none;
+}
+.g3-tbtn.down { background: rgba(255, 204, 51, .35); border-color: var(--accent); }
+
+@media (max-width: 560px) { .g3-panel { padding: 20px 16px 16px; border-radius: 16px; } }

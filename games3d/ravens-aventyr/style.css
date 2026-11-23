@@ -1,0 +1,106 @@
+/* Rävens äventyr – spelspecifik stil */
+:root { --g3-c1: #ffb347; --g3-c2: #7dffc8; --fox: #f07a2a; --aur1: #7dffc8; --aur2: #b08aff; }
+.hidden { display: none !important; }
+.g3-screen.hidden { display: flex !important; }
+
+.ra-logo { font-size: 3.4rem; line-height: 1; margin-bottom: 4px; filter: drop-shadow(0 6px 14px rgba(255, 140, 40, .45)); }
+.ra-best { color: var(--muted); margin: 16px 0 0; font-size: .95rem; }
+.ra-best b { color: var(--accent); }
+
+/* ---------- HUD ---------- */
+.ra-tl { position: absolute; left: 16px; top: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.ra-tr { position: absolute; right: 70px; top: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.ra-hearts { display: flex; gap: 4px; }
+.ra-heart { width: 28px; height: 26px; position: relative; transition: transform .2s; }
+.ra-heart::before { content: ''; position: absolute; inset: 0; background: #ff3b5c; clip-path: path('M14 25 C 6 18, 0 13, 0 7.5 C 0 3, 3.5 0, 7.5 0 C 10.5 0, 12.6 1.8, 14 4 C 15.4 1.8, 17.5 0, 20.5 0 C 24.5 0, 28 3, 28 7.5 C 28 13, 22 18, 14 25 Z'); filter: drop-shadow(0 2px 2px rgba(0,0,0,.5)); }
+.ra-heart::after { content: ''; position: absolute; left: 6px; top: 4px; width: 6px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.7); }
+.ra-heart.empty::before { background: rgba(30, 20, 40, .55); box-shadow: inset 0 0 0 2px #fff; }
+.ra-heart.empty::after { display: none; }
+.ra-heart.pop { animation: ra-pop .35s ease; }
+@keyframes ra-pop { 50% { transform: scale(1.35); } }
+.ra-coins, .ra-stones, .ra-berries { display: flex; align-items: center; gap: 8px; font-size: 1.45rem; font-weight: 900; background: rgba(10, 15, 30, .42); padding: 3px 12px 3px 6px; border-radius: 999px; }
+.ra-coin { width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff4b0, #ffc72c 45%, #c98a00); box-shadow: inset 0 0 0 2px #a86d00; display: inline-block; }
+.ra-berry { width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff9aa8, #e0203a 55%, #8a0018); display: inline-block; }
+.ra-bug { width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 45% 45%, #fbffd8, #d8ff7a 40%, rgba(160,255,80,0) 72%); box-shadow: 0 0 12px #c8ff60; display: inline-block; }
+.ra-pearl { width: 20px; height: 20px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ffffff, #e8e4f4 45%, #a8a0c8); box-shadow: 0 0 8px rgba(255,255,255,.7); display: inline-block; }
+.ra-berries span { opacity: 1; }
+.ra-gem { width: 22px; height: 28px; display: inline-block; background: linear-gradient(160deg, #b9fff0, #7dffc8 30%, #8a7dff 70%, #c9a8ff); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); filter: drop-shadow(0 0 6px rgba(125,255,200,.8)); }
+.ra-coins.bump, .ra-stones.bump { animation: ra-pop .25s ease; }
+.ra-time { font-size: 1rem; color: #e4ecff; background: rgba(10, 15, 30, .42); padding: 3px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.ra-banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: clamp(1.8rem, 5vw, 3.2rem); font-weight: 900; opacity: 0; transition: opacity .6s; text-align: center; white-space: nowrap;
+  background: linear-gradient(90deg, var(--g3-c1), var(--g3-c2)); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); text-shadow: none; }
+.ra-banner small { display: block; font-size: .45em; color: #fff; -webkit-text-fill-color: #fff; opacity: .9; }
+.ra-banner.on { opacity: 1; }
+.ra-boss { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); text-align: center; width: min(420px, 70vw); }
+.ra-boss span { font-size: 1.05rem; }
+.ra-bossbar { height: 14px; border-radius: 99px; background: rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.7); overflow: hidden; margin-top: 4px; }
+.ra-bossbar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #ff5a6e, #ffb347); transition: width .4s; }
+.ra-race { position: absolute; left: 50%; top: 60px; transform: translateX(-50%); font-size: 1.4rem; background: rgba(10,15,30,.5); padding: 4px 14px; border-radius: 12px; font-variant-numeric: tabular-nums; }
+.ra-big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); font-size: clamp(3rem, 12vw, 7rem); font-weight: 900; color: #fff; animation: ra-big .5s ease; }
+@keyframes ra-big { from { transform: translate(-50%, -50%) scale(1.8); opacity: 0; } }
+.ra-prompt { position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%); background: rgba(10, 15, 30, .78); border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; font-size: 1.05rem; }
+.ra-prompt kbd { background: #fff; color: #111; border-radius: 6px; padding: 2px 8px; font: 800 .95rem var(--font); box-shadow: 0 2px 0 #999; }
+.ra-tip { position: absolute; left: 50%; top: 12%; transform: translateX(-50%); background: rgba(10, 15, 30, .8); border: 1px solid var(--aur1); border-radius: 14px; padding: 10px 16px; max-width: min(560px, 88vw); text-align: center; font-weight: 500; line-height: 1.4; text-shadow: none; }
+.ra-tip b { display: block; color: var(--aur1); font-size: .8rem; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
+.ra-pausebtn { position: absolute; right: 12px; top: 12px; z-index: 16; width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--line); background: rgba(10,15,30,.55); color: #fff; font-size: 20px; cursor: pointer; }
+.ra-fade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 28; transition: opacity .35s ease; }
+.ra-fade.on { opacity: 1; }
+
+/* ---------- Dialog ---------- */
+.ra-dialog { position: absolute; left: 50%; bottom: 4%; transform: translateX(-50%); width: min(720px, 94vw); z-index: 26; background: linear-gradient(180deg, rgba(255, 249, 235, .97), rgba(246, 232, 205, .97)); color: #3a2a1a; border-radius: 18px; padding: 22px 24px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.5); border: 3px solid #c8955a; cursor: pointer; }
+.ra-dname { position: absolute; top: -16px; left: 22px; background: var(--fox); color: #fff; font-weight: 900; padding: 4px 14px; border-radius: 10px; box-shadow: 0 3px 0 #a84a10; }
+.ra-dtext { font-size: 1.15rem; line-height: 1.5; min-height: 3em; font-weight: 500; }
+.ra-dnext { position: absolute; right: 18px; bottom: 8px; color: var(--fox); animation: ra-bob 1s infinite; }
+@keyframes ra-bob { 50% { transform: translateY(4px); } }
+.ra-dchoices { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.ra-dchoices button { background: #fff; border: 2px solid #c8955a; border-radius: 10px; padding: 8px 16px; font: 700 1rem var(--font); color: #3a2a1a; cursor: pointer; }
+.ra-dchoices button.sel, .ra-dchoices button:hover { background: var(--fox); color: #fff; border-color: #a84a10; }
+
+/* ---------- Sten tagen ---------- */
+.ra-stoneget { position: absolute; inset: 0; z-index: 24; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 9vh; pointer-events: auto; text-align: center; background: radial-gradient(60% 40% at 50% 20%, rgba(40,20,80,.45), transparent); }
+.ra-sg-title { font-size: clamp(2.4rem, 8vw, 5rem); font-weight: 900; background: linear-gradient(90deg, #7dffc8, #b08aff, #7ad8ff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 10px rgba(0,0,0,.6)); animation: ra-big .6s ease; }
+.ra-sg-name { font-size: clamp(1.2rem, 3.5vw, 1.8rem); font-weight: 700; margin-top: 6px; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+.ra-sg-count { margin-top: 6px; color: #e8e0ff; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+.ra-sg-hint { position: absolute; bottom: 8vh; color: #fff; opacity: .8; animation: ra-bob 1.2s infinite; text-shadow: 0 2px 6px rgba(0,0,0,.8); }
+
+/* ---------- Menyer ---------- */
+.ra-slots { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.ra-slot { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; text-align: left; display: flex; flex-direction: column; gap: 6px; }
+.ra-slot h3 { margin: 0; font-size: 1.15rem; }
+.ra-slot .meta { color: var(--muted); font-size: .92rem; line-height: 1.45; }
+.ra-slot .meta b { color: var(--text); }
+.ra-slot .row { display: flex; gap: 6px; margin-top: auto; }
+.ra-slot .row .btn { flex: 1; }
+.ra-helptab { margin-bottom: 12px; }
+.ra-pausegrid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; text-align: left; }
+@media (max-width: 720px) { .ra-pausegrid { grid-template-columns: 1fr; } .ra-pauseside { order: -1; } .ra-tr { right: 66px; } }
+.ra-map { display: grid; gap: 8px; align-content: start; }
+.ra-world { display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+.ra-world:hover:not(:disabled), .ra-world:focus-visible { border-color: var(--aur1); }
+.ra-world:disabled { opacity: .5; cursor: default; }
+.ra-world.cur { border-color: var(--g3-c1); box-shadow: 0 0 0 2px rgba(255,179,71,.35) inset; }
+.ra-world .ic { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 1.4rem; }
+.ra-world .nm { font-weight: 700; }
+.ra-world .sub { color: var(--muted); font-size: .82rem; }
+.ra-world .gems { display: flex; gap: 2px; }
+.ra-world .gems i { width: 11px; height: 15px; display: inline-block; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); background: rgba(255,255,255,.18); }
+.ra-world .gems i.on { background: linear-gradient(160deg, #b9fff0, #7dffc8 30%, #8a7dff); }
+.ra-stats { color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+.ra-stats b { color: var(--text); }
+.ra-missions { display: grid; gap: 4px; margin-bottom: 14px; font-size: .92rem; }
+.ra-missions div { display: flex; gap: 8px; align-items: center; color: var(--muted); }
+.ra-missions div.on { color: var(--text); }
+.ra-missions i { width: 10px; height: 14px; flex: none; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); background: rgba(255,255,255,.2); }
+.ra-missions .on i { background: linear-gradient(160deg, #b9fff0, #7dffc8 30%, #8a7dff); }
+.ra-pauseside .g3-btns { max-width: none; }
+
+.ra-mh { font-size: .95rem; margin: 16px 0 8px; color: var(--muted); font-weight: 700; }
+.g3-btns a.btn { text-decoration: none; }
+.ra-slot .row .btn.small { flex: 0 0 auto; padding-left: 10px; padding-right: 10px; }
+.g3-root.inmenu .g3-hud, .g3-root.inmenu .ra-pausebtn, .g3-root.inmenu .g3-touch { display: none; }
+
+/* ---------- Huvudmeny över byn ---------- */
+#menu { background: radial-gradient(70% 60% at 50% 45%, rgba(8, 10, 30, .12), rgba(8, 6, 24, .5)); backdrop-filter: none; -webkit-backdrop-filter: none; }
+#menu .g3-panel { background: linear-gradient(180deg, rgba(31, 33, 80, .78), rgba(18, 16, 51, .84)); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+@media (min-width: 980px) and (min-height: 560px) { #menu { justify-content: flex-start; padding-left: 7vw; } #menu .g3-panel { width: min(480px, 100%); } }
+#slots, #help, #settings { background: radial-gradient(900px 500px at 50% 30%, rgba(40, 40, 110, .45), rgba(8, 6, 24, .78)); }

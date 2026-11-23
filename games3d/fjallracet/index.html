@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fjällracet – Spelhallen</title>
+<link rel="stylesheet" href="../../shared.css">
+<link rel="stylesheet" href="../../engine/kit.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.js", "three/addons/": "../../vendor/three/addons/" } }</script>
+</head>
+<body class="game3d">
+<div class="g3-root" id="root">
+  <div class="g3-hud" id="hud"></div>
+  <div class="g3-touch" id="touch"></div>
+  <button class="fj-pausebtn hidden" id="pauseBtn" aria-label="Paus">⏸</button>
+
+  <!-- Laddning -->
+  <div class="g3-screen" id="loading">
+    <div class="g3-panel">
+      <h1 class="g3-title">Fjällracet</h1>
+      <div class="g3-loadbar"><i></i></div>
+      <div class="g3-loadtext">Värmer upp motorn …</div>
+    </div>
+  </div>
+
+  <!-- Huvudmeny -->
+  <div class="g3-screen hidden fj-menu" id="menu">
+    <a class="g3-back" href="../../index.html">← Spelhallen</a>
+    <div class="g3-panel fj-side">
+      <h1 class="g3-title">Fjällracet</h1>
+      <p class="g3-sub">Arkadracing genom Sverige – från midsommarskog till norrskensis. Drifta, ladda nitro och kör om allt som rör sig.</p>
+      <div class="g3-btns">
+        <button class="btn primary" id="mCup"><span class="ic" aria-hidden="true">🏆</span>Mästerskap</button>
+        <button class="btn" id="mQuick"><span class="ic" aria-hidden="true">🏁</span>Snabblopp</button>
+        <button class="btn" id="mTime"><span class="ic" aria-hidden="true">⏱️</span>Tidskörning</button>
+        <button class="btn" id="mFree"><span class="ic" aria-hidden="true">🚗</span>Fri körning</button>
+        <div class="g3-row">
+          <button class="btn small" id="mSettings"><span class="ic" aria-hidden="true">⚙️</span>Inställningar</button>
+          <button class="btn small" id="mHelp"><span class="ic" aria-hidden="true">❓</span>Hur man spelar</button>
+        </div>
+        <a class="btn small" href="../../index.html">Tillbaka till Spelhallen</a>
+      </div>
+      <p class="fj-best" id="mBest"></p>
+    </div>
+  </div>
+
+  <!-- Val av lopp -->
+  <div class="g3-screen hidden fj-menu" id="setup">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2" id="setupTitle">Snabblopp</h2>
+      <div id="setupBody"></div>
+      <div class="g3-row fj-setupbtns">
+        <button class="btn" data-back id="setupBack">← Tillbaka</button>
+        <button class="btn primary" id="setupGo">Starta</button>
+      </div>
+    </div>
+    <div class="fj-carinfo" id="carInfo"></div>
+  </div>
+
+  <!-- Inställningar -->
+  <div class="g3-screen hidden" id="settingsScr">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Inställningar</h2>
+      <div id="settingsBody"></div>
+      <p class="fj-note" id="settingsNote">Siktavstånd och skuggor för terrängen gäller från nästa lopp.</p>
+      <button class="btn primary" data-back id="settingsBack">Klar</button>
+    </div>
+  </div>
+
+  <!-- Hjälp -->
+  <div class="g3-screen hidden" id="help">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Hur man spelar</h2>
+      <div class="fj-helpgrid">
+        <div>
+          <h3>Tangentbord</h3>
+          <div class="g3-keys">
+            <span><kbd>W</kbd> / <kbd>↑</kbd></span><span>Gasa</span>
+            <span><kbd>S</kbd> / <kbd>↓</kbd></span><span>Bromsa / backa</span>
+            <span><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></span><span>Styra</span>
+            <span><kbd>Shift</kbd></span><span>Handbroms – drifta i kurvorna</span>
+            <span><kbd>Mellanslag</kbd></span><span>Nitro (boost)</span>
+            <span><kbd>C</kbd></span><span>Byt kamera (bakom, nära, huv, bakåtblick)</span>
+            <span><kbd>V</kbd></span><span>Titta bakåt (håll)</span>
+            <span><kbd>R</kbd></span><span>Återställ bilen på banan</span>
+            <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>Paus</span>
+            <span><kbd>M</kbd></span><span>Ljud av/på</span>
+          </div>
+        </div>
+        <div>
+          <h3>Handkontroll</h3>
+          <div class="g3-keys">
+            <span>RT / LT</span><span>Gas / broms</span>
+            <span>Vänster spak</span><span>Styra</span>
+            <span>A</span><span>Nitro</span>
+            <span>B</span><span>Handbroms</span>
+            <span>Y / X</span><span>Kamera / titta bakåt</span>
+            <span>Back / Start</span><span>Återställ / paus</span>
+          </div>
+          <h3>Pekskärm</h3>
+          <p class="fj-p">Styr med pilknapparna (eller spaken – välj i inställningarna) till vänster. Gas, broms, drift och nitro sitter till höger. Automatisk gas kan slås på i inställningarna.</p>
+        </div>
+      </div>
+      <h3>Tips</h3>
+      <ul class="fj-tips">
+        <li><b>Drifta</b> genom att hålla handbromsen när du svänger in i kurvan. Styr in i kurvan för skarpare drift, motstyr för att räta upp. Drift fyller <b>nitromätaren</b>.</li>
+        <li>Långa hopp och att ligga i <b>suget</b> bakom en motståndare fyller också på nitron.</li>
+        <li>Brytpunkten: bromsa <i>före</i> kurvan, gasa ut ur den. Pilskyltarna varnar för skarpa kurvor.</li>
+        <li><b>Perfekt start:</b> tryck gas precis innan KÖR! – för tidigt ger ingen extra skjuts.</li>
+        <li>Kör du fel håll eller åker av banan återställs bilen automatiskt.</li>
+        <li>Varje bil har egna egenskaper. Lodjuret greppar bäst på is och snö, Älgen tål knuffar, Vråken driftar villigast.</li>
+        <li><b>Poäng</b> per lopp: placering + tidsbonus + driftpoäng, gånger svårighetsgrad. Mästerskapen ger mest.</li>
+      </ul>
+      <button class="btn primary" data-back id="helpBack">Tillbaka</button>
+    </div>
+  </div>
+
+  <!-- Paus -->
+  <div class="g3-screen hidden" id="pause">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Paus</h2>
+      <p class="g3-sub" id="pauseInfo"></p>
+      <div class="g3-btns">
+        <button class="btn primary" id="pResume">Fortsätt</button>
+        <button class="btn" id="pRestart">Starta om loppet</button>
+        <button class="btn" id="pSettings">Inställningar</button>
+        <button class="btn" id="pMenu">Huvudmeny</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resultat -->
+  <div class="g3-screen hidden fj-menu" id="results">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2" id="resTitle">Resultat</h2>
+      <div id="resBody"></div>
+      <div class="g3-row" id="resBtns"></div>
+    </div>
+  </div>
+</div>
+<script src="../../shared.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>

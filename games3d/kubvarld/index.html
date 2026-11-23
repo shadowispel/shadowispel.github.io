@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kubvärld – Spelhallen</title>
+<link rel="stylesheet" href="../../shared.css">
+<link rel="stylesheet" href="../../engine/kit.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.js", "three/addons/": "../../vendor/three/addons/" } }</script>
+</head>
+<body class="game3d">
+<div class="g3-root" id="root">
+  <div class="g3-hud kv-hud hidden" id="hud">
+    <div class="kv-cross" id="cross"></div>
+    <pre class="kv-debug hidden" id="debug"></pre>
+    <div class="kv-day" id="dayChip"><span class="kv-dayic" id="dayIc"></span><span class="kv-daytx" id="dayTx">Dag 1</span><span class="kv-daybar"><i id="dayMark"></i></span></div>
+    <div class="kv-quest hidden" id="tut"></div>
+    <div class="kv-log" id="log"></div>
+    <div class="kv-bottom">
+      <div class="kv-held" id="heldName"></div>
+      <div class="kv-meters" id="stats">
+        <div class="kv-meter air" id="mAir"><span class="kv-mic"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="2.6"/><circle cx="9.5" cy="10.5" r="2" fill="currentColor"/><circle cx="18" cy="4.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></span><span class="kv-mbar"><s></s><b></b></span></div>
+        <div class="kv-meter hp" id="mHp"><span class="kv-mic"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.3-9.4C1.4 8.2 3.4 4.5 7 4.5c2.1 0 3.6 1.2 5 3 1.4-1.8 2.9-3 5-3 3.6 0 5.6 3.7 4.3 7.1C19.5 16.4 12 21 12 21z" fill="currentColor"/></svg></span><span class="kv-mbar"><s></s><b></b></span><em class="kv-mval" id="hpVal"></em></div>
+        <div class="kv-meter food" id="mFood"><span class="kv-mic"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.6" fill="currentColor"/><circle cx="16" cy="15.5" r="4.2" fill="currentColor"/><circle cx="12.2" cy="9.6" r="4" fill="currentColor"/><path d="M12 6c0-2 1.2-3.4 3.4-3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span><span class="kv-mbar"><s></s><b></b></span><em class="kv-mval" id="foodVal"></em></div>
+      </div>
+      <div class="kv-hotbar" id="hotbar"></div>
+    </div>
+    <div class="kv-vig" id="vignette"></div>
+    <div class="kv-water" id="water"></div>
+    <div class="kv-sleep" id="sleep"></div>
+  </div>
+  <div class="g3-touch" id="touch"></div>
+  <div class="g3-lockhint hidden" id="lockhint">Klicka för att fortsätta spela</div>
+
+  <div class="kv-inv hidden" id="inv"><div class="kv-invpanel" id="invpanel"></div></div>
+  <div class="kv-cursor" id="cursorItem"></div>
+  <div class="kv-tooltip" id="tooltip"></div>
+
+  <!-- Huvudmeny -->
+  <div class="g3-screen kv-menu" id="menu">
+    <a class="g3-back" href="../../index.html">← Spelhallen</a>
+    <div class="g3-panel">
+      <img class="kv-logo" id="logo" alt="">
+      <h1 class="g3-title">Kubvärld</h1>
+      <p class="g3-sub">Bygg, utforska och överlev i en oändlig nordisk kubvärld – från ljusa björkskogar och myrar till snöklädda fjäll och djupa kristallgrottor. Akta dig för skuggvargar när natten faller!</p>
+      <div class="g3-btns">
+        <button class="btn primary" id="btnContinue" hidden>Fortsätt</button>
+        <button class="btn" id="btnWorlds">Världar</button>
+        <button class="btn" id="btnSettings">Inställningar</button>
+        <button class="btn" id="btnHelp">Hur man spelar</button>
+        <a class="btn" href="../../index.html">Till Spelhallen</a>
+      </div>
+      <p class="kv-best" id="bestLine"></p>
+    </div>
+  </div>
+
+  <!-- Världslista -->
+  <div class="g3-screen hidden kv-menu" id="worlds">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Dina världar</h2>
+      <div class="kv-worldlist" id="worldList"></div>
+      <div class="g3-row">
+        <button class="btn primary" id="btnNew">Ny värld</button>
+        <button class="btn" id="btnWorldsBack">Tillbaka</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ny värld -->
+  <div class="g3-screen hidden kv-menu" id="newworld">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Skapa ny värld</h2>
+      <div class="kv-form">
+        <label for="nwName">Namn</label><input id="nwName" maxlength="32" autocomplete="off">
+        <label for="nwSeed">Frö (valfritt)</label><input id="nwSeed" maxlength="32" placeholder="Slumpas om tomt" autocomplete="off">
+        <label>Spelläge</label>
+        <div class="kv-seg" id="nwMode"><button data-v="survival" class="on">Överlevnad</button><button data-v="creative">Kreativt</button></div>
+        <label>Svårighet</label>
+        <div class="kv-seg" id="nwDiff"><button data-v="0">Fridfull</button><button data-v="1" class="on">Normal</button><button data-v="2">Svår</button></div>
+        <p class="kv-note" id="nwNote">Överlevnad: samla resurser, tillverka verktyg och klara nätterna. Poäng till rekordlistan: överlevda dagar × 100 + brutna/placerade block ÷ 10.</p>
+      </div>
+      <div class="g3-row">
+        <button class="btn primary" id="btnCreate">Skapa värld</button>
+        <button class="btn" id="btnNewBack">Avbryt</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inställningar -->
+  <div class="g3-screen hidden" id="settingsScr">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Inställningar</h2>
+      <div id="setBox"></div>
+      <button class="btn primary" id="btnSetBack">Klar</button>
+    </div>
+  </div>
+
+  <!-- Hjälp -->
+  <div class="g3-screen hidden" id="help">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Hur man spelar</h2>
+      <div class="g3-tabs" id="helpTabs"><button class="on" data-t="keys">Tangentbord & mus</button><button data-t="touch">Pek & handkontroll</button><button data-t="tips">Tips</button></div>
+      <div id="helpKeys" class="g3-keys">
+        <span><kbd>W A S D</kbd></span><span>Gå</span>
+        <span><kbd>Mellanslag</kbd></span><span>Hoppa / simma uppåt (dubbeltryck = flyg i kreativt)</span>
+        <span><kbd>Ctrl</kbd> / dubbeltryck <kbd>W</kbd></span><span>Spring</span>
+        <span><kbd>Skift</kbd></span><span>Smyg – du faller inte av kanter (sjunk när du flyger)</span>
+        <span>Vänster musknapp</span><span>Håll för att bryta block, klicka för att slå</span>
+        <span>Höger musknapp</span><span>Placera block, använd (dörr, kista, ugn, säng), ät mat (håll)</span>
+        <span>Mittenklick</span><span>Välj blocket du tittar på</span>
+        <span><kbd>1</kbd>–<kbd>9</kbd> / mushjul</span><span>Välj i snabbfältet</span>
+        <span><kbd>E</kbd></span><span>Inventarie och tillverkning</span>
+        <span><kbd>R</kbd></span><span>Receptbok</span>
+        <span><kbd>J</kbd></span><span>Äventyrsdagbok – dina mål</span>
+        <span><kbd>Q</kbd></span><span>Släpp föremål (Ctrl+Q = hela stapeln)</span>
+        <span><kbd>V</kbd> / <kbd>F5</kbd></span><span>Byt kameravy (första/tredje person)</span>
+        <span><kbd>F3</kbd> / <kbd>F1</kbd></span><span>Koordinater & felsökning / dölj gränssnittet</span>
+        <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>Paus</span>
+        <span><kbd>M</kbd></span><span>Ljud av/på</span>
+      </div>
+      <div id="helpTouch" class="g3-keys" hidden>
+        <span>Vänster halva</span><span>Dra för att gå</span>
+        <span>Höger halva</span><span>Dra för att titta</span>
+        <span>Knappar</span><span>Hoppa, Bryt (håll), Använd, Smyg, Väska (inventarie), Vy, Paus</span>
+        <span>Snabbfältet</span><span>Tryck på en ruta för att välja</span>
+        <span>Dagboken</span><span>Tryck på målkortet uppe till vänster</span>
+        <span>Handkontroll</span><span>Vänster spak: gå · Höger spak: titta · A: hoppa · RT: bryt · LT: använd · LB/RB: snabbfält · Y: inventarie · B: smyg · L3: spring · Select: vy · Start: paus</span>
+      </div>
+      <div id="helpTips" class="kv-tips" hidden>
+        <p><b>Äventyrsdagboken</b> (J) visar ditt nästa mål – från första vedträt till kristallverktyg – och vildmarkens utmaningar.</p>
+        <p><b>Första dagen:</b> hugg ved, gör plankor och en arbetsbänk. Gör en trähacka och bryt sten. Bygg ett skydd innan solen går ned – klockan uppe till höger visar hur länge det är kvar.</p>
+        <p><b>Natten:</b> skuggvargar jagar i flock, lyktgastar kastar irrbloss och mossbjässar slår hårt. Facklor håller dem borta – de kan bara dyka upp i mörker. Skuggvargar och lyktgastar tål inte solljus.</p>
+        <p><b>Mat:</b> plocka lingon, hjortron och kantareller, eller jaga tovfår, harar och älgar. Stek köttet i en ugn för mer mättnad.</p>
+        <p><b>Grottor:</b> järn finns djupare ned, guld och glänsande kristaller allra djupast. Järn kräver stenhacka, guld och kristall kräver järnhacka.</p>
+        <p><b>Sängen</b> (ull + plankor) sätter din återuppståndelsepunkt och låter dig sova bort natten. Vit ull får du från tovfår eller av fyra ängsull från myren.</p>
+        <p><b>Poäng:</b> överlevda dagar × 100 + brutna och placerade block ÷ 10 rapporteras när du dör eller sparar och avslutar (endast överlevnad).</p>
+      </div>
+      <button class="btn primary" id="btnHelpBack">Tillbaka</button>
+    </div>
+  </div>
+
+  <!-- Paus -->
+  <div class="g3-screen hidden" id="pause">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Paus</h2>
+      <p class="g3-sub" id="pauseInfo"></p>
+      <div class="g3-btns">
+        <button class="btn primary" id="btnResume">Fortsätt</button>
+        <button class="btn" id="btnPauseSet">Inställningar</button>
+        <button class="btn" id="btnPauseHelp">Hur man spelar</button>
+        <button class="btn" id="btnQuit">Spara och avsluta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Död -->
+  <div class="g3-screen hidden kv-deadscr" id="dead">
+    <div class="g3-panel">
+      <h2 class="g3-h2 kv-red">Du dog!</h2>
+      <p class="g3-sub" id="deadReason"></p>
+      <p class="kv-score" id="deadScore"></p>
+      <div class="g3-btns">
+        <button class="btn primary" id="btnRespawn">Återuppstå</button>
+        <button class="btn" id="btnDeadQuit">Spara och avsluta</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Laddning -->
+  <div class="g3-screen hidden" id="loading">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="loadTitle">Laddar världen</h2>
+      <div class="g3-loadbar"><i></i></div>
+      <div class="g3-loadtext">Förbereder…</div>
+    </div>
+  </div>
+
+  <!-- Bekräfta -->
+  <div class="g3-screen hidden" id="confirm">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="confirmTitle">Är du säker?</h2>
+      <p class="g3-sub" id="confirmText"></p>
+      <div class="g3-row"><button class="btn primary" id="confirmYes">Ja</button><button class="btn" id="confirmNo">Avbryt</button></div>
+    </div>
+  </div>
+</div>
+<script src="../../shared.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rävens äventyr – Spelhallen</title>
+<link rel="stylesheet" href="../../shared.css">
+<link rel="stylesheet" href="../../engine/kit.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">{ "imports": { "three": "../../vendor/three/three.module.js", "three/addons/": "../../vendor/three/addons/" } }</script>
+</head>
+<body class="game3d">
+<div class="g3-root" id="root">
+  <!-- HUD -->
+  <div class="g3-hud" id="hud">
+    <div class="ra-tl">
+      <div class="ra-hearts" id="hearts"></div>
+      <div class="ra-coins"><i class="ra-coin"></i><b id="coins">0</b></div>
+      <div class="ra-berries hidden" id="berries"><i class="ra-berry" id="berryIcon"></i><b id="berryN">0</b>/<span id="berryTot">8</span></div>
+    </div>
+    <div class="ra-tr">
+      <div class="ra-stones"><i class="ra-gem"></i><b id="stones">0</b></div>
+      <div class="ra-time" id="time">0:00</div>
+    </div>
+    <div class="ra-banner" id="banner"></div>
+    <div class="ra-boss hidden" id="boss"><span id="bossName">Boss</span><div class="ra-bossbar"><i id="bossBar"></i></div></div>
+    <div class="ra-race hidden" id="race"></div>
+    <div class="ra-big hidden" id="big"></div>
+    <div class="ra-prompt hidden" id="prompt"><kbd id="promptKey">E</kbd><span id="promptText">Prata</span></div>
+    <div class="ra-tip hidden" id="tip"><b>Tips</b><span id="tipText"></span></div>
+  </div>
+  <button class="ra-pausebtn" id="pauseBtn" aria-label="Paus">⏸</button>
+  <div class="g3-touch" id="touch"></div>
+  <div class="ra-fade" id="fade"></div>
+
+  <!-- Dialog -->
+  <div class="ra-dialog hidden" id="dialog" role="dialog" aria-live="polite">
+    <div class="ra-dname" id="dname">Namn</div>
+    <div class="ra-dtext" id="dtext"></div>
+    <div class="ra-dchoices" id="dchoices"></div>
+    <div class="ra-dnext" id="dnext">▼</div>
+  </div>
+
+  <!-- Sten tagen -->
+  <div class="ra-stoneget hidden" id="stoneget">
+    <div class="ra-sg-title">Norrskenssten!</div>
+    <div class="ra-sg-name" id="sgName"></div>
+    <div class="ra-sg-count" id="sgCount"></div>
+    <div class="ra-sg-hint" id="sgHint">Tryck för att fortsätta</div>
+  </div>
+
+  <!-- Laddning -->
+  <div class="g3-screen hidden" id="loading">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="loadTitle">Laddar …</h2>
+      <div class="g3-loadbar"><i></i></div>
+      <div class="g3-loadtext">Förbereder världen</div>
+    </div>
+  </div>
+
+  <!-- Huvudmeny -->
+  <div class="g3-screen" id="menu">
+    <a class="g3-back" href="../../index.html">← Spelhallen</a>
+    <div class="g3-panel">
+      <div class="ra-logo" aria-hidden="true">🦊</div>
+      <h1 class="g3-title">Rävens äventyr</h1>
+      <p class="g3-sub">Korpen Kaos har stulit Norrskensstenarna! Hjälp räven Ylva att springa, hoppa och klättra genom fem världar och få tillbaka norrskenet till Rävlyan.</p>
+      <div class="g3-btns">
+        <button class="btn primary" id="btnPlay">Spela</button>
+        <button class="btn" id="btnHelp">Hur man spelar</button>
+        <button class="btn" id="btnSet">Inställningar</button>
+        <a class="btn" href="../../index.html">Tillbaka till Spelhallen</a>
+      </div>
+      <p class="ra-best">Rekord: <b id="best">0</b> poäng</p>
+    </div>
+  </div>
+
+  <!-- Sparplatser -->
+  <div class="g3-screen hidden" id="slots">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Välj sparplats</h2>
+      <div class="ra-slots" id="slotList"></div>
+      <div class="g3-btns"><button class="btn" data-back="menu">Tillbaka</button></div>
+    </div>
+  </div>
+
+  <!-- Hjälp -->
+  <div class="g3-screen hidden" id="help">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Hur man spelar</h2>
+      <div class="g3-tabs" id="helpTabs"><button class="on" data-tab="hKeys">Tangentbord</button><button data-tab="hPad">Handkontroll</button><button data-tab="hTouch">Pekskärm</button><button data-tab="hMoves">Rörelser</button></div>
+      <div class="ra-helptab" id="hKeys"><div class="g3-keys">
+        <span>W A S D / pilar</span><span>Spring (håll lätt för att gå med spak)</span>
+        <span>Mellanslag</span><span>Hoppa – håll för högre hopp, tryck igen i luften för dubbelhopp</span>
+        <span>E / vänsterklick</span><span>Svanssnurr (attack) · prata · läs skyltar</span>
+        <span>C (eller Ctrl)</span><span>Huka · i luften: markstöt</span>
+        <span>Shift / K</span><span>Rusning (även en gång i luften)</span>
+        <span>Höger musknapp + dra</span><span>Vrid kameran (eller pekarlås i inställningarna)</span>
+        <span>Mushjul</span><span>Zooma</span>
+        <span>Q / R</span><span>Centrera kameran bakom Ylva</span>
+        <span>Esc / P</span><span>Paus och världskarta</span>
+        <span>M</span><span>Ljud av/på</span>
+      </div></div>
+      <div class="ra-helptab hidden" id="hPad"><div class="g3-keys">
+        <span>Vänster spak</span><span>Spring</span>
+        <span>Höger spak</span><span>Kamera · R3 centrerar</span>
+        <span>A</span><span>Hoppa / dubbelhopp</span>
+        <span>X eller Y</span><span>Svanssnurr · prata</span>
+        <span>B / LB / LT</span><span>Huka · markstöt i luften</span>
+        <span>RB / RT</span><span>Rusning</span>
+        <span>Start</span><span>Paus</span>
+      </div></div>
+      <div class="ra-helptab hidden" id="hTouch"><div class="g3-keys">
+        <span>Vänster halva</span><span>Spak för att springa</span>
+        <span>Höger halva</span><span>Dra för att vrida kameran</span>
+        <span>Knappar</span><span>Hoppa, Snurr, Huka, Rusa, Kamera</span>
+        <span>⏸</span><span>Paus</span>
+      </div></div>
+      <div class="ra-helptab hidden" id="hMoves"><div class="g3-keys">
+        <span>Långhopp</span><span>Spring, håll Huka och hoppa</span>
+        <span>Bakåtvolt</span><span>Stå still, håll Huka och hoppa</span>
+        <span>Glid</span><span>Huka medan du springer – slår ut fiender</span>
+        <span>Markstöt</span><span>Huka i luften – trycker ned knappar och krossar lådor</span>
+        <span>Superhopp</span><span>Hoppa direkt efter en markstöt</span>
+        <span>Klättra</span><span>Hoppa mot gröna rankväggar eller isväggar och styr upp/ned · hoppa för väggsprång</span>
+        <span>Simma</span><span>Hoppa ur vattnet med Hoppa · dyk med Huka</span>
+        <span>Fiender</span><span>Hoppa på dem eller snurra. Taggsvin och krabbor: snurra först!</span>
+        <span>Stenar</span><span>Varje värld har sex Norrskensstenar och 100 mynt. Fler stenar öppnar fler portaler.</span>
+      </div></div>
+      <div class="g3-btns"><button class="btn primary" data-back="__prev">Tillbaka</button></div>
+    </div>
+  </div>
+
+  <!-- Inställningar -->
+  <div class="g3-screen hidden" id="settings">
+    <div class="g3-panel">
+      <h2 class="g3-h2">Inställningar</h2>
+      <div id="setBox"></div>
+      <div class="g3-btns"><button class="btn primary" data-back="__prev">Klar</button></div>
+    </div>
+  </div>
+
+  <!-- Paus -->
+  <div class="g3-screen clear hidden" id="pause">
+    <div class="g3-panel wide">
+      <h2 class="g3-h2">Paus</h2>
+      <div class="ra-pausegrid">
+        <div class="ra-map" id="map"></div>
+        <div class="ra-pauseside">
+          <div class="ra-stats" id="pauseStats"></div>
+          <div class="g3-btns">
+            <button class="btn primary" id="btnResume">Fortsätt</button>
+            <button class="btn" id="btnLeave">Lämna världen</button>
+            <button class="btn" id="btnPHelp">Hur man spelar</button>
+            <button class="btn" id="btnPSet">Inställningar</button>
+            <button class="btn" id="btnQuit">Spara och avsluta</button>
+          </div>
+          <h3 class="ra-mh">Stenar i den här världen</h3>
+          <div class="ra-missions" id="missions"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bekräfta -->
+  <div class="g3-screen hidden" id="confirm">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="confirmTitle">Är du säker?</h2>
+      <p class="g3-sub" id="confirmText"></p>
+      <div class="g3-btns"><button class="btn primary" id="confirmYes">Ja</button><button class="btn" id="confirmNo">Nej</button></div>
+    </div>
+  </div>
+
+  <!-- Slut -->
+  <div class="g3-screen hidden" id="ending">
+    <div class="g3-panel">
+      <h1 class="g3-title">Norrskenet är tillbaka!</h1>
+      <p class="g3-sub" id="endText"></p>
+      <div class="ra-stats" id="endStats"></div>
+      <div class="g3-btns"><button class="btn primary" id="btnEndCont">Fortsätt utforska</button><button class="btn" id="btnEndMenu">Huvudmeny</button></div>
+    </div>
+  </div>
+</div>
+<script src="../../shared.js"></script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
