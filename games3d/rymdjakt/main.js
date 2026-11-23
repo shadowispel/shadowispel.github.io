@@ -20,6 +20,7 @@ import { MISSIONS, SURVIVAL } from './missions.js';
 import { Sfx, MUSIC } from './sfx.js';
 import { UI } from './ui.js';
 import { portrait } from './portraits.js';
+import { Online } from './online.js';
 
 window.Spelhallen && Spelhallen.init(GAME_ID);
 const $ = id => document.getElementById(id);
@@ -45,6 +46,8 @@ class Game {
     this.pc = new PlayerControl(this);
     this.rig = new CameraRig(this.camera);
     this.ui = new UI(this);
+    this.online = new Online(this);
+    this.overlay = false; // onlineläge: pausmenyn visas men simuleringen fortsätter
     this.state = 'loading';
     this.mission = null; this.targetSub = null;
     this.touchOn = false;
@@ -148,7 +151,8 @@ class Game {
     addEventListener('keydown', e => {
       if (e.code !== 'Escape') return;
       if (this.state === 'paused' && this.ui.cur === 'pause' && performance.now() - this.pausedAt > 400) { e.preventDefault(); this.resume(); }
-      else if ((this.state === 'menu' || this.state === 'paused') && this.ui.cur && !['menu', 'pause', 'debrief', 'loading'].includes(this.ui.cur)) { e.preventDefault(); this.sfx.play('click'); this.ui.back(); }
+      else if (this.state === 'flight' && this.overlay && this.ui.cur === 'pause' && performance.now() - this.pausedAt > 400) { e.preventDefault(); this.resume(); }
+      else if ((this.state === 'menu' || this.state === 'paused' || (this.state === 'flight' && this.overlay)) && this.ui.cur && !['menu', 'pause', 'debrief', 'loading', 'online'].includes(this.ui.cur)) { e.preventDefault(); this.sfx.play('click'); this.ui.back(); }
     });
   }
   /** Pekarlåsning utan ohanterade promise-fel (kräver användargest). */
@@ -163,7 +167,7 @@ class Game {
     } catch (e) { try { c.requestPointerLock(); } catch (e2) { /* ignorera */ } }
   }
   _lockHint() {
-    const show = this.state === 'flight' && !this.input.locked && !this.touchOn;
+    const show = this.state === 'flight' && !this.input.locked && !this.touchOn && !this.overlay;
     $('lockhint').classList.toggle('hidden', !show);
   }
 
@@ -245,6 +249,16 @@ class Game {
   }
   pause() {
     if (this.state !== 'flight') return;
+    if (this.online.active) {
+      // online: visa menyn men låt världen fortsätta (andra spelare väntar inte)
+      if (this.overlay) return;
+      this.overlay = true; this.pausedAt = performance.now();
+      $('pauseSub').textContent = 'Spelet fortsätter medan menyn är öppen.';
+      this.ui.show('pause', false);
+      this._ignoreUnlock = true; this.input.exitLock(); this._ignoreUnlock = false;
+      this._lockHint();
+      return;
+    }
     this.state = 'paused';
     this.pausedAt = performance.now();
     this.sfx.setEngine(0, false, false);
@@ -254,6 +268,7 @@ class Game {
     this._lockHint();
   }
   resume() {
+    if (this.overlay) { this.overlay = false; this.ui.hideAll(); this.tryLock(); this._lockHint(); this.input.clear(); this.input.endFrame(); return; }
     if (this.state !== 'paused') return;
     this.ui.hideAll();
     this.state = 'flight';
@@ -261,12 +276,12 @@ class Game {
     this._lockHint();
     this.input.clear(); this.input.endFrame();
   }
-  quitToMenu() { this.toMenuWorld(); this.ui.show('menu', false); }
+  quitToMenu() { if (this.online.active) { this.online.quit(); return; } this.toMenuWorld(); this.ui.show('menu', false); }
   campaignTotal() { return Object.values(this.save.missions).reduce((a, m) => a + (m.best || 0), 0); }
 
   /** Anropas av MissionRun när uppdraget är över. */
   missionEnded(m) {
-    if (this.mission !== m) return;
+    if (this.mission !== m || this.online.active) return;
     const r = m.computeScore();
     const s = this.save, opts = this.cur.opts;
     let credits = 0, firstClear = false, newBest = false, campaignDone = false;
@@ -315,10 +330,12 @@ class Game {
     this.audio.update();
     const I = this.input, W = this.world;
     if (this.state === 'flight') {
-      if (I.pressed('Escape', 'KeyP', 'Pad9')) { this.pause(); I.endFrame(); return; }
-      this.pc.update(dt);
+      if (I.pressed('Escape', 'KeyP', 'Pad9')) { if (this.overlay) this.resume(); else this.pause(); I.endFrame(); return; }
+      if (this.overlay) { const c = W.player && W.player.ctrl; if (c) { c.fire = false; c.pitch = c.yaw = c.roll = 0; c.boost = false; c.brake = false; } }
+      else this.pc.update(dt);
       W.update(dt);
       if (this.mission) this.mission.update(dt);
+      if (this.online.active) this.online.update(dt);
       const P = W.player;
       this.fx.update(dt, this.camera, P ? P.vel : null);
       this.hud.update(dt);

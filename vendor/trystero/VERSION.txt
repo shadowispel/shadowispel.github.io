@@ -1,0 +1,5 @@
+Trystero 0.22.0 (MIT, https://github.com/dmotz/trystero) – källmoduler från npm-paketet trystero-0.22.0.tgz (src/).
+Endast nostr- och torrent-strategierna (inga externa beroenden) är medtagna.
+@noble/secp256k1 3.1.0 (MIT) – index.js från npm, omdöpt till noble-secp256k1.js.
+Enda ändringen: i nostr.js pekar importen av '@noble/secp256k1' på './noble-secp256k1.js'.
+Ändring 2: room.js loggar inte längre det ofarliga RTCError "User-Initiated Abort" när en peer stänger.

@@ -148,3 +148,9 @@ body.touch .fj-tip { bottom: 212px; font-size: .92rem; padding: 8px 12px; }
   .fj-pos small { display: none; }
   .fj-drift { bottom: auto; top: 25%; }
 }
+
+/* Online-lobby */
+#online .fj-sec { margin: 0 0 8px; }
+#online .fj-seg[data-k=track] button, #online .fj-seg[data-k=car] button { flex: 1 1 30%; min-width: 0; white-space: normal; font-size: .9rem; padding: 7px 6px; }
+#online .fj-seg button:disabled { opacity: .45; cursor: not-allowed; }
+#online .fj-swatches { margin-top: 8px; }

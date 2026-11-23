@@ -7,7 +7,7 @@ import { MISSIONS } from './missions.js';
 import { portraitURL } from './portraits.js';
 
 const $ = id => document.getElementById(id);
-const SCREENS = ['menu', 'campaign', 'briefing', 'survival', 'hangar', 'debrief', 'pause', 'settingsScr', 'help', 'records', 'loading'];
+const SCREENS = ['menu', 'campaign', 'briefing', 'survival', 'hangar', 'debrief', 'pause', 'settingsScr', 'help', 'records', 'loading', 'online'];
 const kr = n => Number(Math.floor(n)).toLocaleString('sv-SE') + ' kr';
 const pts = n => Number(Math.floor(n)).toLocaleString('sv-SE');
 const GRADE_ORDER = ['S', 'A', 'B', 'C', 'D'];
@@ -29,6 +29,7 @@ export class UI {
       this.openBriefing(Math.min(MISSIONS.length - 1, s.unlocked));
     });
     click('btnSurvival', () => this.openSurvival());
+    click('btnOnline', () => this.g.online.openLobby());
     click('btnHangar', () => this.openHangar());
     click('btnSettings', () => this.openSettings());
     click('btnHelp', () => this.show('help'));

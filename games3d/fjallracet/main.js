@@ -17,6 +17,8 @@ import { Particles, Skids, SpeedFx } from './fx.js';
 import { Hud, fmtTime } from './hud.js';
 import * as TX from './textures.js';
 import { engineVoice } from './sound.js';
+import { makeNet, makeLobby, buildStart, packCar, pushSample, stepRemote, INTERP } from './online.js';
+import { backgroundTicker, emoteBar } from '../../engine/net.js';
 
 const ID = 'fjallracet';
 Spelhallen.init(ID);
@@ -217,7 +219,7 @@ function buildTouch() {
   btn('TReset', '↺', { left: '10px', top: '170px', width: '44px', height: '44px' });
 }
 settings.onChange(k => { if (k === 'touchControls' || k === 'touchSteer') buildTouch(); if (k === 'quality') setupComposer(); });
-$('pauseBtn').addEventListener('click', () => { if (race && !paused) pauseGame(true); });
+$('pauseBtn').addEventListener('click', () => { if (race && !uiPaused()) pauseGame(true); });
 
 /* ------------------------------------------------------------------ Ljud */
 const snd = { engine: null, engine2: null, screech: null, squeal: null, wind: null, rev: 0 };
@@ -237,7 +239,9 @@ function engineState(car, throttle) {
 }
 
 /* ------------------------------------------------------------------ Skärmar */
-const SCREENS = ['loading', 'menu', 'setup', 'settingsScr', 'help', 'pause', 'results'];
+const SCREENS = ['loading', 'menu', 'setup', 'settingsScr', 'help', 'pause', 'results', 'online'];
+const isRace = (m) => m === 'quick' || m === 'cup' || m === 'online';
+const isAiKey = (k) => /^ai\d$/.test(k || '');
 function screen(id) { SCREENS.forEach(s => s === id ? show(s) : hide(s)); }
 let backTo = 'menu';
 
@@ -256,6 +260,9 @@ function quickPlay() {
   openSetup('quick');
 }
 function toMenu() {
+  if (net && net.status !== 'idle') net.leave();
+  if (ol.emo) { ol.emo.destroy(); ol.emo = null; }
+  ol.results = null;
   if (race) endSession(true);
   disposeRace();
   showroom.showCar(); showroom.setCar(save.car, save.color);
@@ -343,6 +350,7 @@ $('mCup').addEventListener('click', () => { audio.play('select'); openSetup('cup
 $('mQuick').addEventListener('click', () => { audio.play('select'); openSetup('quick'); });
 $('mTime').addEventListener('click', () => { audio.play('select'); openSetup('time'); });
 $('mFree').addEventListener('click', () => { audio.play('select'); openSetup('free'); });
+$('mOnline').addEventListener('click', () => { audio.play('select'); openOnline(); });
 $('mHelp').addEventListener('click', () => { audio.play('click'); backTo = 'menu'; screen('help'); });
 $('mSettings').addEventListener('click', () => { audio.play('click'); openSettings('menu'); });
 $('helpBack').addEventListener('click', () => { audio.play('click'); screen(backTo); });
@@ -359,8 +367,20 @@ function openSettings(from) {
 $('settingsBack').addEventListener('click', () => { audio.play('click'); screen(backTo); if (backTo === 'menu') updateMenu(); });
 
 /* ---------- Paus ---------- */
+function uiPaused() { return race && race.online ? !!race.menu : paused; }
 function pauseGame(on) {
   if (!race) return;
+  if (race.online) {
+    // online: simuleringen fortsätter – bara ett överlägg (och ingen styrning)
+    race.menu = on; input.clear();
+    if (on) {
+      $('pauseInfo').textContent = trackName(race.cfg.track) + ' · Online – loppet fortsätter medan menyn är öppen';
+      $('pRestart').classList.add('hidden'); $('pMenu').textContent = 'Lämna loppet';
+      screen('pause');
+    } else { screen(null); if (document.activeElement) document.activeElement.blur(); }
+    return;
+  }
+  $('pRestart').classList.remove('hidden'); $('pMenu').textContent = 'Huvudmeny';
   paused = on;
   loop.setPaused(on);
   if (on) {
@@ -376,13 +396,13 @@ $('pSettings').addEventListener('click', () => { audio.play('click'); openSettin
 $('pMenu').addEventListener('click', () => { audio.play('click'); paused = false; loop.setPaused(false); toMenu(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
 window.addEventListener('blur', autoPause);
-function autoPause() { if (race && !paused && (race.state === 'countdown' || race.state === 'running' || race.state === 'finished')) pauseGame(true); }
+function autoPause() { if (race && !race.online && !paused && (race.state === 'countdown' || race.state === 'running' || race.state === 'finished')) pauseGame(true); }
 addEventListener('keydown', (e) => {
   if (e.code === 'Escape' || e.code === 'KeyP') {
     const vis = (id) => !$(id).classList.contains('hidden');
     if (vis('settingsScr')) { $('settingsBack').click(); return; }
     if (vis('help')) { $('helpBack').click(); return; }
-    if (race && !vis('results') && !vis('loading')) { pauseGame(!paused); if (!paused) audio.play('click'); }
+    if (race && !vis('results') && !vis('loading')) { pauseGame(!uiPaused()); if (!uiPaused()) audio.play('click'); }
     else if (vis('setup') && e.code === 'Escape') $('setupBack').click();
   }
 });
@@ -448,10 +468,15 @@ async function startRace(cfg) {
     speedFx: new SpeedFx(scene), finishOrder: [], msgCool: 0, draftT: 0
   };
   r.tp.i = -1;
+  r.online = !!cfg.online; r.byKey = {};
+  if (r.online) { r.menu = false; r.waitT = 0; r.sendT = 0; r.aiT = 0; r.rkT = 0; r.goT = 0; r.rank = null; r.firstHumanFin = null; r.lastFin = 0; }
   const diff = DIFFICULTY[cfg.diff] || DIFFICULTY.easy;
   const rng = makeRng(Date.now() & 0xfffff);
   let entries = [];
-  if (cfg.mode === 'cup') {
+  if (cfg.online) {
+    entries = cfg.grid.map((g, k) => ({ name: g.n, car: g.car, color: COLORS[g.col].hex, idx: k, key: g.id, player: g.id === net.selfId,
+      remote: g.id !== net.selfId && !(net.isHost && isAiKey(g.id)), skill: g.sk, aggr: g.ag }));
+  } else if (cfg.mode === 'cup') {
     const run = save.cupRun;
     // startordning: ledaren startar sist
     const order = run.drivers.map((d, k) => k).sort((a, b) => run.points[a] - run.points[b] || (a === 0 ? 1 : b === 0 ? -1 : a - b));
@@ -476,6 +501,7 @@ async function startRace(cfg) {
   entries.forEach((e, slot) => {
     const car = new Car(carSpec(e.car), e.color, { physical: !!e.player && settings.get('quality') !== 'low' });
     car.name = e.name; car.isPlayer = !!e.player; car.entryIdx = e.idx; car.colorHex = e.color;
+    car.key = e.key || null; car.remote = !!e.remote; car.isHuman = cfg.online ? !isAiKey(e.key) : !!e.player;
     // nattbanor: lite egenljus i lacken så att bilarna (och särskilt den egna) inte blir svarta siluetter
     if (th.night) car.model.paintMat.emissive.set(e.color).multiplyScalar(e.player ? 0.16 : 0.1);
     const gs = track.gridSlot(slot);
@@ -483,15 +509,19 @@ async function startRace(cfg) {
     Object.assign(car, { progress: gs.s, lastS: car.tp.s, lapsDone: 0, cpNext: 1, lapStart: 0, lapTimes: [], bestLap: Infinity, finished: false, finishTime: 0, wrong: 0, stuck: 0, raceActive: false, position: slot + 1 });
     scene.add(car.root);
     if (!car.isPlayer) {
-      const lbl = makeLabel(e.name); car.root.add(lbl); car.model.label = lbl;
-      const ai = new AIDriver(car, track, { skill: e.skill || 0.95, aggr: e.aggr || 0.5, pace: diff.pace, rng });
-      car.ai = ai; r.ais.push(ai); car.noDrift = true; car.powerMul = diff.power;
+      const lbl = makeLabel(car.isHuman ? '👤 ' + e.name : e.name); car.root.add(lbl); car.model.label = lbl;
+      if (car.remote) { car.net = { buf: [], last: 0 }; car.noDrift = true; }
+      else {
+        const ai = new AIDriver(car, track, { skill: e.skill || 0.95, aggr: e.aggr || 0.5, pace: diff.pace, rng });
+        car.ai = ai; r.ais.push(ai); car.noDrift = true; car.powerMul = diff.power;
+      }
     }
     if (night && !e.player) {
       if (!r.coneGeo) { const g = new THREE.ConeGeometry(3.2, 15, 16, 1, true); g.rotateX(-Math.PI / 2); g.translate(0, 0, 8); r.coneGeo = g; }
       const cone = new THREE.Mesh(r.coneGeo, buildConeMat()); cone.position.set(0, 0.7, 1.9); cone.rotation.x = 0.06; car.model.body.add(cone);
     }
     r.cars.push(car);
+    if (car.key) r.byKey[car.key] = car;
     if (car.isPlayer) { r.player = car; car.progressive = true; }
   });
   if (night) {
@@ -507,8 +537,8 @@ async function startRace(cfg) {
     try { const f = await kv.get('fjallracet:ghost:' + cfg.track + ':' + cfg.car); if (f && f.length > 14) r.ghost.frames = f; } catch (e) {}
     if (!r.ghost.frames) { try { const f = await kv.get('fjallracet:ghost:' + cfg.track); if (f && f.length > 14) r.ghost.frames = f; } catch (e) {} }
   }
-  if (!save.tutorial && cfg.mode !== 'free') r.tut = { step: 0, t: 0 };
-  hud.setTrack(track); hud.setMode(cfg.mode);
+  if (!save.tutorial && cfg.mode !== 'free' && !cfg.online) r.tut = { step: 0, t: 0 };
+  hud.setTrack(track); hud.setMode(cfg.online ? 'quick' : cfg.mode);
   hud.e.posOf.textContent = '/' + r.cars.length;
   hud.cache = {};
   ['tip', 'wrong', 'drift'].forEach(k => hud.e[k].classList.add('hidden')); hud.e.msg.innerHTML = ''; hud.center('');
@@ -533,6 +563,12 @@ async function startRace(cfg) {
   hud.center('');
   if (cfg.mode === 'free') hud.msg('Fri körning – utforska i lugn och ro', 2500, 'cyan');
   else hud.msg(trackName(cfg.track) + ' · ' + th.label, 2500, 'gold');
+  if (r.online) {
+    if (race !== r) return;
+    if (net.isHost) ol.loaded.add(net.selfId); else net.send('ld', 1);
+    hud.msg('Väntar på att alla ska bli klara …', 2500, 'cyan');
+    if (!ol.stopTick) ol.stopTick = backgroundTicker(bgStep, 30);
+  }
 }
 /**
  * Förkompilerar alla shaders i loppscenen (undviker hack första gången t.ex. nitroflammor syns) och
@@ -551,6 +587,7 @@ let coneMat = null;
 function buildConeMat() { if (!coneMat) coneMat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.035, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }); return coneMat; }
 
 function disposeRace() {
+  if (ol.stopTick) { ol.stopTick(); ol.stopTick = null; }
   if (!race) return;
   const r = race;
   stopLoops();
@@ -582,6 +619,7 @@ function resetCar(car, why) {
 }
 
 function readControls(c) {
+  if (race && race.menu) { c.throttle = 0; c.brake = 0; c.steer = 0; c.hand = false; c.nitro = false; return; }
   const gp = input._gp ? input._gp() : null;
   let thr = input.down('KeyW', 'ArrowUp', 'TGas') ? 1 : 0;
   let brk = input.down('KeyS', 'ArrowDown', 'TBrake') ? 1 : 0;
@@ -615,7 +653,8 @@ function raceUpdate(dt) {
   const r = race, tr = r.track, P = r.player;
   // ---------- nedräkning ----------
   if (r.state === 'countdown') {
-    const before = r.cd; r.cd -= dt; r.introT += dt;
+    const before = r.cd; r.introT += dt;
+    if (r.online) r.cd = onlineCountdown(r, dt); else r.cd -= dt;
     const cross = (x) => before > x && r.cd <= x;
     if (r.cfg.mode !== 'free') {
       if (cross(3)) { hud.center('3'); audio.play('countdown'); tr.setStartLights(2, false); }
@@ -628,12 +667,14 @@ function raceUpdate(dt) {
     snd.rev = damp(snd.rev, P.ctl.throttle, P.ctl.throttle > snd.rev ? 8 : 3, dt);
     if (r.cd <= 0) {
       r.state = 'running';
+      if (r.online) r.time = clamp((net.now() - ol.goAt) / 1000, 0, 30);
       hud.center('KÖR!', 'go'); audio.play('go'); tr.setStartLights(0, true);
       audio.noise({ dur: 2.2, vol: 0.1, freq: 1100, type: 'bandpass', delay: 0.15 });
       r.cars.forEach(c => { c.raceActive = true; c.lapStart = 0; });
       if (r.perfect != null && r.perfect <= 0.45 && P.ctl.throttle > 0.5) { P.freeBoost = 1.1; hud.msg('PERFEKT START!', 1600, 'gold'); audio.play('power'); }
       r.ais.forEach(ai => { if (Math.random() < 0.35 * ai.skill) ai.car.freeBoost = 0.5 + Math.random() * 0.5; });
     }
+    if (r.online) onlineSend(r, dt);
     updateAudio(dt); hudUpdate(dt);
     return;
   }
@@ -646,11 +687,12 @@ function raceUpdate(dt) {
   r.lookBack = input.down('KeyV', 'Pad2');
   for (const ai of r.ais) if (!ai.car.finished || true) ai.think(dt, r.cars, r.time);
   // ---------- fysik ----------
-  for (const c of r.cars) c.update(dt, tr);
+  for (const c of r.cars) { if (c.remote) stepRemote(c, r.time - INTERP, dt, tr); else c.update(dt, tr); }
   collideCars(r.cars, onCarHit);
   // ---------- loppslogik ----------
   const L = tr.L;
   for (const c of r.cars) {
+    if (c.remote) continue;
     let ds = c.tp.s - c.lastS;
     if (ds > L / 2) ds -= L; else if (ds < -L / 2) ds += L;
     c.progress += ds; c.lastS = c.tp.s;
@@ -680,10 +722,15 @@ function raceUpdate(dt) {
     c.events.length = 0;
   }
   // ---------- placeringar ----------
-  const sorted = r.cars.slice().sort((a, b) => (a.finished && b.finished) ? a.finishTime - b.finishTime : a.finished ? -1 : b.finished ? 1 : b.progress - a.progress);
+  let sorted = r.cars.slice().sort((a, b) => (a.finished && b.finished) ? a.finishTime - b.finishTime : a.finished ? -1 : b.finished ? 1 : b.progress - a.progress);
+  if (r.online && !net.isHost && r.rank) {
+    // placeringar från värden (bilar som saknas i listan sist)
+    const ranked = r.rank.map(k => r.byKey[k]).filter(Boolean);
+    sorted = ranked.concat(sorted.filter(c => !ranked.includes(c)));
+  }
   sorted.forEach((c, k) => c.position = k + 1);
   r.sorted = sorted;
-  if (r.cfg.mode === 'quick' || r.cfg.mode === 'cup') {
+  if (isRace(r.cfg.mode)) {
     if (P.position < r.lastPos && r.lastPos && r.state === 'running' && r.time > 3 && r.msgCool <= 0) { audio.play('pickup', { vol: 0.5 }); r.msgCool = 1.2; }
     r.lastPos = P.position;
   }
@@ -717,8 +764,10 @@ function raceUpdate(dt) {
     r.recT++;
     if (r.recT % 2 === 0) { const q = P.quat; r.rec.push(+P.pos.x.toFixed(2), +P.pos.y.toFixed(2), +P.pos.z.toFixed(2), +q.x.toFixed(4), +q.y.toFixed(4), +q.z.toFixed(4), +q.w.toFixed(4)); }
   }
+  // ---------- online ----------
+  if (r.online) { onlineSend(r, dt); if (net.isHost && onlineHostEnd(r, dt)) return; }
   // ---------- mål ----------
-  if (r.state === 'finished') {
+  if (r.state === 'finished' && !r.online) {
     r.finishT += dt;
     const allDone = r.cars.every(c => c.finished);
     if (r.finishT > 6.5 || (allDone && r.finishT > 3.5)) { endRace(); return; }
@@ -759,16 +808,16 @@ function onLap(c) {
     if (c.lapsDone >= laps) { finishCar(c); return; }
     if (c.lapsDone === laps - 1) { hud.msg('SISTA VARVET!', 2200, 'gold'); audio.play('power'); }
     else hud.msg('Varv ' + (c.lapsDone + 1) + '/' + laps + (isBest ? ' · Bästa ' + fmtTime(lt) : ''), 1800, 'cyan');
-  } else if ((r.cfg.mode === 'quick' || r.cfg.mode === 'cup') && c.lapsDone >= laps) finishCar(c);
+  } else if (isRace(r.cfg.mode) && c.lapsDone >= laps) finishCar(c);
 }
 function finishCar(c) {
   const r = race;
   c.finished = true; c.finishTime = r.time;
   r.finishOrder.push(c);
   if (c.isPlayer) {
-    const pos = r.finishOrder.length;
-    r.state = 'finished'; r.finishT = 0; r.slowmo = 1.6;
-    loop.timeScale = 0.35;
+    const pos = r.online ? r.cars.filter(o => o.finished && o.finishTime <= c.finishTime).length : r.finishOrder.length;
+    r.state = 'finished'; r.finishT = 0;
+    if (!r.online) { r.slowmo = 1.6; loop.timeScale = 0.35; }
     hud.center(pos === 1 ? 'SEGER!' : pos + ':a plats', 'fin stay');
     audio.play(pos === 1 ? 'win' : pos <= 3 ? 'levelup' : 'lose');
     audio.noise({ dur: 3, vol: 0.12, freq: 1000, type: 'bandpass' });
@@ -904,13 +953,13 @@ function hudUpdate(dt) {
   r.hudT -= dt; if (r.hudT > 0) return; r.hudT = 1 / 20;
   const mode = r.cfg.mode;
   hud.set('pos', hud.e.pos, String(P.position));
-  if (mode === 'quick' || mode === 'cup') hud.set('lap', hud.e.lap, Math.min(r.cfg.laps, P.lapsDone + 1) + '/' + r.cfg.laps);
+  if (isRace(mode)) hud.set('lap', hud.e.lap, Math.min(r.cfg.laps, P.lapsDone + 1) + '/' + r.cfg.laps);
   else hud.set('lap', hud.e.lap, String(P.lapsDone + 1));
   hud.set('total', hud.e.total, fmtTime(r.time));
   hud.set('lapT', hud.e.lapT, fmtTime(r.state === 'countdown' ? 0 : r.time - P.lapStart));
   const best = mode === 'time' || mode === 'free' ? Math.min(P.bestLap, save.best[r.cfg.track] || Infinity) : P.bestLap;
   hud.set('best', hud.e.best, isFinite(best) ? fmtTime(best) : '–:––.–');
-  if ((mode === 'quick' || mode === 'cup') && r.sorted) hud.standings(r.sorted.map(c => ({ name: c.isPlayer ? 'Du' : c.name.split(' ')[0], me: c.isPlayer, color: css(c.colorHex) })));
+  if (isRace(mode) && r.sorted) hud.standings(r.sorted.map(c => ({ name: c.isPlayer ? 'Du' : c.isHuman ? c.name : c.name.split(' ')[0], me: c.isPlayer, color: css(c.colorHex) })));
   hud.wrong(P.wrong > 0.8 && !P.finished);
   if (P.drift && P.driftCombo > 20) hud.drift('DRIFT ' + Math.round(P.driftCombo)); else hud.drift(r.draftT > 0 ? 'SUG · nitro laddas' : null);
   if (P.stuck > 2.5 && !P.finished) hud.tip(touchOn() ? 'Kört fast? Tryck <b>↺</b>' : 'Kört fast? Tryck <kbd>R</kbd> för att återställa'); else if (!r.tut && hud.cache.tip) hud.tip(null);
@@ -1024,6 +1073,171 @@ function showResults(sm) {
   screen('results');
 }
 
+/* ------------------------------------------------------------------ Online */
+let net = null, lobby = null;
+const ol = { stopTick: null, loaded: new Set(), goAt: null, bgAcc: 0, results: null, emo: null, startCfg: null };
+function ensureNet() {
+  if (net) return;
+  net = makeNet();
+  lobby = makeLobby(net, {
+    container: $('online'), save, persist, css, carUnlocked,
+    onBack: () => { lobby.close(); screen('menu'); updateMenu(); },
+    onStartPressed: () => net.startGame(buildStart(net))
+  });
+  lobby.el.classList.add('fj-side', 'wide-side');
+  net.on('start', p => onlineStart(p));
+  net.on('lobby', () => { if (race && race.online) { disposeRace(); hudEl.classList.add('hidden'); buildTouch(); } openOnline(); });
+  net.onMsg('cs', (a, from) => { const c = race && race.online && race.byKey[from]; if (c && c.remote) pushSample(c, a); });
+  net.onMsg('ai', list => { if (!race || !race.online || net.isHost) return; for (const a of list) { const c = race.byKey['ai' + (a[0] | 0)]; if (c && c.remote) pushSample(c, a, 1); } });
+  net.onMsg('rk', keys => { if (race && race.online && !net.isHost) race.rank = keys; });
+  net.onMsg('ld', (v, from) => { if (net.isHost) ol.loaded.add(from); });
+  net.onMsg('go', at => { if (!net.isHost && ol.goAt == null) ol.goAt = at; });
+  net.onMsg('res', rows => { if (race && race.online && !net.isHost && !race.ended) onlineFinish(rows); });
+  net.on('peerleave', p => { if (race && race.online && !race.ended) removeRemote(p.id, p.name + (p.wasHost ? ' (värden)' : '') + ' lämnade loppet'); });
+  net.on('hostleft', h => {
+    if (!race || !race.online || race.ended) { if (ol.results && h.newHost) showOnlineResults(ol.results); return; }
+    if (h.newHost === net.selfId) {
+      // ta över datorförarna där de är just nu
+      const r = race, d = DIFFICULTY[r.cfg.diff] || DIFFICULTY.easy, L = r.track.L;
+      for (const c of r.cars) if (c.remote && isAiKey(c.key)) {
+        c.remote = false; c.lastS = c.tp.s;
+        c.cpNext = clamp(Math.floor((c.progress - c.lapsDone * L) / (L / KCP)) + 1, 1, KCP);
+        c.ai = new AIDriver(c, r.track, { skill: 0.95, aggr: 0.5, pace: d.pace }); r.ais.push(c.ai); c.powerMul = d.power;
+        c.raceActive = r.state !== 'countdown';
+      }
+      if (ol.goAt == null) { ol.goAt = net.now() + 3500; }
+      hud.msg('Värden lämnade – du är ny värd', 2600, 'gold');
+    } else hud.msg('Värden lämnade – ' + (h.newName || 'en annan spelare') + ' tar över', 2600, 'gold');
+  });
+  net.on('emote', e => { if (race && race.online && !race.ended) hud.msg((e.player && !e.player.isMe ? e.player.name : 'Du') + ': ' + e.text, 2000, 'cyan'); });
+  net.on('error', err => {
+    if (err.soft) return;
+    if (race && race.online) { toast('Anslutningen bröts: ' + err.message, { ms: 3500 }); disposeRace(); hudEl.classList.add('hidden'); buildTouch(); openOnline(); }
+    else if (!$('results').classList.contains('hidden') && ol.results) { toast('Anslutningen bröts', { ms: 3000 }); openOnline(); }
+  });
+}
+function openOnline() {
+  ensureNet();
+  ol.results = null;
+  if (ol.emo) { ol.emo.destroy(); ol.emo = null; }
+  if (race) { endSession(true); disposeRace(); }
+  hudEl.classList.add('hidden');
+  showroom.showCar(); showroom.setCar(save.car, save.color);
+  screen('online'); lobby.open();
+  audio.music('adventure');
+}
+function onlineStart(p) {
+  if (!p.grid.some(g => g.id === net.selfId)) return; // anslöt under pågående lopp – med i nästa
+  lobby.close();
+  if (ol.emo) { ol.emo.destroy(); ol.emo = null; }
+  ol.loaded = new Set(); ol.goAt = null; ol.results = null; ol.startCfg = p;
+  const me = p.grid.find(g => g.id === net.selfId);
+  startRace({ mode: 'online', online: true, track: p.track, laps: p.laps, diff: p.diff, grid: p.grid, car: me.car, color: me.col, opp: 0 });
+}
+/** Synkad nedräkning: värden väntar tills alla laddat klart (högst 15 s) och skickar sedan KÖR-tiden. */
+function onlineCountdown(r, dt) {
+  r.waitT += dt;
+  if (net.isHost) {
+    if (ol.goAt == null) {
+      const need = r.cars.filter(c => c.isHuman && !ol.loaded.has(c.key));
+      if (!need.length || r.waitT > 15) ol.goAt = net.now() + 3800;
+    }
+    r.goT -= dt;
+    if (ol.goAt != null && r.goT <= 0) { r.goT = 1; net.send('go', ol.goAt); } // skickas om – sena laddare
+  }
+  if (ol.goAt == null) {
+    if (r.waitT > 1.5 && !r.waitMsg) { r.waitMsg = true; hud.center('Väntar på andra spelare …'); }
+    if (r.waitT > 25 && !net.isHost && !r.waitWarn) { r.waitWarn = true; hud.msg('Värden svarar inte – lämna via menyn om det dröjer', 3000); }
+    return 4.2;
+  }
+  if (r.waitMsg) { r.waitMsg = false; hud.center(''); }
+  return Math.min(4.2, (ol.goAt - net.now()) / 1000);
+}
+const _pk = [];
+function onlineSend(r, dt) {
+  r.sendT -= dt; r.aiT -= dt; r.rkT -= dt;
+  const running = r.state !== 'countdown';
+  if (r.sendT <= 0) { r.sendT = running ? 1 / 20 : 0.5; net.sendFast('cs', packCar(r.player, r.time, _pk)); }
+  if (!net.isHost) return;
+  if (r.aiT <= 0 && r.ais.length) {
+    r.aiT = running ? 1 / 15 : 0.5;
+    const list = [];
+    for (const c of r.cars) if (!c.remote && !c.isPlayer && isAiKey(c.key)) list.push([+c.key.slice(2), ...packCar(c, r.time)]);
+    if (list.length) net.sendFast('ai', list);
+  }
+  if (r.rkT <= 0 && running && r.sorted) { r.rkT = 0.2; net.sendFast('rk', r.sorted.map(c => c.key)); }
+}
+/** Värden: avgör när loppet är slut. true = slut (resultat skickat). */
+function onlineHostEnd(r, dt) {
+  if (r.state === 'countdown') return false;
+  const humans = r.cars.filter(c => c.isHuman);
+  const fins = humans.filter(c => c.finished);
+  if (fins.length && r.firstHumanFin == null) { r.firstHumanFin = r.time; hud.msg('Första i mål! 60 sekunder kvar för övriga', 2600, 'gold'); }
+  if (fins.length !== r.lastFinN) { r.lastFinN = fins.length; r.lastFin = r.time; }
+  const allHumans = humans.length > 0 && fins.length === humans.length;
+  const allCars = r.cars.every(c => c.finished);
+  const over = (allHumans && r.time - r.lastFin > 3.5) || (allCars && r.time - r.lastFin > 2) || (r.firstHumanFin != null && r.time - r.firstHumanFin > 60);
+  if (!over) return false;
+  const L = r.track.L, laps = r.cfg.laps;
+  const rows = r.cars.map(c => {
+    if (c.finished) return [c.key, c.finishTime, isFinite(c.bestLap) ? c.bestLap : -1, 0];
+    const avg = Math.max(12, c.progress / Math.max(1, r.time));
+    return [c.key, r.time + Math.max(0, laps * L - c.progress) / avg, isFinite(c.bestLap) ? c.bestLap : -1, 1];
+  }).sort((a, b) => a[1] - b[1]).map(x => [x[0], Math.round(x[1] * 1000) / 1000, Math.round(x[2] * 1000) / 1000, x[3]]);
+  net.send('res', rows);
+  onlineFinish(rows);
+  return true;
+}
+function onlineFinish(rows) {
+  const r = race; if (!r || r.ended) return; r.ended = true;
+  const grid = r.cfg.grid;
+  const res = rows.map(([key, time, best, est]) => {
+    const g = grid.find(x => x.id === key) || { n: '?', car: 'viggen', col: 0 };
+    return { key, name: key === net.selfId ? g.n + ' (du)' : g.n, car: carSpec(g.car).name, carId: g.car, color: COLORS[g.col].hex, time, best: best >= 0 ? best : Infinity, est: !!est, me: key === net.selfId, human: !isAiKey(key) };
+  });
+  ol.results = { rows: res, track: r.cfg.track, laps: r.cfg.laps };
+  disposeRace();
+  hudEl.classList.add('hidden'); buildTouch();
+  showOnlineResults(ol.results);
+}
+function showOnlineResults(sm) {
+  const posTxt = (p) => p === 1 ? '🥇 1' : p === 2 ? '🥈 2' : p === 3 ? '🥉 3' : String(p);
+  const pos = sm.rows.findIndex(x => x.me) + 1;
+  const esc = (t) => String(t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+  $('resTitle').textContent = pos === 1 ? '🏆 Du vann på ' + trackName(sm.track) + '!' : `${trackName(sm.track)} – ${pos}:a plats`;
+  let h = `<table class="fj-table"><thead><tr><th>#</th><th>Förare</th><th class="car">Bil</th><th class="num">Tid</th><th class="num">Bästa varv</th></tr></thead><tbody>` +
+    sm.rows.map((x, k) => `<tr class="${x.me ? 'me' : ''}"><td>${posTxt(k + 1)}</td><td><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${css(x.color)};margin-right:6px"></i>${x.human ? '👤 ' : ''}${esc(x.name)}</td><td class="car">${esc(x.car)}</td><td class="num">${(x.est ? '≈ ' : '') + fmtTime(x.time)}</td><td class="num">${isFinite(x.best) ? fmtTime(x.best) : '–'}</td></tr>`).join('') + `</tbody></table>`;
+  h += `<p class="fj-note" id="olResNote">${net.isHost ? 'Du är värd – starta nästa lopp eller gå tillbaka till lobbyn.' : 'Väntar på att värden startar nästa lopp …'}</p><div id="olEmo"></div>`;
+  $('resBody').innerHTML = h;
+  if (ol.emo) ol.emo.destroy();
+  ol.emo = emoteBar(net, root); $('olEmo').appendChild(ol.emo.el);
+  const bb = $('resBtns'); bb.innerHTML = '';
+  const btns = net.isHost
+    ? [['Spela igen', () => net.startGame(buildStart(net)), true], ['Till lobbyn', () => net.backToLobby()], ['Lämna', toMenu]]
+    : [['Till lobbyn', () => openOnline()], ['Lämna', toMenu]];
+  btns.forEach(([t, fn, prim]) => { const b = document.createElement('button'); b.className = 'btn' + (prim ? ' primary' : ''); b.textContent = t; b.addEventListener('click', () => { audio.play('select'); fn(); }); bb.appendChild(b); });
+  showroom.showPodium(sm.rows.map(x => ({ car: x.carId, color: x.color })));
+  audio.music(pos <= 3 ? 'victory' : 'calm');
+  screen('results');
+}
+function removeRemote(id, msg) {
+  const r = race; const c = r && r.byKey[id];
+  if (!c || c.isPlayer) return;
+  scene.remove(c.root); disposeCarModel(c.model);
+  r.cars.splice(r.cars.indexOf(c), 1); delete r.byKey[id];
+  if (r.sorted) r.sorted = r.sorted.filter(x => x !== c);
+  hud.e.posOf.textContent = '/' + r.cars.length;
+  hud.msg(msg, 2400);
+}
+/** Håller loppet igång när fliken är dold/inte ritas (andra spelare väntar inte på oss). */
+function bgStep(dt) {
+  if (!race || !race.online || race.ended) return;
+  ol.bgAcc += dt;
+  let n = 0;
+  while (ol.bgAcc >= 1 / 60 && n++ < 15) { ol.bgAcc -= 1 / 60; raceUpdate(1 / 60); input.endFrame(); if (!race || race.ended) break; }
+  loop.last = performance.now();
+}
+
 /* ------------------------------------------------------------------ Kamera */
 const _cf = new THREE.Vector3(), _cu = new THREE.Vector3(), _cd = new THREE.Vector3(), _ct = new THREE.Vector3(), _cl = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
@@ -1116,7 +1330,7 @@ function menuPad() {
   const ay = gp.axes[1] || 0;
   const axisUp = ay < -0.6 && !(lastMenuPad.ay < -0.6), axisDn = ay > 0.6 && !(lastMenuPad.ay > 0.6);
   const vis = SCREENS.map(id => $(id)).find(el => !el.classList.contains('hidden') && el.id !== 'loading');
-  if (race && pr(9)) { if (!vis || vis.id === 'pause') pauseGame(!paused); }
+  if (race && pr(9)) { if (!vis || vis.id === 'pause') pauseGame(!uiPaused()); }
   else if (vis) {
     const items = [...vis.querySelectorAll('button:not([disabled]), a.btn, select, input')].filter(el => el.offsetParent !== null);
     let i = items.indexOf(document.activeElement);
@@ -1197,7 +1411,7 @@ fpsMeter(root, loop, settings);
   addEventListener('pointerdown', startMusic); addEventListener('keydown', startMusic);
   // felsökningskrok – bara med ?debug i adressen (annars går det att fuska via konsolen)
   if (/[?&]debug\b/.test(location.search)) {
-    window.__fj = { get race() { return race; }, save, settings, loop, startRace, toMenu, scene, renderer, camera, AIDriver, input, hud, startCup, showResults, endRace,
+    window.__fj = { get race() { return race; }, get net() { return net; }, get lobby() { return lobby; }, bgStep, save, settings, loop, startRace, toMenu, scene, renderer, camera, AIDriver, input, hud, startCup, showResults, endRace,
       get composer() { return composer; },
       step(n) { for (let k = 0; k < n && race && !race.ended; k++) { raceUpdate(1 / 60); input.endFrame(); } },
       frames(n) { for (let k = 0; k < n; k++) loop.render(1, 1 / 30); } };

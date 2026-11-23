@@ -66,6 +66,7 @@ export class World {
     for (const o of this.extra) { this.scene.remove(o); if (o.userData.ownGeo && o.geometry) o.geometry.dispose(); }
     this.extra.length = 0;
     this.player = null; this.playerTarget = null;
+    this.teams.length = 2; this.netPlayers = null; this.netVisual = null; this.netHook = null; this.netDuel = false;
     this.listeners = {};
     this.navs.length = 0; this.bounds = null; this.shakeAmt = 0;
   }
@@ -154,8 +155,9 @@ export class World {
     if (this._tokT <= 0) {
       this._tokT = 0.5;
       this.fireTokens.clear();
-      const P = this.player;
-      if (P && !P.dead) {
+      // en kvot per mänsklig spelare (online: även fjärrspelarnas skepp, netPlayers)
+      for (const P of this.netPlayers ? [this.player, ...this.netPlayers] : [this.player]) {
+        if (!P || P.dead) continue;
         const att = this.teams[1].filter(s => !s.dead && s.ai && s.ai.target === P && !s.isLarge);
         att.sort((a, b) => a.pos.distanceToSquared(P.pos) - b.pos.distanceToSquared(P.pos));
         for (let i = 0; i < Math.min(att.length, this.diff.tokens || 2); i++) this.fireTokens.add(att[i]);

@@ -57,7 +57,7 @@ export function pickTarget(s, W, opts = {}) {
     let sc = d;
     if (e.ai && e.ai.target === s) sc -= 500;
     if (e.isLarge && !opts.large) sc += 1600; else if (e.isLarge && opts.large) sc -= 1000;
-    if (e.isPlayer && s.team === 1) sc -= 350 * W.diff.aggro;
+    if ((e.isPlayer || e.netPlayer) && s.team === 1) sc -= 350 * W.diff.aggro;
     if (ai && ai.prefer) {
       if (ai.prefer === 'player' && e.isPlayer) sc -= 1500;
       else if (ai.prefer === 'large' && e.isLarge) sc -= 1500;
@@ -178,7 +178,7 @@ function fighter(s, W, dt) {
     // salvor: skjut en stund, vila en stund
     ai.burst = (ai.burst == null ? Math.random() : ai.burst) - dt;
     if (ai.burst < -rnd(0.7, 1.5) / Math.max(0.5, W.diff.aggro)) ai.burst = rnd(0.6, 1.2);
-    const mayFire = !T.isPlayer || W.fireTokens.has(s) || s.team === 0;
+    const mayFire = !(T.isPlayer || T.netPlayer) || W.fireTokens.has(s) || s.team === 0;
     if (ai.burst > 0 && mayFire && ang < cone * 2.2 && dl < (T.isLarge ? 1300 : 950) && s.heat < 82) c.fire = true;
     // missiler (interceptor)
     if (s.missiles > 0 && !T.isLarge && dist < 1300 && dist > 220 && ang < 0.25 && ai.mcd <= 1) {

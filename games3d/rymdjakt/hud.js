@@ -229,6 +229,7 @@ export class HUD {
         if (isT) this.bracket(ctx, o.x, o.y, r + 5 * s, col, 2.2 * s, 0.32);
         else if (r < 12 * s && !sh.isLarge) this.tri(ctx, o.x, o.y, 5 * s, col);
         else this.bracket(ctx, o.x, o.y, r, col, 1.3 * s, 0.22);
+        if (sh.netName) { ctx.fillStyle = sh.netColor || col; ctx.fillText(sh.netName, o.x, o.y - r - (isT ? 26 : 10) * s); }
         if (sh.hudMark) {
           ctx.fillStyle = col;
           const mt = MARK[sh.hudMark] || 'MÅL', mp = this.clampOut({ x: o.x, y: o.y - r - 10 * s }, ctx.measureText(mt).width / 2 + 4 * s, 8 * s);
@@ -263,9 +264,9 @@ export class HUD {
             }
           }
         }
-      } else if (isT || sh.hudMark || (sh.isLarge && d < 6000)) {
+      } else if (isT || sh.hudMark || (sh.isLarge && d < 6000) || (sh.netName && sh.team === 0)) {
         const e = this.edge(o);
-        this.arrow(ctx, e, col, isT ? fmtDist(d) : (sh.hudMark ? (MARK[sh.hudMark] || 'MÅL') : ''));
+        this.arrow(ctx, e, sh.netName && !isT ? (sh.netColor || col) : col, isT ? fmtDist(d) : (sh.hudMark ? (MARK[sh.hudMark] || 'MÅL') : (sh.netName || '')));
       } else if (sh.team === 1 && sh.ai && sh.ai.target === P && d < 1500) {
         // fiender som jagar spelaren utanför bild: diskret pil så man ser var hotet kommer ifrån
         this.arrow(ctx, this.edge(o), 'rgba(255,96,72,0.6)', '');

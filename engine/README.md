@@ -10,7 +10,10 @@ ROOT/
   engine/kit.js, engine/kit.css  – 3D-kit (läs kit.js!): Settings, QUALITY, createRenderer, Loop, Input, Audio,
                                    toast, show/hide, loadingScreen, nextFrame, buildSettings, fpsMeter, kv (IndexedDB),
                                    makeRng, lerp, damp, clamp, submitScore, bestScore, fmt
+  engine/net.js                  – P2P-multiplayer (WebRTC via Trystero/Nostr, ingen server): createNet, createLobby, V,
+                                   backgroundTicker, emoteBar. API och exempel överst i filen. Exempel: games3d/fjallracet/online.js
   vendor/three/three.module.js   – Three.js r170 (lokalt)
+  vendor/trystero/               – Trystero 0.22 (MIT) som används av net.js (se VERSION.txt)
   vendor/three/addons/…          – utvalda addons (controls, postprocessing, math/ImprovedNoise+SimplexNoise,
                                    utils/BufferGeometryUtils, objects/Sky+Water, geometries/RoundedBoxGeometry,
                                    math/Capsule+Octree, lines …). Lista: `find vendor/three/addons -name '*.js'`
