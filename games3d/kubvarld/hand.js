@@ -56,6 +56,18 @@ export class Hand {
     this.layout = null; // { xr, yt } snabbfältets högerkant/överkant i NDC
     this.curId = -1; this.equip = 0; this.swing = 0; this.eat = 0; this.pull = 0; this.light = new THREE.Color(1, 1, 1);
     this._mesh = null;
+    // andra handen (sköld m.m.) – ritas nere till vänster
+    this.off = new THREE.Group(); this.scene.add(this.off);
+    this.offId = -1; this._offMesh = null; this.block = 0; this.blockHit = 0; this._blk = 0;
+  }
+  _setOff(id) {
+    if (this._offMesh) { this.off.remove(this._offMesh); this._offMesh = null; }
+    this.offId = id; if (!id) return;
+    const cube = isCubeItem(id);
+    const m = cube ? new THREE.Mesh(blockGeo(id), this.g.mats.entity) : new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMatL);
+    m.scale.setScalar(cube ? 0.28 : ITEMS[id] && ITEMS[id].shield ? 0.62 : 0.4);
+    if (cube) { const self = this; m.onBeforeRender = function (r, s, c, g, mat) { mat.uniforms.uEntLight.value.set(self.sky, self.blk); mat.uniformsNeedUpdate = true; }; m.rotation.y = Math.PI / 4; }
+    this._offMesh = m; this.off.add(m);
   }
   dispose() { this.arm.children.forEach(c => c.geometry.dispose()); this.armMats.forEach(m => m.dispose()); this.texs.forEach(t => t.dispose()); this.itemMatL.dispose(); }
   setAspect(a) {
@@ -132,6 +144,17 @@ export class Hand {
     this.arm.visible = true;
     this.item.position.set(-0.15, -0.25, -0.13); // i vantens grepp
     this.item.visible = hasItem;
+    // parering: skölden (i handen eller andra handen) lyfts fram mitt i bild
+    this._blk += ((this.block ? 1 : 0) - this._blk) * (1 - Math.exp(-18 * dt));
+    this.blockHit = Math.max(0, this.blockHit - dt * 4);
+    const offS = this.g.inv && this.g.inv.off, offId = offS ? offS.id : 0;
+    if (offId !== this.offId) this._setOff(offId);
+    const b = this._blk, kick = Math.sin(this.blockHit * Math.PI) * 0.05;
+    this.off.visible = !!offId;
+    this.off.position.set(-ax * 0.95 + b * 0.55 * ax, -0.52 + b * 0.22 - this.equip * 0.3 + kick, -0.95 + b * 0.25);
+    this.off.rotation.set(0, 0.35 - b * 0.35, 0);
+    if (this.block === 1) { this.root.position.x -= b * 0.32; this.root.position.y += b * 0.1; this.root.rotation.set(0, 0.2 * b, 0); this.item.rotation.set(0, -0.6 * b, 0); this.arm.visible = b < 0.5; }
+    else this.item.rotation.set(0, 0, 0);
   }
   render(renderer) { const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth(); renderer.render(this.scene, this.cam); renderer.autoClear = ac; }
 }

@@ -181,9 +181,10 @@ const TOOLS = {
   pick: ['................', '....hhhhhh......', '...hHHHHHHhh....', '..hH.....sHHh...', '..h.....sS.HHh..', '........sS..Hh..', '.......sS....hh.', '......sS.....h..', '.....sS.........', '....sS..........', '...sS...........', '..sS............', '.sS.............', '................', '................', '................'],
   axe: ['................', '........hh......', '.......hHHh.....', '......hHHHHh....', '......hHHHsS....', '.......hHsS.....', '........sS......', '.......sS.......', '......sS........', '.....sS.........', '....sS..........', '...sS...........', '..sS............', '.sS.............', '................', '................'],
   shovel: ['................', '..........hhh...', '.........hHHHh..', '.........hHHHh..', '..........hHh...', '.........sS.....', '........sS......', '.......sS.......', '......sS........', '.....sS.........', '....sS..........', '...sS...........', '..sS............', '.sS.............', '................', '................'],
+  hoe: ['................', '......hhhhhh....', '......hHHHHh....', '.........sSh....', '........sS......', '.......sS.......', '......sS........', '.....sS.........', '....sS..........', '...sS...........', '..sS............', '.sS.............', '................', '................', '................', '................'],
   sword: ['................', '.............hh.', '............hHh.', '...........hHh..', '..........hHh...', '.........hHh....', '........hHh.....', '.......hHh......', '..g...hHh.......', '...g.hHh........', '....gHh.........', '....sg..........', '...sS.g.........', '..sS............', '.hh.............', '................']
 };
-const TIER_COL = [['#c9995a', '#8a6132'], ['#a3a6ae', '#6c6f78'], ['#eef0f2', '#a9adb2'], ['#e6fbff', '#58b4dc']];
+const TIER_COL = [['#c9995a', '#8a6132'], ['#a3a6ae', '#6c6f78'], ['#eef0f2', '#a9adb2'], ['#e6fbff', '#58b4dc'], ['#fff0a0', '#d8a428']];
 
 // Nordisk palett
 const GRASS = P(['#3b6440', '#487246', '#56824b', '#669252', '#78a35b']);
@@ -504,6 +505,67 @@ const draw = {
   emerald_ore(p) { draw.stone(p); for (const [cx, cy] of [[4, 5], [11, 4], [8, 11]]) { p.rect(cx - 1, cy - 2, 2, 5, hex('#2ec46a')); p.rect(cx - 2, cy - 1, 4, 3, hex('#2ec46a')); p.set(cx - 1, cy - 1, hex('#a8f8c8')); p.set(cx, cy + 2, hex('#167a3e')); p.set(cx + 1, cy + 1, hex('#167a3e')); } },
   emerald_block(p) { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, shade(((x >> 2) + (y >> 2)) % 2 ? hex('#3ad47a') : hex('#2ab866'), 0.95 + p.r() * 0.08)); for (let i = 0; i < S; i++) { p.set(i, 0, hex('#a8f8c8')); p.set(0, i, hex('#a8f8c8')); p.set(i, 15, hex('#14703a')); p.set(15, i, hex('#14703a')); } },
   // ---- utökning: föremål ----
+
+  /* ----- utökning 2 ----- */
+  oak_log(p) {
+    // grov, mörk ekbark med djupa längsgående fåror
+    ramp(p, field(p, 0.25, 0.3, 0.45), P(['#3e2f22', '#4b3a2a', '#5a4632', '#66513a']), 0.12);
+    for (let k = 0; k < 5; k++) { let x = k * 3 + (p.r() * 2 | 0); for (let y = 0; y < S; y++) { p.set(x, y, hex('#2a2018')); if (p.r() < 0.3) x += p.r() < 0.5 ? 1 : -1; } }
+    for (let k = 0; k < 4; k++) { const x = p.r() * 15 | 0, y = p.r() * 15 | 0; p.set(x, y, hex('#7a6448')); }
+    roundCols(p, 0.16);
+  },
+  oak_log_top(p) { logTop(p, P(['#b8925e', '#c6a06a']), hex('#9c774a'), hex('#3e2f22')); },
+  oak_leaves(p) { leafClumps(p, P(['#2f5e26', '#3c712e', '#4b8436', '#5c9640', '#6ea84c']), 12, 2.2, 3.4, hex('#28501f')); },
+  oak_planks(p) { planks(p, hex('#b98d55'), hex('#8e6a3c')); },
+  oak_sapling(p) { p.clear(); stem(p, 7, 8, 15, hex('#5a4632')); const g = P(['#3c712e', '#4b8436', '#5c9640']); for (const [cx, cy] of [[6, 4], [9, 5], [7, 7]]) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx * dx + dy * dy <= 4 && p.r() < 0.85) p.setIn(cx + dx, cy + dy, g[p.r() * 3 | 0]); },
+  stem0(p) { p.clear(); stem(p, 7, 12, 15, hex('#6aa84a')); p.set(6, 12, hex('#7ab85a')); p.set(8, 13, hex('#7ab85a')); },
+  stem1(p) { p.clear(); stem(p, 7, 9, 15, hex('#78a848')); p.line(7, 11, 5, 9, hex('#8ab858')); p.line(8, 12, 10, 10, hex('#8ab858')); },
+  stem2(p) { p.clear(); stem(p, 7, 5, 15, hex('#8aa848')); p.line(7, 9, 4, 6, hex('#9ab858')); p.line(8, 11, 11, 8, hex('#9ab858')); p.rect(3, 5, 2, 2, hex('#6a9a3a')); p.rect(11, 7, 2, 2, hex('#6a9a3a')); },
+  stem3(p) { p.clear(); stem(p, 7, 2, 15, hex('#b0a040')); p.line(7, 7, 3, 3, hex('#c0b050')); p.line(8, 10, 12, 6, hex('#c0b050')); p.rect(2, 2, 3, 2, hex('#7a9a3a')); p.rect(12, 5, 3, 2, hex('#7a9a3a')); p.set(7, 1, hex('#d8c860')); },
+  trapdoor(p) {
+    planks(p, hex('#9a7044')); frame(p, hex('#4d3219'));
+    for (const [x, y] of [[4, 4], [11, 4], [4, 11], [11, 11]]) { p.rect(x - 1, y - 1, 3, 3, hex('#3a2616')); p.set(x, y, hex('#00000000'.slice(0, 7)), 0); }
+    p.rect(1, 7, 14, 2, hex('#6a4a2a')); p.set(2, 7, hex('#a8acb4')); p.set(13, 7, hex('#a8acb4'));
+  },
+  button(p) { draw.smooth_stone_top(p); frame(p, hex('#6c6f78')); },
+  spark_ore(p) { draw.stone(p); for (const [cx, cy] of [[4, 4], [11, 6], [6, 11], [12, 12]]) { p.rect(cx - 1, cy - 1, 3, 2, hex('#e0422e')); p.set(cx, cy - 1, hex('#ffb070')); p.set(cx + 1, cy + 1, hex('#8a1a12')); p.set(cx - 1, cy + 1, hex('#ff6a3a')); } },
+  wire_0(p) { wireTile(p, '#5a1a14', '#7a2a1e'); },
+  wire_1(p) { wireTile(p, '#9a2a1c', '#c0402a'); },
+  wire_2(p) { wireTile(p, '#d8402a', '#ff7a4a'); },
+  wire_3(p) { wireTile(p, '#ff5a32', '#ffd08a'); },
+  spark_torch(p) { p.clear(); for (let y = 9; y < 16; y++) { p.set(7, y, hex('#7a5230')); p.set(8, y, hex('#5c3d22')); } p.rect(7, 6, 2, 3, hex('#ff4a2a')); p.set(7, 6, hex('#ffd0a0')); p.set(8, 8, hex('#a8201a')); },
+  spark_torch_off(p) { p.clear(); for (let y = 9; y < 16; y++) { p.set(7, y, hex('#7a5230')); p.set(8, y, hex('#5c3d22')); } p.rect(7, 6, 2, 3, hex('#5a2a22')); p.set(7, 6, hex('#7a3a30')); },
+  spark_torch_top(p) { p.clear(); p.rect(7, 7, 2, 2, hex('#ff4a2a')); p.set(7, 7, hex('#ffd0a0')); },
+  spark_torch_top_off(p) { p.clear(); p.rect(7, 7, 2, 2, hex('#5a2a22')); },
+  repeater_top(p) { repTile(p, false); },
+  repeater_top_on(p) { repTile(p, true); },
+  repeater_side(p) { draw.smooth_stone_top(p); for (let x = 0; x < S; x++) p.set(x, 13, hex('#6c6f78')); },
+  lamp(p) { lampTile(p, ['#4a3a2a', '#6a5038', '#8a6a48'], '#2a2018'); },
+  lamp_on(p) { lampTile(p, ['#ffc860', '#ffe0a0', '#fff4d8'], '#a86a28'); },
+  piston_side(p) { draw.cobble(p); p.rect(0, 0, 16, 4, hex('#a07a4a')); for (let x = 0; x < S; x++) { p.set(x, 4, hex('#4a4c52')); p.set(x, 0, hex('#c09a62')); } },
+  piston_front(p) { planks(p, hex('#a98050')); frame(p, hex('#5a4228')); p.rect(6, 6, 4, 4, hex('#8e9198')); p.set(6, 6, hex('#c8ccd2')); },
+  piston_sticky_front(p) { draw.piston_front(p); for (let y = 2; y < 14; y++) for (let x = 2; x < 14; x++) if ((x - 8) ** 2 + (y - 8) ** 2 < 30 + p.r() * 8) p.set(x, y, shade(hex('#6ac04a'), 0.85 + p.r() * 0.3)); p.set(6, 6, hex('#c8f8a8')); },
+  piston_back(p) { draw.cobble(p); p.rect(5, 5, 6, 6, hex('#5a5c62')); p.rect(6, 6, 4, 4, hex('#3a3c42')); },
+  dispenser_front(p) { draw.furnace_side(p); p.rect(4, 4, 8, 8, hex('#2a2a30')); p.rect(6, 3, 4, 10, hex('#2a2a30')); p.rect(3, 6, 10, 4, hex('#2a2a30')); p.rect(6, 6, 4, 4, hex('#111114')); },
+  observer_front(p) { draw.cobble(p); p.rect(2, 4, 12, 8, hex('#3a3c42')); for (const x of [4, 9]) { p.rect(x, 6, 3, 3, hex('#101014')); p.set(x + 1, 7, hex('#e0422e')); } },
+  observer_back(p) { draw.cobble(p); p.rect(5, 5, 6, 6, hex('#3a3c42')); p.rect(7, 7, 2, 2, hex('#e0422e')); },
+  observer_side(p) { draw.cobble(p); for (let x = 0; x < S; x++) { p.set(x, 7, hex('#3a3c42')); p.set(x, 8, hex('#5a5c62')); } },
+  observer_top(p) { draw.cobble(p); p.rect(3, 3, 10, 10, hex('#5a5c62')); for (let i = 3; i < 13; i++) p.set(i, i, hex('#3a3c42')); },
+  daylight_top(p) { p.noise(hex('#2c3a52'), 0.08); for (let y = 1; y < 15; y += 5) for (let x = 1; x < 15; x += 5) { p.rect(x, y, 4, 4, hex('#9ac8ec')); p.set(x, y, hex('#e8f6ff')); } frame(p, hex('#8a6a42')); },
+  note_block(p) { planks(p, hex('#7a5030')); frame(p, hex('#3a2616')); const N = hex('#1a1210'); p.rect(5, 4, 1, 7, N); p.rect(10, 3, 1, 7, N); p.rect(5, 4, 6, 1, N); p.rect(5, 3, 6, 1, N); p.rect(3, 10, 3, 2, N); p.rect(8, 9, 3, 2, N); },
+  i_shield(p) {
+    p.clear();
+    for (let y = 1; y < 15; y++) for (let x = 2; x < 14; x++) {
+      const w = y < 10 ? 6 : 6 - (y - 9) * 1.1; if (Math.abs(x - 7.5) > w) continue;
+      const edge = Math.abs(x - 7.5) > w - 1.2 || y === 1;
+      p.set(x, y, edge ? hex('#8e9198') : shade(hex(y < 8 ? '#2d4f8e' : '#2a4880'), 0.95 + p.r() * 0.1));
+    }
+    for (let y = 3; y < 13; y++) p.setIn(7, y, hex('#f2c230')), p.setIn(8, y, hex('#f2c230'));
+    for (let x = 4; x < 12; x++) p.setIn(x, 6, hex('#f2c230'));
+  },
+  i_pumpkin_seeds(p) { p.clear(); for (const [x, y] of [[4, 5], [9, 4], [6, 9], [11, 9], [8, 12], [4, 12]]) { p.rect(x, y, 2, 3, hex('#f0e2a8')); p.set(x, y, hex('#fff6d0')); p.set(x + 1, y + 2, hex('#c8b070')); } },
+  i_melon_seeds(p) { p.clear(); for (const [x, y] of [[4, 5], [9, 4], [6, 9], [11, 9], [8, 12], [4, 12]]) { p.rect(x, y, 2, 3, hex('#2a2018')); p.set(x, y, hex('#5a4a38')); } },
+  i_spark_dust(p) { p.clear(); for (let k = 0; k < 40; k++) { const a = p.r() * 6.28, r = Math.sqrt(p.r()) * 5.5; p.setIn(Math.round(8 + Math.cos(a) * r), Math.round(9 + Math.sin(a) * r * 0.7), shade(hex(p.r() < 0.3 ? '#ff9a5a' : '#e0422e'), 0.8 + p.r() * 0.4)); } p.set(7, 8, hex('#ffe0b0')); },
   i_hoe(p) { p.clear(); for (let i = 0; i < 11; i++) { p.set(3 + i, 14 - i, hex('#8a5f33')); p.set(4 + i, 14 - i, hex('#5e3f20')); } p.rect(9, 2, 5, 2, hex('#8e9198')); p.rect(9, 4, 2, 1, hex('#6c6f78')); p.set(9, 2, hex('#b4b7bd')); },
   i_seeds(p) { p.clear(); for (const [x, y] of [[5, 9], [8, 7], [10, 10], [6, 12], [9, 13], [12, 8], [4, 6]]) { p.set(x, y, hex('#c8a85a')); p.set(x + 1, y, hex('#a88a40')); p.set(x, y - 1, hex('#7aaa4a')); } },
   i_wheat(p) { p.clear(); for (let k = 0; k < 4; k++) { const x0 = 4 + k * 2; p.line(x0, 15, x0 + 2, 6, hex('#b8943a')); for (let y = 1; y < 7; y++) { p.set(x0 + 2 + (y % 2), y, hex('#e8c870')); } } p.rect(5, 11, 7, 1, hex('#8a6a2a')); },
@@ -539,6 +601,26 @@ const draw = {
     for (let i = 4; i < 12; i += 2) { p.set(i, 4, hex('#e0c090')); p.set(i, 11, hex('#e0c090')); p.set(4, i, hex('#e0c090')); p.set(11, i, hex('#e0c090')); }
   }
 };
+
+function wireTile(p, c, hi) {
+  // ledningskors som går mot alla fyra kanter, prickigt glittrande
+  p.clear(); const C = hex(c), H = hex(hi);
+  for (let i = 0; i < S; i++) for (const o of [7, 8]) { p.set(i, o, shade(C, 0.9 + p.r() * 0.2)); p.set(o, i, shade(C, 0.9 + p.r() * 0.2)); }
+  p.rect(5, 5, 6, 6, C); for (let k = 0; k < 10; k++) p.set(5 + (p.r() * 6 | 0), 5 + (p.r() * 6 | 0), H);
+  for (let k = 0; k < 6; k++) { const i = p.r() * S | 0; p.set(i, 7 + (k & 1), H); p.set(7 + (k & 1), i, H); }
+}
+function repTile(p, on) {
+  draw.smooth_stone_top(p);
+  const L = hex(on ? '#ff5a32' : '#6a2a20');
+  for (let y = 2; y < 14; y++) p.set(7, y, L), p.set(8, y, L);
+  for (const y of [3, 10]) { p.rect(6, y, 4, 3, hex(on ? '#ff8a5a' : '#4a2018')); p.set(7, y, hex(on ? '#ffe0b0' : '#7a3a30')); }
+  p.set(7, 1, hex('#e8e8e8')); p.set(8, 1, hex('#e8e8e8')); p.set(6, 2, hex('#e8e8e8')); p.set(9, 2, hex('#e8e8e8'));
+}
+function lampTile(p, pal, frameC) {
+  const C = pal.map(hex);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); p.set(x, y, shade(C[d < 3 ? 2 : d < 5.5 ? 1 : 0], 0.95 + p.r() * 0.1)); }
+  for (let i = 0; i < S; i++) { p.set(i, 0, hex(frameC)); p.set(i, 15, hex(frameC)); p.set(0, i, hex(frameC)); p.set(15, i, hex(frameC)); p.set(i, 7, hex(frameC)); p.set(7, i, hex(frameC)); }
+}
 function planks90(p, base) { planks(p, base); const t = new Uint8ClampedArray(p.d); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const s = (x * S + y) * 4, o = (y * S + x) * 4; p.d[o] = t[s]; p.d[o + 1] = t[s + 1]; p.d[o + 2] = t[s + 2]; p.d[o + 3] = t[s + 3]; } }
 function frame(p, c) { for (let i = 0; i < S; i++) { p.set(i, 0, c); p.set(i, 15, c); p.set(0, i, c); p.set(15, i, c); } }
 function waterFrame(p, f) {

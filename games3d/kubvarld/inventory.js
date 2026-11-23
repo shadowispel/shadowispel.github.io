@@ -1,9 +1,9 @@
 /** Inventarie, stackar och tillverkningsrecept. Ingen DOM här. */
-import { B, I, TOOL0, maxStack, toolOf, SMELT, fuelOf, itemName, STAIR0, ARMOR0 } from './blocks.js';
+import { B, I, TOOL0, maxStack, toolOf, SMELT, fuelOf, itemName, STAIR0, ARMOR0, GOLD_TOOL0, TRAP0, BUTTON0, GATE0, REP0, PISTON0, STICKY0, DISP0, OBS0 } from './blocks.js';
 
 export const TAGS = {
-  '#planks': [B.spruce_planks, B.birch_planks, B.pine_planks],
-  '#log': [B.spruce_log, B.birch_log, B.pine_log],
+  '#planks': [B.spruce_planks, B.birch_planks, B.pine_planks, B.oak_planks],
+  '#log': [B.spruce_log, B.birch_log, B.pine_log, B.oak_log],
   '#stone': [B.cobble, B.mossy_cobble],
   '#wool': [41, 42, 43, 44, 45, 46, 47, 132, 133, 134, 135, 136]
 };
@@ -17,6 +17,7 @@ const RS = (out, n, list, cat) => RECIPES.push({ out, n, shapeless: list, cat })
 RS(B.spruce_planks, 4, [B.spruce_log], 'Grund');
 RS(B.birch_planks, 4, [B.birch_log], 'Grund');
 RS(B.pine_planks, 4, [B.pine_log], 'Grund');
+RS(B.oak_planks, 4, [B.oak_log], 'Grund');
 R(I.stick, 4, ['P', 'P'], { P: '#planks' }, 'Grund');
 R(B.workbench, 1, ['PP', 'PP'], { P: '#planks' }, 'Grund');
 R(B.torch, 4, ['C', 'S'], { C: I.coal, S: I.stick }, 'Grund');
@@ -28,6 +29,10 @@ for (const [m, t] of MATS) {
   R(TOOL0 + t * 4 + 2, 1, ['M', 'S', 'S'], { M: m, S: I.stick }, 'Verktyg');
   R(TOOL0 + t * 4 + 3, 1, ['M', 'M', 'S'], { M: m, S: I.stick }, 'Verktyg');
 }
+// guldverktyg och jordhackor i alla material
+[0, 1, 2, 3].forEach(k => R(GOLD_TOOL0 + k, 1, [['MMM', ' S ', ' S '], ['MM', 'MS', ' S'], ['M', 'S', 'S'], ['M', 'M', 'S']][k], { M: I.gold_ingot, S: I.stick }, 'Verktyg'));
+[['#planks', 354], [I.iron_ingot, 355], [I.gold_ingot, 356], [I.diamond, 357]].forEach(([m, id]) => R(id, 1, ['MM', ' S', ' S'], { M: m, S: I.stick }, 'Verktyg'));
+R(I.shield, 1, ['PIP', 'PPP', ' P '], { P: '#planks', I: I.iron_ingot }, 'Verktyg');
 R(B.furnace, 1, ['CCC', 'C C', 'CCC'], { C: '#stone' }, 'Bygg');
 R(B.chest, 1, ['PPP', 'P P', 'PPP'], { P: '#planks' }, 'Bygg');
 R(I.door, 2, ['PP', 'PP', 'PP'], { P: '#planks' }, 'Bygg');
@@ -91,7 +96,26 @@ R(I.shears, 1, [' I', 'I '], { I: I.iron_ingot }, 'Verktyg');
 R(I.compass, 1, [' I ', 'IGI', ' I '], { I: I.iron_ingot, G: B.glass }, 'Verktyg');
 R(I.clock, 1, [' G ', 'GLG', ' G '], { G: I.gold_ingot, L: B.glass }, 'Verktyg');
 R(I.rod, 1, ['  S', ' ST', 'S T'], { S: I.stick, T: I.string }, 'Verktyg');
-R(I.hoe, 1, ['CC', ' S', ' S'], { C: '#stone', S: I.stick }, 'Verktyg');
+R(I.hoe, 1, ['MM', ' S', ' S'], { M: '#stone', S: I.stick }, 'Verktyg');
+// odling
+RS(I.pumpkin_seeds, 4, [B.pumpkin], 'Grund');
+RS(I.melon_seeds, 1, [I.melon_slice], 'Grund');
+// fällucka, knapp, grind
+R(TRAP0, 2, ['PPP', 'PPP'], { P: '#planks' }, 'Bygg');
+R(GATE0, 1, ['SPS', 'SPS'], { S: I.stick, P: '#planks' }, 'Bygg');
+RS(BUTTON0, 1, [B.stone], 'Kretsar');
+// gnistkretsar
+R(B.spark_torch, 1, ['D', 'S'], { D: I.spark_dust, S: I.stick }, 'Kretsar');
+R(B.plate_stone, 1, ['SS'], { S: B.stone }, 'Kretsar');
+R(B.plate_wood, 1, ['PP'], { P: '#planks' }, 'Kretsar');
+R(REP0, 1, ['TDT', 'SSS'], { T: B.spark_torch, D: I.spark_dust, S: B.stone }, 'Kretsar');
+R(B.lamp, 1, [' D ', 'DGD', ' D '], { D: I.spark_dust, G: B.glass }, 'Kretsar');
+R(PISTON0, 1, ['PPP', 'CIC', 'CDC'], { P: '#planks', C: '#stone', I: I.iron_ingot, D: I.spark_dust }, 'Kretsar');
+RS(STICKY0, 1, [PISTON0, I.egg], 'Kretsar');
+R(DISP0, 1, ['CCC', 'CBC', 'CDC'], { C: '#stone', B: I.bow, D: I.spark_dust }, 'Kretsar');
+R(B.daylight, 1, ['GGG', 'DDD', 'SSS'], { G: B.glass, D: I.spark_dust, S: B.plank_slab }, 'Kretsar');
+R(B.note_block, 1, ['PPP', 'PDP', 'PPP'], { P: '#planks', D: I.spark_dust }, 'Kretsar');
+R(OBS0, 1, ['CCC', 'DDG', 'CCC'], { C: '#stone', D: I.spark_dust, G: B.glass }, 'Kretsar');
 // mat
 R(I.bread, 1, ['WWW'], { W: I.wheat }, 'Mat');
 RS(I.pie, 1, [B.pumpkin, I.egg, I.wheat], 'Mat');
@@ -154,6 +178,7 @@ export class Inventory {
     this.cursor = null;                      // stack på muspekaren
     this.craft = new Array(9).fill(null);
     this.armor = [null, null, null, null];        // hjälm, bröstplåt, benskydd, kängor
+    this.off = null;                              // andra handen (t.ex. sköld)
     this.onChange = null;
   }
   changed() { if (this.onChange) this.onChange(); }
@@ -192,16 +217,17 @@ export class Inventory {
     if (s.d >= t.dur) { this.slots[this.sel] = null; this.changed(); return true; }
     this.changed(); return false;
   }
-  serialize() { return { slots: this.slots.map(s => s && [s.id, s.n, s.d || 0]), sel: this.sel, armor: this.armor.map(s => s && [s.id, s.n, s.d || 0]) }; }
+  serialize() { return { slots: this.slots.map(s => s && [s.id, s.n, s.d || 0]), sel: this.sel, armor: this.armor.map(s => s && [s.id, s.n, s.d || 0]), off: this.off && [this.off.id, this.off.n, this.off.d || 0] }; }
   load(o) {
     if (!o) return;
     this.slots = o.slots.map(s => s ? { id: s[0], n: s[1], d: s[2] || 0 } : null);
     while (this.slots.length < 36) this.slots.push(null);
     this.sel = o.sel || 0;
     this.armor = [0, 1, 2, 3].map(i => { const s = o.armor && o.armor[i]; return s ? { id: s[0], n: s[1], d: s[2] || 0 } : null; });
+    this.off = o.off ? { id: o.off[0], n: o.off[1], d: o.off[2] || 0 } : null;
     this.changed();
   }
-  clear() { this.slots.fill(null); this.armor.fill(null); this.cursor = null; this.craft.fill(null); this.changed(); }
+  clear() { this.slots.fill(null); this.armor.fill(null); this.off = null; this.cursor = null; this.craft.fill(null); this.changed(); }
 }
 
 /* ---------- ugn ---------- */

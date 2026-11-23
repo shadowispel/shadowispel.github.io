@@ -8,7 +8,7 @@ const UNLOADED = [[0, 0, 0, 1, 1, 1]];
 function boxes(world, x, y, z) {
   const b = world.get(x, y, z);
   if (b < 0) return UNLOADED;
-  return World.boxesOf(b);
+  return world.collBoxes ? world.collBoxes(x, y, z, b) : World.boxesOf(b);
 }
 
 /** Kolliderar AABB (center x,z; fötter y; halvbredd hw; höjd h) mot block. Returnerar true om något överlappar. */

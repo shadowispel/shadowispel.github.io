@@ -422,6 +422,8 @@ export class Entities {
       else m.vel.y = Math.max(m.vel.y - 28 * dt, md.flutter ? -2.2 : -40);
       const r = moveBody(w, m.pos, m.vel, dt, { hw: Math.min(m.hw, 0.45), h: Math.min(m.h, 2.8), stepUp: 0.55, grounded: m.ground });
       m.ground = r.ground;
+      // ta sig upp ur vattnet mot en strandkant i stället för att fastna
+      if (inW && (r.hitX || r.hitZ)) m.vel.y = Math.max(m.vel.y, 5.5);
       m.climbing = false;
       if ((r.hitX || r.hitZ) && (tx || tz)) {
         if (md.climb && canTarget) { m.vel.y = 3.4; m.climbing = true; }

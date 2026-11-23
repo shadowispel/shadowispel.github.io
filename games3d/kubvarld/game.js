@@ -1,6 +1,6 @@
 /** En spelomgång i en värld: binder ihop värld, spelare, varelser, inventarie, HUD och sparning. */
 import * as THREE from 'three';
-import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0, armorOf, LAVA, isLava, waterLevel } from './blocks.js';
+import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0, armorOf, LAVA, isLava, waterLevel, isHoe, TRAP0, BUTTON0, GATE0, REP0, PISTON0, STICKY0, DISP0, OBS0, isTrap, isGate, isButton, isRep, DIR6 } from './blocks.js';
 import { World, DIR4, ckey } from './world.js';
 import { Sky } from './sky.js';
 import { Player } from './player.js';
@@ -12,9 +12,16 @@ import { matSound, birdChirp } from './sfx.js';
 import { placeTree, BIOMES } from './worldgen.js';
 import { mulberry } from './noise.js';
 import { kv, toast, submitScore, isTouchDevice } from '../../engine/kit.js';
-import { Journal } from './journal.js';
+import { Achievements } from './achievements.js';
+import { Circuits } from './circuits.js';
+import { hasCustomSkin } from './skin.js';
+
+const isSapling = id => (id >= B.spruce_sapling && id <= B.pine_sapling) || id === B.oak_sapling;
+const isLeaf = id => (id >= 16 && id <= 20 && id % 2 === 0) || id === B.oak_leaves;
+const H4_D6 = [0, 1, 4, 5];
 
 export const DAY_LEN = 600; // sekunder per dygn
+const SPLASH = new THREE.Color('#d8eef8'), BUBBLE = new THREE.Color('#bfe6ff');
 const SUN_SVG = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></g></svg>';
 const MOON_SVG = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/><circle cx="18" cy="5" r="1" fill="currentColor"/><circle cx="21" cy="9" r=".7" fill="currentColor"/></svg>';
 const REACH = 5, REACH_C = 6;
@@ -35,7 +42,7 @@ export class Game {
     this.flags = Object.assign({}, meta.flags || {});
     this.flags.tally = Object.assign({}, this.flags.tally || {});
     this.touch = isTouchDevice();
-    this.world = new World({ scene: this.scene, mats: this.mats, seed: meta.seed, fancy: this.settings.get('fancyLeaves') });
+    this.world = new World({ scene: this.scene, mats: this.mats, seed: meta.seed, fancy: this.settings.get('fancyLeaves'), genVer: (meta.version || 1) >= 2 ? 2 : 1 });
     this.applyView();
     this.world.onBlockChange = (x, y, z, o, n) => this._onBlockChange(x, y, z, o, n);
     this.world.onFall = (x, y, z, id) => this.ents.fallBlock(x, y, z, id);
@@ -45,6 +52,7 @@ export class Game {
     this.player.creative = this.creative;
     this.player.onLand = d => this._onLand(d);
     this.player.onStep = () => this._onStep();
+    this.player.onSplash = v => this._splash(v);
     this.ents = new Entities(this);
     this.inv = new Inventory();
     this.inv.onChange = () => { this._invDirty = true; };
@@ -63,7 +71,10 @@ export class Game {
     this.target = null; this._ray = {}; this.mine = null; this.useCd = 0; this.atkCd = 0; this.eatT = 0;
     this.ready = false; this.paused = false; this.sleeping = 0;
     this.saveT = 45; this.musicT = 0; this.ambT = 8; this.curMusic = null;
-    this.journal = new Journal(this);
+    this.achievements = new Achievements(this);
+    this.circuits = new Circuits(this);
+    this.world.onChunkReady = (c, m) => this.circuits.onChunkReady(c, m);
+    this.customSkin = hasCustomSkin();
     this.tutMoved = 0; this._lastPos = new THREE.Vector3();
     this.lastW = 0; this.lastSpace = 0;
     this.shake = 0; this.debug = false;
@@ -85,7 +96,6 @@ export class Game {
     document.getElementById('water').classList.remove('on');
     document.getElementById('hud').classList.remove('nohud');
     document.getElementById('debug').classList.add('hidden');
-    document.getElementById('tut').style.display = '';
   }
 
   /* ---------- start och laddning ---------- */
@@ -120,12 +130,11 @@ export class Game {
     this.ready = true;
     this._lastPos.copy(this.player.pos);
     this.log(this.creative ? (this.touch ? 'Kreativt läge: dubbeltryck Hoppa för att flyga.' : 'Kreativt läge: dubbeltryck mellanslag för att flyga.') : `Dag ${this.day}. Lycka till!`);
-    this.ui.setQuest(null);
   }
   _placeOnGround() {
     const W = this.world;
     const x0 = Math.floor(this.player.pos.x), z0 = Math.floor(this.player.pos.z);
-    const tree = id => id >= B.spruce_log && id <= B.pine_leaves;
+    const tree = id => (id >= B.spruce_log && id <= B.pine_leaves) || id === B.oak_log || id === B.oak_leaves;
     const ground = (x, z) => {
       for (let y = CY - 2; y > 1; y--) {
         const b = W.get(x, y, z); if (b < 0) return -1;
@@ -157,7 +166,7 @@ export class Game {
     let near = null, td = 1e9;
     for (let dz = -18; dz <= 18; dz++) for (let dx = -18; dx <= 18; dx++) {
       const d = dx * dx + dz * dz; if (d >= td || d < 4) continue;
-      for (let dy = -2; dy <= 4; dy++) { const b = W.get(best[0] + dx, best[1] + dy, best[2] + dz); if (b === B.spruce_log || b === B.birch_log || b === B.pine_log) { near = [dx, dz]; td = d; break; } }
+      for (let dy = -2; dy <= 4; dy++) { const b = W.get(best[0] + dx, best[1] + dy, best[2] + dz); if (b === B.spruce_log || b === B.birch_log || b === B.pine_log || b === B.oak_log) { near = [dx, dz]; td = d; break; } }
     }
     if (near) { this.player.yaw = Math.atan2(-near[0], -near[1]); this.player.pitch = -0.05; }
   }
@@ -205,7 +214,7 @@ export class Game {
         this.log(`God morgon! Dag ${this.day}.`, 'good');
         this.audio.play('levelup', { vol: 0.5 });
         this.ents.clearHostiles();
-        this._justSlept = true;
+        this._justSlept = true; this.tally('sleep', 1);
       }
     } else this.worldTime += dt / DAY_LEN;
 
@@ -239,10 +248,11 @@ export class Game {
       this.ui.gamepad(inp.gpAxis(0) * sp, inp.gpAxis(1) * sp, inp.pressed('Pad0'), inp.pressed('Pad2'));
       if (inp.pressed('Pad1')) this.closeInventory();
     }
-    if (inp.pressed('F3')) { this.debug = !this.debug; document.getElementById('debug').classList.toggle('hidden', !this.debug); document.getElementById('tut').style.display = this.debug ? 'none' : ''; }
+    if (inp.pressed('F3')) { this.debug = !this.debug; document.getElementById('debug').classList.toggle('hidden', !this.debug); }
     if (inp.pressed('F1')) document.getElementById('hud').classList.toggle('nohud');
     if (inp.pressed('KeyE', 'Pad3', 'Inv') && P.alive) { if (uiOpen) this.closeInventory(); else this.openInventory(); }
-    if (inp.pressed('KeyJ') && P.alive && !this.creative) { if (uiOpen && this.ui.mode === 'journal') this.closeInventory(); else if (!uiOpen) this.openInventory('journal'); }
+    if (inp.pressed('KeyL', 'Ach') && P.alive) { if (uiOpen && this.ui.mode === 'ach') this.closeInventory(); else if (!uiOpen) this.openInventory('ach'); }
+    if (inp.pressed('KeyF', 'Pad11') && P.alive && !uiOpen) this.swapHands();
     if (inp.pressed('KeyR') && P.alive && !this.creative) { if (!uiOpen) { this.ui.showBook = true; this.openInventory(); } else if (this.ui.mode === 'inv' || this.ui.mode === 'bench') { this.ui.showBook = !this.ui.showBook; this.ui.build(); this.ui.refresh(); } }
 
     // ---- spelare ----
@@ -253,6 +263,12 @@ export class Game {
     if (pr.stepped) this._onStep();
     const moved = Math.hypot(P.pos.x - this._lastPos.x, P.pos.z - this._lastPos.z);
     this.tutMoved += moved;
+    if (!this.creative && P.alive) {
+      if (moved > 0 && moved < 3) this.tally('walk', 1, moved);
+      const T = this.flags.tally;
+      if (P.pos.y < 16 && !T['depth:1']) this.tally('depth', 1);
+      if (P.pos.y >= 100 && P.ground && !T['peak:1']) this.tally('peak', 1);
+    }
     if (P.sprinting && P.ground) this._exh(moved * 0.1);
     if (P.inWater) this._exh(moved * 0.015);
     this._lastPos.copy(P.pos);
@@ -271,7 +287,7 @@ export class Game {
     // ---- handlingar ----
     this.useCd = Math.max(0, this.useCd - dt); this.atkCd = Math.max(0, this.atkCd - dt);
     if (!uiOpen && P.alive && !this.sleeping) this._actions(dt);
-    else { this.mine = null; this.crack.visible = false; this.eatT = 0; }
+    else { this.mine = null; this.crack.visible = false; this.eatT = 0; P.blocking = false; this.hand.block = 0; }
 
     // ---- överlevnad ----
     if (!this.creative && P.alive) this._survival(dt);
@@ -279,6 +295,7 @@ export class Game {
     // ---- värld ----
     W.update(P.pos.x, P.pos.z, dt);
     this.ents.update(dt);
+    this.circuits.update(dt);
     this._tickFish(dt);
     if (P.alive && !this.creative) this._lavaContact(dt);
     this._heldInfo();
@@ -303,6 +320,13 @@ export class Game {
     }
     this.app.renderer.setClearColor(U.uFogColor.value);
     document.getElementById('water').classList.toggle('on', P.headInWater);
+    U.uUnderwater.value = P.headInWater ? 1 : 0;
+    this._underwaterAudio(P.headInWater);
+    // simtag och bubblor
+    if (P.inWater && !P.flying) {
+      if ((P.swimT || 0) - (this._strokeAt || 0) > 1.6) { this._strokeAt = P.swimT; matSound(this.audio, 'water', 'step', { vol: P.headInWater ? 0.5 : 0.9 }); }
+      if (P.headInWater && Math.random() < dt * 3) this.ents.particle(P.pos.x + (Math.random() - 0.5) * 0.4, P.pos.y + P.camY - 0.2, P.pos.z + (Math.random() - 0.5) * 0.4, 0, 1.4, 0, BUBBLE, 0.05, 1.2, -0.6, false);
+    }
     lightColor(W, this.sky.skyLight, P.pos.x, P.pos.y + 1, P.pos.z, P.light, 0.05);
     if (((this._hbT = (this._hbT || 0) - dt)) <= 0) {
       // mät snabbfältet (och mätarna ovanför) så att vanten kan placeras fritt från det
@@ -318,7 +342,7 @@ export class Game {
     this.ui.updateStats(P, this.creative);
     if (this.ui.mode === 'furnace' && (this.time * 4 | 0) !== this._furnT) { this._furnT = this.time * 4 | 0; this.ui.refresh(); }
     if (this.debug && (this.time * 5 | 0) !== this._dbgT) { this._dbgT = this.time * 5 | 0; this._updateDebug(); }
-    if (!this.creative) this.journal.update(dt, this.touch);
+    this.achievements.update(dt);
     this._ambience(dt);
     this._dayEvents();
     // autosparning
@@ -333,6 +357,17 @@ export class Game {
     const rmb = inp.mouseDown(2) || inp.down('Pad6', 'Use');
     const rmbP = inp.mousePressed(2) || inp.pressed('Pad6', 'Use');
     const held = this.inv.held;
+    // sköld: håll Använd med sköld i handen (eller i andra handen med vapen/tom hand)
+    {
+      const off = this.inv.off, hs = held && ITEMS[held.id] && ITEMS[held.id].shield, os = off && ITEMS[off.id] && ITEMS[off.id].shield;
+      const ht = held && toolOf(held.id);
+      const freeHand = !held || (ht && ['sword', 'axe', 'pick', 'shovel'].includes(ht.type));
+      const tgt = this.target && BLOCKS[this.target.id];
+      const inter = tgt && tgt.interact && !P.sneaking;
+      P.blocking = !!(rmb && (hs || (os && freeHand)) && !inter);
+      this.hand.block = P.blocking ? (hs ? 1 : 2) : 0;
+      if (P.blocking) { this.mine = null; this.crack.visible = false; this.eatT = 0; return; }
+    }
     // anfall
     if (this.mobTarget && lmbP && this.atkCd <= 0) {
       const m = this.mobTarget.mob;
@@ -392,6 +427,7 @@ export class Game {
       const id = this.target.id; const want = BLOCKS[id] && BLOCKS[id].drop > 0 && !this.creative ? id : id;
       let pick = id;
       if (isDoor(id)) pick = I.door; else if (isBed(id)) pick = I.bed; else if (id >= 36 && id <= 39) pick = B.torch; else if (id === B.furnace_lit) pick = B.furnace; else if (id >= 66 && id <= 72) pick = WATER;
+      else if (BLOCKS[id] && !BLOCKS[id].creative && BLOCKS[id].drop > 0) pick = BLOCKS[id].drop;
       const at = this.inv.slots.findIndex((s, i) => i < 9 && s && s.id === pick);
       if (at >= 0) { this.inv.sel = at; this.onSelChange(); }
       else if (this.creative) { this.inv.slots[this.inv.sel] = { id: pick, n: 64, d: 0 }; this.inv.changed(); this.onSelChange(); }
@@ -442,7 +478,7 @@ export class Game {
     const k = x + ',' + y + ',' + z;
     if (W.chests.has(k)) { for (const s of W.chests.get(k)) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5, s.d); W.chests.delete(k); }
     if (W.furnaces.has(k)) { const f = W.furnaces.get(k); for (const s of [f.in, f.fuel, f.out]) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5); W.furnaces.delete(k); }
-    W.saplings.delete(k);
+    W.saplings.delete(k); this.circuits.forget(x, y, z);
     if (id === B.ice && !this.creative) W.set(x, y, z, WATER); else W.set(x, y, z, 0);
     this.ents.blockBurst(x, y, z, id, this.creative ? 10 : 18);
     matSound(this.audio, d.sound, 'break');
@@ -470,6 +506,7 @@ export class Game {
       else if (id === B.tallgrass && r < 0.172) drop = I.carrot;
       else if (id === B.tallgrass && r < 0.184) drop = I.potato;
       else if ((id === B.birch_leaves || id === B.spruce_leaves) && r > 0.98) drop = I.apple;
+      else if (id === B.oak_leaves) drop = r < 0.07 ? B.oak_sapling : r < 0.12 ? I.stick : r > 0.96 ? I.apple : 0;
       else drop = 0;
       // saxen klipper löv och gräs hela
       const held = this.inv.held;
@@ -478,6 +515,7 @@ export class Game {
     const cd = d.crop;
     if (cd) {
       if (cd.kind === 'wheat') { if (cd.stage === cd.max) { this.ents.drop(I.wheat, 1, x + 0.5, y + 0.4, z + 0.5); n = 1 + (Math.random() * 3 | 0); } else n = 1; drop = I.seeds; }
+      else if (cd.kind === 'pumpkin' || cd.kind === 'melon') { drop = cd.kind === 'pumpkin' ? I.pumpkin_seeds : I.melon_seeds; n = cd.stage === cd.max ? 1 + (Math.random() * 2 | 0) : 1; }
       else { drop = cd.kind === 'carrot' ? I.carrot : I.potato; n = cd.stage === cd.max ? 2 + (Math.random() * 3 | 0) : 1; }
     }
     if (id === B.melon) n = 3 + (Math.random() * 5 | 0);
@@ -534,7 +572,7 @@ export class Game {
       if (mob.model.parts.wool) for (const w of mob.model.parts.wool) w.visible = false;
       if (mob.model.parts.skin) mob.model.parts.skin.visible = true;
       this.ents.drop(B.wool_white, 1 + (Math.random() * 3 | 0), mob.pos.x, mob.pos.y + 1, mob.pos.z);
-      matSound(this.audio, 'wool', 'break'); if (!this.creative && inv.wearHeld(1)) this._broke(id);
+      matSound(this.audio, 'wool', 'break'); this.tally('shear', 1); if (!this.creative && inv.wearHeld(1)) this._broke(id);
       return true;
     }
     if (id === I.bucket_milk) { P.food = Math.min(20, P.food + 4); P.sat = Math.min(P.food, P.sat + 3); this._swapHeld(I.bucket); this.audio.play('power', { vol: 0.35 }); this.tally('e', id); return true; }
@@ -601,7 +639,7 @@ export class Game {
     const t = held && toolOf(held.id);
     if (!t || !held.d) { this.toast('Håll ett slitet verktyg eller en rustningsdel och använd städet för att laga det.'); return; }
     const a = armorOf(held.id);
-    const mat = a ? [I.leather, I.iron_ingot, I.gold_ingot, I.diamond][a.mat] : (held.id === I.bow || held.id === I.rod) ? I.string : held.id === I.shears ? I.iron_ingot : held.id === I.hoe ? '#stone' : ['#planks', '#stone', I.iron_ingot, I.diamond][t.tier];
+    const mat = a ? [I.leather, I.iron_ingot, I.gold_ingot, I.diamond][a.mat] : (held.id === I.bow || held.id === I.rod) ? I.string : held.id === I.shears ? I.iron_ingot : t.rep || ['#planks', '#stone', I.iron_ingot, I.diamond][t.tier] || '#planks';
     if (!this.creative && this.inv.count(mat) <= 0) { this.toast('Du behöver ' + wantName(mat).toLowerCase() + ' för att laga det.'); this.audio.play('error'); return; }
     if (!this.creative) this.inv.take(mat, 1);
     held.d = Math.max(0, held.d - Math.ceil(t.dur * 0.3));
@@ -609,20 +647,22 @@ export class Game {
     this.log('Du lagade ' + itemName(held.id).toLowerCase() + ' på städet.', 'good');
   }
   _lever(T) {
-    const W = this.world, on = T.id === B.lever;
-    W.set(T.x, T.y, T.z, on ? B.lever_on : B.lever, { noUpdate: true });
-    let n = 0;
-    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
-      const x = T.x + dx, y = T.y + dy, z = T.z + dz, b = W.get(x, y, z);
-      if (!isDoor(b)) continue;
-      const dd = BLOCKS[b].door; if (dd.upper) continue;
-      W.set(x, y, z, DOOR0 + (on ? 4 : 0) + dd.f, { noUpdate: true });
-      if (isDoor(W.get(x, y + 1, z))) W.set(x, y + 1, z, DOOR0 + 8 + (on ? 4 : 0) + dd.f, { noUpdate: true });
-      n++;
-    }
-    matSound(this.audio, 'wood', 'hit', { vol: 1.2 }); this.audio.play('click', { vol: 0.5 });
-    if (n) matSound(this.audio, 'wood', 'place', { vol: 0.8 });
+    // spaken är en strömkälla – kretsmotorn sköter dörrar, lampor och kolvar i närheten
+    const on = T.id === B.lever;
+    this.world.set(T.x, T.y, T.z, on ? B.lever_on : B.lever, { noUpdate: true });
+    matSound(this.audio, 'wood', 'hit', { vol: 1.2 }); this.audio.play('click', { vol: 0.5, pitch: on ? 1 : 0.8 });
   }
+  /** Byt föremål mellan handen och andra handen (F) */
+  swapHands() {
+    const inv = this.inv, h = inv.slots[inv.sel];
+    inv.slots[inv.sel] = inv.off; inv.off = h;
+    inv.changed(); this.onSelChange(); this.audio.play('click', { vol: 0.35 });
+    if (inv.off) this.log(itemName(inv.off.id) + ' i andra handen.');
+  }
+  /** Riktning spelaren tittar åt: horisontellt index 0 +x, 1 −x, 2 +z, 3 −z */
+  _look4() { const P = this.player, lx = -Math.sin(P.yaw), lz = -Math.cos(P.yaw); return Math.abs(lx) > Math.abs(lz) ? (lx > 0 ? 0 : 1) : (lz > 0 ? 2 : 3); }
+  /** Som _look4 men med upp/ned (DIR6-index) */
+  _look6() { const P = this.player; return P.pitch > 0.85 ? 2 : P.pitch < -0.85 ? 3 : H4_D6[this._look4()]; }
   _ignite(x, y, z, fuse) { this.world.set(x, y, z, 0); this.ents.primeTnt(x, y, z, fuse); }
   explode(c, r = 3.3) {
     const W = this.world, P = this.player;
@@ -660,7 +700,7 @@ export class Game {
     if (P.burnT > 0) {
       P.burnT -= dt; this._burnAcc = (this._burnAcc || 0) + dt;
       if (Math.random() < dt * 20) this.ents.particle(P.pos.x + (Math.random() - 0.5) * 0.6, P.pos.y + Math.random() * 1.6, P.pos.z + (Math.random() - 0.5) * 0.6, 0, 1.5, 0, new THREE.Color('#ff9a30'), 0.1, 0.5, -0.2, true);
-      if (this._burnAcc >= 0.5) { this._burnAcc = 0; this.damagePlayer(inLava ? 3 : 1, null, 0, 'lava', true); }
+      if (this._burnAcc >= 0.5) { this._burnAcc = 0; this.damagePlayer(inLava ? 3 : 1, null, 0, 'lava', true); if (P.alive) this.tally('lavahurt', 1); }
     }
   }
   /** Kompass och klocka: visar en liten rad i HUD:en när de hålls */
@@ -701,11 +741,12 @@ export class Game {
     if (cd) {
       if (cd.stage >= cd.max) return false;
       W.set(T.x, T.y, T.z, id - cd.stage + cd.max, { noUpdate: true }); W.saplings.delete(T.x + ',' + T.y + ',' + T.z); ok = true;
+      if (cd.kind === 'pumpkin' || cd.kind === 'melon') W.saplings.set(T.x + ',' + T.y + ',' + T.z, this.worldTime + CROP_T());
     } else if (id === B.reed) {
       let top = T.y; while (W.get(T.x, top + 1, T.z) === B.reed) top++;
       let h = 1; while (W.get(T.x, top - h, T.z) === B.reed) h++;
       if (h < 3 && W.get(T.x, top + 1, T.z) === 0) { W.set(T.x, top + 1, T.z, B.reed); ok = true; }
-    } else if (id >= B.spruce_sapling && id <= B.pine_sapling) {
+    } else if (isSapling(id)) {
       W.saplings.set(T.x + ',' + T.y + ',' + T.z, this.worldTime - 1); this._sapT = -1; this._tickSaplings(); ok = true;
     } else if (id === B.grass) {
       const fl = [B.tallgrass, B.tallgrass, B.tallgrass, B.fern, B.bluebell, B.buttercup, B.daisy, B.fireweed];
@@ -744,13 +785,19 @@ export class Game {
       if (d.interact === 'bed') { this._sleep(T); return true; }
       if (d.interact === 'anvil') { this._anvil(inv.held); return true; }
       if (d.interact === 'lever') { this._lever(T); return true; }
+      if (d.interact === 'trapdoor') { const t = d.trap; W.set(T.x, T.y, T.z, TRAP0 + t.f + (t.open ? 0 : 4), { noUpdate: true }); matSound(this.audio, 'wood', 'place', { vol: 0.8 }); return true; }
+      if (d.interact === 'gate') { const q = d.gate; W.set(T.x, T.y, T.z, GATE0 + q.ax + (q.open ? 0 : 2), { noUpdate: true }); matSound(this.audio, 'wood', 'place', { vol: 0.8 }); return true; }
+      if (d.interact === 'button') { this.circuits.press(T.x, T.y, T.z, 10); this.audio.play('click', { vol: 0.5 }); return true; }
+      if (d.interact === 'repeater') { const n = this.circuits.cycleDelay(T.x, T.y, T.z); this.toast('Fördröjning: ' + n + (n === 1 ? ' steg' : ' steg') + ' (' + (n / 10).toFixed(1).replace('.', ',') + ' s)'); this.audio.play('click', { vol: 0.4, pitch: 0.8 + n * 0.1 }); this.circuits.markAround(T.x, T.y, T.z); return true; }
+      if (d.interact === 'note') { const n = this.circuits.cycleNote(T.x, T.y, T.z); this.toast('Ton: ' + this.circuits.noteName(n)); return true; }
+      if (d.interact === 'dispenser') { if (!W.chests.has(k)) W.chests.set(k, new Array(9).fill(null)); this.openInventory('chest', { c: W.chests.get(k), key: k, title: 'Utmatare' }); this.audio.play('select', { vol: 0.5, pitch: 0.6 }); return true; }
       if (d.interact === 'tnt' && inv.held && inv.held.id === B.torch) { this._ignite(T.x, T.y, T.z, 3); this.tally('tnt', 1); return true; }
     }
     const held = inv.held;
     if (!held) return false;
     let id = held.id;
     if (id === I.bone_meal) return pressed ? this._boneMeal(T) : false;
-    if (id === I.hoe) {
+    if (isHoe(id)) {
       if (!pressed) return false;
       if ((T.id === B.grass || T.id === B.dirt || T.id === B.snowgrass) && T.ny === 1 && W.get(T.x, T.y + 1, T.z) <= 0) {
         if (W.get(T.x, T.y + 1, T.z) < 0) return false;
@@ -793,11 +840,20 @@ export class Game {
     let bid = placeOf(id);
     if (!bid) return false;
     let bd = BLOCKS[bid];
-    if (bd.wall !== undefined) {
+    if (isButton(bid)) {
+      if (T.ny === -1) return false;
+      bid = T.ny === 1 ? BUTTON0 + 4 : BUTTON0 + (T.nx === 1 ? 1 : T.nx === -1 ? 0 : T.nz === 1 ? 3 : 2);
+    } else if (bd.wall !== undefined) {
       // stege och tavla fästs mot väggen man klickar på
       if (T.ny !== 0) return false;
       bid = bid - bd.wall + (T.nx === 1 ? 1 : T.nx === -1 ? 0 : T.nz === 1 ? 3 : 2);
     } else if (bd.stair !== undefined) bid = bid - bd.stair + f;
+    else if (isTrap(bid)) bid = TRAP0 + (T.ny === 0 ? (T.nx === 1 ? 1 : T.nx === -1 ? 0 : T.nz === 1 ? 3 : 2) : this._look4());
+    else if (isGate(bid)) bid = GATE0 + (this._look4() < 2 ? 1 : 0);
+    else if (isRep(bid)) bid = REP0 + this._look4();
+    else if (bd.piston) bid = (bd.piston.sticky ? STICKY0 : PISTON0) + (this._look6() ^ 1);
+    else if (bd.disp !== undefined) bid = DISP0 + (this._look4() ^ 1);
+    else if (bd.obs !== undefined) { const oi = DIR6.findIndex(([a, b, c]) => a === -T.nx && b === -T.ny && c === -T.nz); bid = OBS0 + (oi >= 0 ? oi : this._look6() ^ 1); }
     else if (bid === B.glass_pane && f % 2) bid = B.glass_pane_1;
     bd = BLOCKS[bid];
     if (bid === B.torch) {
@@ -805,6 +861,7 @@ export class Game {
       if (T.ny === 0) bid = T.nx === 1 ? 37 : T.nx === -1 ? 36 : T.nz === 1 ? 39 : 38;
       else if (!T_SOLID[Math.max(0, W.get(tx, ty - 1, tz))]) return false;
     }
+    if (bd.support && !T_SOLID[Math.max(0, W.get(tx, ty - 1, tz))]) return false;
     if (bd.model === M_CROSS) {
       const below = W.get(tx, ty - 1, tz);
       let okGround;
@@ -815,7 +872,7 @@ export class Game {
     }
     if (T_SOLID[bid] && this._blocked(tx, ty, tz)) return false;
     W.set(tx, ty, tz, bid);
-    if (bid >= B.spruce_sapling && bid <= B.pine_sapling) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + (0.6 + Math.random() * 1.2) / 1);
+    if (isSapling(bid)) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + (0.6 + Math.random() * 1.2) / 1);
     if (bd.crop) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + CROP_T());
     if (bid === B.reed) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + 0.3 + Math.random() * 0.3);
     if (bid === B.furnace) W.furnaces.set(tx + ',' + ty + ',' + tz, newFurnace());
@@ -849,7 +906,7 @@ export class Game {
     P.vel.set(0, 0, 0);
   }
   _onBlockChange(x, y, z, o, n) {
-    if (isDoor(n) || isDoor(o)) return;
+    this.circuits.onBlockChange(x, y, z, o, n);
   }
 
   /* ---------- överlevnad ---------- */
@@ -872,6 +929,18 @@ export class Game {
     const P = this.player;
     if (this.creative || !P.alive || amount <= 0) return;
     if (P.hurtT > 0.15 && !silent) return;
+    // sköld: parera attacker framifrån
+    if (P.blocking && dir && source !== 'fall' && source !== 'lava') {
+      const lx = -Math.sin(P.yaw), lz = -Math.cos(P.yaw), dl = Math.hypot(dir.x, dir.z) || 1;
+      if (-(dir.x * lx + dir.z * lz) / dl > 0.3) {
+        P.vel.x += dir.x * kb * 0.25; P.vel.z += dir.z * kb * 0.25;
+        matSound(this.audio, 'metal', 'hit', { vol: 1.2 }); this.audio.play('hit', { vol: 0.4, pitch: 0.6 });
+        const sh = this.inv.held && ITEMS[this.inv.held.id] && ITEMS[this.inv.held.id].shield ? this.inv.held : this.inv.off;
+        if (sh && !this.creative) { sh.d = (sh.d || 0) + Math.max(1, Math.round(amount)); const t = toolOf(sh.id); if (t && sh.d >= t.dur) { if (sh === this.inv.off) this.inv.off = null; else this.inv.slots[this.inv.sel] = null; this._broke(sh.id); } this.inv.changed(); }
+        this.tally('block', 1); this.hand.blockHit = 1;
+        return 'blocked';
+      }
+    }
     if (source !== 'fall' && source !== 'svält' && source !== 'drunkning') amount = this._armorReduce(amount);
     P.health -= amount; P.hurtT = 0.5;
     if (dir) { P.vel.x += dir.x * kb; P.vel.z += dir.z * kb; P.vel.y = Math.max(P.vel.y, 4.5); }
@@ -886,7 +955,29 @@ export class Game {
     if (this.creative) return;
     const dmg = Math.floor(dist - 3);
     const below = this.world.get(Math.floor(P.pos.x), Math.floor(P.pos.y - 0.2), Math.floor(P.pos.z));
-    if (dmg > 0 && !isWater(below) && !isBed(below)) { this.damagePlayer(dmg, null, 0, 'fall', true); this.audio.play('land'); }
+    if (dmg > 0 && !isWater(below) && !isBed(below)) { this.damagePlayer(dmg, null, 0, 'fall', true); this.audio.play('land'); if (dist >= 15 && P.alive) this.tally('bigfall', 1); }
+  }
+  /** Plask när spelaren går/faller i vatten */
+  _splash(v) {
+    const P = this.player;
+    if (v < 1.5 && this.time - (this._splashT || -9) < 1) return;
+    this._splashT = this.time;
+    const n = Math.min(26, 6 + v * 2.5);
+    for (let i = 0; i < n; i++) this.ents.particle(P.pos.x + (Math.random() - 0.5) * 0.8, P.pos.y + 0.6, P.pos.z + (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 3, 2 + Math.random() * (2 + v * 0.4), (Math.random() - 0.5) * 3, SPLASH, 0.07 + Math.random() * 0.06, 0.6 + Math.random() * 0.4, 1, false);
+    matSound(this.audio, 'water', 'break', { vol: Math.min(1.6, 0.5 + v * 0.12) });
+  }
+  /** Dämpat ljud under ytan: lågpassfilter mellan ljudbussarna och huvudvolymen */
+  _underwaterAudio(on) {
+    const a = this.audio; if (!a.ctx || !a.sfxBus) return;
+    if (!a._kvLP) {
+      try {
+        const f = a.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 20000; f.Q.value = 0.7;
+        a.sfxBus.disconnect(); a.musicBus.disconnect(); a.sfxBus.connect(f); a.musicBus.connect(f); f.connect(a.master);
+        a._kvLP = f;
+      } catch (e) { a._kvLP = { frequency: { setTargetAtTime() { } } }; }
+    }
+    if (on === this._uwOn) return; this._uwOn = on;
+    a._kvLP.frequency.setTargetAtTime(on ? 650 : 20000, a.ctx.currentTime, 0.08);
   }
   _groundSound() { const P = this.player; const b = this.world.get(Math.floor(P.pos.x), Math.floor(P.pos.y - 0.2), Math.floor(P.pos.z)); return b > 0 && BLOCKS[b] ? BLOCKS[b].sound : 'stone'; }
   _onStep() { if (!this.player.sneaking) matSound(this.audio, this._groundSound(), 'step', { vol: 0.9 }); }
@@ -903,6 +994,7 @@ export class Game {
     this.lifeScoreSubmitted = true;
     // släpp allt
     for (let i = 0; i < 4; i++) { const s = this.inv.armor[i]; if (s) { this.ents.drop(s.id, 1, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.armor[i] = null; } }
+    if (this.inv.off) { const s = this.inv.off; this.ents.drop(s.id, s.n, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.off = null; }
     for (let i = 0; i < 36; i++) { const s = this.inv.slots[i]; if (s) { this.ents.drop(s.id, s.n, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.slots[i] = null; } }
     this.inv.changed();
     this.audio.play('lose', { vol: 0.7 });
@@ -937,10 +1029,12 @@ export class Game {
   closeInventory() { this.ui.close(); }
   onInventoryClosed() { this.app.onUiClosed(); }
   onSelChange() { this.ui.updateHotbar(true); this.mine = null; this.eatT = 0; }
+  /** Ny figur sparad i Min figur – byt utseende direkt */
+  setSkin(skin) { this.player.setSkin(skin); this.customSkin = true; }
   onPickup(id, n) { this.tally('p', id, n); }
   onCrafted(id, n) { this.tally('c', id, n); this.audio.play('select', { vol: 0.4 }); }
   onKill(type) { this.tally('k', type); }
-  /* ---------- räknare för äventyrsdagboken ---------- */
+  /* ---------- räknare (för prestationer) ---------- */
   tally(kind, key, n = 1) { const k = kind + ':' + key, t = this.flags.tally; t[k] = (t[k] || 0) + n; }
   tl(kind, keys) { let s = 0; const t = this.flags.tally; for (const k of keys) s += t[kind + ':' + k] || 0; return s; }
   have(id) { const t = this.flags.tally, k = 'h:' + id; const c = this.inv.count(id); if (c > (t[k] || 0)) t[k] = c; return t[k] || 0; }
@@ -980,7 +1074,9 @@ export class Game {
       W.saplings.delete(k);
       const cd = BLOCKS[id] && BLOCKS[id].crop;
       if (cd) {
-        if (cd.stage < cd.max && W.get(x, y - 1, z) === B.farmland) { W.set(x, y, z, id + 1, { noUpdate: true }); if (cd.stage + 1 < cd.max) W.saplings.set(k, this.worldTime + CROP_T()); }
+        const fruit = cd.kind === 'pumpkin' || cd.kind === 'melon';
+        if (cd.stage < cd.max && W.get(x, y - 1, z) === B.farmland) { W.set(x, y, z, id + 1, { noUpdate: true }); if (cd.stage + 1 < cd.max || fruit) W.saplings.set(k, this.worldTime + CROP_T()); }
+        else if (fruit && cd.stage === cd.max) { this._growFruit(x, y, z, cd.kind === 'pumpkin' ? B.pumpkin : B.melon); W.saplings.set(k, this.worldTime + CROP_T() * 1.5); }
         continue;
       }
       if (id === B.reed) {
@@ -988,17 +1084,28 @@ export class Game {
         if (h < 3 && W.get(x, y + 1, z) === 0) { W.set(x, y + 1, z, B.reed, { noUpdate: true }); W.saplings.set(x + ',' + (y + 1) + ',' + z, this.worldTime + 0.4 + Math.random() * 0.3); }
         continue;
       }
-      if (id < B.spruce_sapling || id > B.pine_sapling) continue;
+      if (!isSapling(id)) continue;
       // plats?
       let free = true;
-      for (let dy = 1; dy < 8 && free; dy++) { const b = W.get(x, y + dy, z); if (b !== 0 && !(b >= 16 && b <= 20 && b % 2 === 0)) free = false; }
+      for (let dy = 1; dy < 8 && free; dy++) { const b = W.get(x, y + dy, z); if (b !== 0 && !isLeaf(b)) free = false; }
       if (!free) { W.saplings.set(k, this.worldTime + 0.3); continue; }
       W.set(x, y, z, 0, { noUpdate: true });
-      const type = id === B.spruce_sapling ? 'spruce' : id === B.birch_sapling ? 'birch' : 'pine';
+      const type = id === B.spruce_sapling ? 'spruce' : id === B.birch_sapling ? 'birch' : id === B.oak_sapling ? 'oak' : 'pine';
       const r = mulberry((x * 73 + z * 31 + y) >>> 0);
-      placeTree((bx, by, bz, bid, force) => { const c = W.get(bx, by, bz); if (c === 0 || (c > 0 && BLOCKS[c].replace && !isWater(c)) || (force && c >= 16 && c <= 20)) W.set(bx, by, bz, bid, { noUpdate: true }); }, type, x, y, z, r);
+      placeTree((bx, by, bz, bid, force) => { const c = W.get(bx, by, bz); if (c === 0 || (c > 0 && BLOCKS[c].replace && !isWater(c)) || (force && isLeaf(c))) W.set(bx, by, bz, bid, { noUpdate: true }); }, type, x, y, z, r);
       if (this.player.pos.distanceTo(this._tmp.set(x, y, z)) < 24) this.log('En planta har vuxit till ett träd.', 'good');
     }
+  }
+  /** Mogen stjälk: sätt en pumpa/melon bredvid (om det inte redan finns en) */
+  _growFruit(x, y, z, fruit) {
+    const W = this.world;
+    if (DIR4.some(([dx, dz]) => { const b = W.get(x + dx, y, z + dz); return b === B.pumpkin || b === B.melon; })) return;
+    const [dx, dz] = DIR4[Math.random() * 4 | 0], b = W.get(x + dx, y, z + dz), below = W.get(x + dx, y - 1, z + dz);
+    if (!(b === 0 || (b > 0 && BLOCKS[b].replace && !isWater(b)))) return;
+    if (![B.grass, B.dirt, B.farmland, B.snowgrass].includes(below)) return;
+    W.set(x + dx, y, z + dz, fruit);
+    this.tally('fruit', 1);
+    if (this.player.pos.distanceTo(this._tmp.set(x, y, z)) < 24) this.log((fruit === B.pumpkin ? 'En pumpa' : 'En melon') + ' har vuxit fram.', 'good');
   }
   _randomTicks() {
     // gräs sprider sig till jord i ljus
@@ -1047,6 +1154,7 @@ export class Game {
       `Chunkar: ${loaded} laddade, ${meshed} meshade, radie ${W.radius}  Frö: ${this.meta.seed}\n` +
       `Varelser: ${this.ents.mobs.length}${this.ents.mobs.length ? ' (' + this.ents.census() + ')' : ''}\n` +
       `Föremål: ${this.ents.drops.length}  Ritanrop: ${info.render.calls}  Trianglar: ${(info.render.triangles / 1000).toFixed(0)}k\n` +
+      `Kretsar: ${this.circuits.stats.ms.toFixed(2)} ms/steg · ${this.circuits.level.size} ledningar\n` +
       `Generering: ${(W.stats.genMs / Math.max(1, W.stats.gens)).toFixed(1)} ms/chunk  Meshning: ${(W.stats.meshMs / Math.max(1, W.stats.meshes)).toFixed(1)} ms/chunk`;
   }
   _dayEvents() {
@@ -1092,7 +1200,7 @@ export class Game {
       worldTime: this.worldTime, played: Date.now(), day: this.day,
       player: { pos: [P.pos.x, P.pos.y, P.pos.z], yaw: P.yaw, pitch: P.pitch, health: P.alive ? P.health : 20, food: P.alive ? P.food : 20, sat: P.sat, flying: P.flying, view: P.view },
       inv: this.inv.serialize(), spawn: this.spawn, bed: this.bed, stats: this.stats, flags: this.flags,
-      furnaces: [...this.world.furnaces], chests: [...this.world.chests].map(([k, c]) => [k, c]), saplings: [...this.world.saplings]
+      furnaces: [...this.world.furnaces], chests: [...this.world.chests].map(([k, c]) => [k, c]), saplings: [...this.world.saplings], circ: this.circuits.serialize()
     });
   }
   async save() {
@@ -1140,6 +1248,7 @@ export class Game {
     this.scene.remove(this.hl); this.scene.remove(this.crack);
     this.hl.geometry.dispose(); this.hl.material.dispose(); this.crack.geometry.dispose(); this.crack.material.dispose(); this.crackTex.dispose();
     this.app.renderer.info.autoReset = true;
+    this._underwaterAudio(false);
     this.audio.stopMusic();
   }
 }

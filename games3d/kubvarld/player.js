@@ -1,10 +1,11 @@
 /** Spelaren: rörelse, kollision, simning, flygning, kamera (första/tredje person). */
 import * as THREE from 'three';
 import { moveBody, overlaps } from './physics.js';
-import { isWater, BLOCKS, ARMOR_MATS, armorOf } from './blocks.js';
-import { buildModel } from './models.js';
+import { isWater, BLOCKS, ARMOR_MATS, armorOf, ITEMS } from './blocks.js';
+import { buildSkinModel, loadSkin } from './skin.js';
 
 const HW = 0.3, H = 1.8, H_SNEAK = 1.5;
+const HURT = new THREE.Color(1, 0.4, 0.4);
 
 export class Player {
   constructor(game) {
@@ -18,14 +19,17 @@ export class Player {
     this.fallY = null; this.walkDist = 0; this.bob = 0; this.bobAmt = 0;
     this.view = 0; // 0 = första, 1 = bakom, 2 = framifrån
     this.eyeH = 1.62; this.camY = 1.62;
-    this.model = buildModel('player');
+    this.model = buildSkinModel(loadSkin());
+    this.blocking = false;
     this.model.root.visible = false;
     game.scene.add(this.model.root);
     this.swing = 0; this.hurtT = 0; this.light = new THREE.Color(1, 1, 1);
     this.onLand = null; this.onStep = null;
     this._camTmp = new THREE.Vector3(); this._dir = new THREE.Vector3();
   }
-  dispose() { this.g.scene.remove(this.model.root); this.model.root.traverse(o => { if (o.geometry) o.geometry.dispose(); }); this.model.mat.dispose(); if (this.model.armorMats) this.model.armorMats.forEach(m => m.dispose()); }
+  dispose() { this.g.scene.remove(this.model.root); this.model.dispose(); }
+  /** Byt figurens utseende (skin-objekt från skin.js) */
+  setSkin(skin) { this.model.setSkin(skin); }
   get height() { return this.sneaking && !this.flying ? H_SNEAK : H; }
   eye(out = new THREE.Vector3()) { return out.set(this.pos.x, this.pos.y + this.camY, this.pos.z); }
   lookDir(out = new THREE.Vector3()) {
@@ -40,21 +44,25 @@ export class Player {
     // tillstånd
     const fx = Math.floor(this.pos.x), fz = Math.floor(this.pos.z);
     const feet = w.get(fx, Math.floor(this.pos.y + 0.1), fz), waist = w.get(fx, Math.floor(this.pos.y + 0.8), fz);
+    const wasIn = this.inWater;
     this.inWater = isWater(feet) || isWater(waist);
+    // plask när man går eller faller i vattnet
+    if (this.inWater && !wasIn && this.onSplash) this.onSplash(Math.max(0, -this.vel.y));
     this.headInWater = isWater(w.get(fx, Math.floor(this.pos.y + this.camY + 0.08), fz));
     const climbAt = id => id > 0 && BLOCKS[id] && BLOCKS[id].climb;
     this.onLadder = climbAt(feet) || climbAt(waist);
-    if (!this.flying) {
+    if (!this.flying && !this.inWater) {
       const wantSneak = !!ctl.sneak;
       if (!wantSneak && this.sneaking) { if (!overlaps(w, this.pos.x, this.pos.y, this.pos.z, HW, H)) this.sneaking = false; }
       else this.sneaking = wantSneak;
-    } else this.sneaking = false;
+    } else if (!overlaps(w, this.pos.x, this.pos.y, this.pos.z, HW, H)) this.sneaking = false;
     if (ctl.sprint && ctl.mz > 0.5 && !this.sneaking && (this.food > 6 || this.creative)) this.sprinting = true;
     if (this.sprinting && (ctl.mz < 0.3 || this.sneaking || (!this.creative && this.food <= 6))) this.sprinting = false;
 
     // önskad hastighet
     let speed = this.flying ? (this.sprinting ? 21 : 10.9) : this.sneaking ? 1.35 : this.sprinting ? 5.6 : 4.3;
     if (this.inWater && !this.flying) speed *= 0.55;
+    if (this.blocking && !this.flying) speed = Math.min(speed, 1.6);
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let mx = ctl.mx, mz = ctl.mz; const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
     const wx = (-sy * mz + cy * mx) * speed, wz = (-cy * mz - sy * mx) * speed;
@@ -66,11 +74,13 @@ export class Player {
       const vy = (ctl.jump ? 1 : 0) - (ctl.down ? 1 : 0);
       this.vel.y += (vy * 8 - this.vel.y) * (1 - Math.exp(-8 * dt));
     } else if (this.inWater) {
-      this.vel.y -= 9 * dt;
-      this.vel.y *= Math.pow(0.25, dt);
-      if (ctl.jump) this.vel.y = Math.min(this.vel.y + 26 * dt, 3.2);
-      // klättra upp ur vattnet mot en kant
-      this.vel.y = Math.max(this.vel.y, -3);
+      // simning: sjunk långsamt, håll hopp för att simma upp, smyg (Skift) för att dyka
+      this.vel.y -= 6 * dt;
+      this.vel.y *= Math.pow(0.2, dt);
+      if (ctl.jump) this.vel.y = Math.min(this.vel.y + 24 * dt, 3.4);
+      else if (ctl.down) this.vel.y = Math.max(this.vel.y - 18 * dt, -3.4);
+      this.vel.y = Math.max(this.vel.y, -3.4);
+      this.swimT = (this.swimT || 0) + dt * Math.hypot(this.vel.x, this.vel.z);
     } else if (this.onLadder) {
       // stege: gå mot den eller håll hopp för att klättra, smyg för att stå still
       if (ml > 0.2 || ctl.jump) this.vel.y = 3.2;
@@ -82,8 +92,16 @@ export class Player {
     }
     const wasGround = this.ground;
     const oldY = this.pos.y;
+    const wantClimb = this.inWater && !this.flying && (ctl.jump || ml > 0.3);
     const r = moveBody(w, this.pos, this.vel, dt, { hw: HW, h: this.height, stepUp: this.flying ? 0 : 0.55, sneak: this.sneaking && !this.flying, grounded: this.ground });
     this.ground = r.ground;
+    // simma upp på en kant: mot en vägg i vattenytan med hopp (eller framåt) → lyft upp
+    if (wantClimb && (r.hitX || r.hitZ) && !this.headInWater) {
+      const fx2 = Math.floor(this.pos.x + (-sy * mz + cy * mx) * 0.7), fz2 = Math.floor(this.pos.z + (-cy * mz - sy * mx) * 0.7), by = Math.floor(this.pos.y + 0.6);
+      const wall = w.get(fx2, by, fz2), above = w.get(fx2, by + 1, fz2), above2 = w.get(fx2, by + 2, fz2);
+      const solid = b => b > 0 && BLOCKS[b] && BLOCKS[b].solid;
+      if (solid(wall) && !solid(above) && !solid(above2)) this.vel.y = Math.max(this.vel.y, 6.2);
+    } else if (wantClimb && ctl.jump && (r.hitX || r.hitZ)) this.vel.y = Math.max(this.vel.y, 3.4);
     if (this.flying && this.ground && !this.creative) this.flying = false;
     if (this.flying && r.ground && ctl.down) { this.flying = false; }
     // autohopp
@@ -148,9 +166,15 @@ export class Player {
       P.armL.rotation.x = -sw * 0.7;
       P.armR.rotation.x = sw * 0.7 - (this.swing > 0 ? Math.sin(this.swing * Math.PI) * 1.6 : 0);
       P.head.rotation.x = -this.pitch * 0.8;
+      // sköld: syns på vänster arm när den hålls, lyfts när man parerar
+      const inv = this.g.inv, isSh = s => !!(s && ITEMS[s.id] && ITEMS[s.id].shield);
+      const shOn = inv && (isSh(inv.off) || isSh(inv.held));
+      P.shield.visible = !!shOn;
+      if (shOn && this.blocking) { P.armL.rotation.x = -1.25; P.armL.rotation.z = -0.35; } else P.armL.rotation.z = 0;
+      m.shieldMat.color.copy(m.mat.color);
       m.root.children[0].position.y = this.sneaking ? -0.2 : 0;
       m.root.children[0].rotation.x = this.sneaking ? 0.35 : 0;
-      m.mat.color.copy(this.hurtT > 0 ? new THREE.Color(1, 0.4, 0.4) : this.light);
+      m.mat.color.copy(this.hurtT > 0 ? HURT : this.light);
       const arm = this.g.inv && this.g.inv.armor;
       if (arm && P.armor) for (let i = 0; i < 4; i++) {
         const a = arm[i] && armorOf(arm[i].id);

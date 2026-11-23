@@ -7,6 +7,8 @@ import { Sky } from './sky.js';
 import { Game } from './game.js';
 import { hashStr } from './noise.js';
 import { B } from './blocks.js';
+import { SkinEditor } from './skineditor.js';
+import { renderAchievements } from './achievements.js';
 
 Spelhallen.init('kubvarld');
 const $ = id => document.getElementById(id);
@@ -228,7 +230,7 @@ async function createWorld() {
   const st = $('nwSeed').value.trim();
   const seed = st ? (/^-?\d+$/.test(st) ? (parseInt(st, 10) >>> 0) : hashStr(st)) : ((Math.random() * 4294967296) >>> 0);
   const id = 'w' + Date.now().toString(36) + ((Math.random() * 1296) | 0).toString(36);
-  const meta = { id, name, seed, mode: nwMode, diff: nwMode === 'creative' ? 0 : nwDiff, created: Date.now(), worldTime: 0.02, version: 1 };
+  const meta = { id, name, seed, mode: nwMode, diff: nwMode === 'creative' ? 0 : nwDiff, created: Date.now(), worldTime: 0.02, version: 2 };
   await kv.set('kubvarld:w:' + id, meta);
   await updateWorldList(meta);
   hide('newworld');
@@ -311,6 +313,12 @@ $('helpTabs').querySelectorAll('button').forEach(b => b.onclick = () => {
   $('helpKeys').hidden = b.dataset.t !== 'keys'; $('helpTouch').hidden = b.dataset.t !== 'touch'; $('helpTips').hidden = b.dataset.t !== 'tips';
 });
 $('btnResume').onclick = () => resume();
+// prestationer och figur
+const skinEd = new SkinEditor('skinScr');
+$('btnSkin').onclick = () => { audio.play('click'); hide('menu'); skinEd.show({ onClose: () => show('menu') }); };
+$('btnPauseSkin').onclick = () => { audio.play('click'); hide('pause'); skinEd.show({ onClose: () => show('pause'), onSave: s => { if (game) game.setSkin(s); } }); };
+$('btnPauseAch').onclick = () => { audio.play('click'); hide('pause'); renderAchievements($('achBox'), game && game.achievements, icons, game && game.creative); show('achScr'); };
+$('btnAchBack').onclick = () => { hide('achScr'); show('pause'); };
 $('btnQuit').onclick = () => quitToMenu();
 $('btnRespawn').onclick = () => { hide('dead'); game.respawn(); state = 'play'; if (!touch) lock(); };
 $('btnDeadQuit').onclick = () => { game.respawn(); quitToMenu(); };
@@ -324,6 +332,7 @@ settings.onChange((k, v) => {
 // handkontroll: Start i menyer
 addEventListener('keydown', e => {
   if ((e.code === 'Escape' || e.code === 'KeyP') && state === 'pause' && !$('pause').classList.contains('hidden') && !e.repeat) { e.preventDefault(); resume(); }
+  else if (e.code === 'Escape' && state === 'pause' && !$('achScr').classList.contains('hidden')) { e.preventDefault(); hide('achScr'); show('pause'); }
 });
 // handkontroll: Start återupptar från paus (loopen står still i paus)
 let padStart = false;
@@ -339,5 +348,5 @@ setInterval(() => {
 startMenuBg();
 refreshMenu();
 show('menu');
-window.__kv = { get game() { return game; }, get state() { return state; }, app, settings, startWorld, quitToMenu };
+window.__kv = { get game() { return game; }, get state() { return state; }, app, settings, startWorld, quitToMenu, skinEd };
 window.__ok = true;

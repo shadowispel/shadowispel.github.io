@@ -7,7 +7,7 @@ self.onmessage = (e) => {
   const m = e.data;
   try {
     if (m.type === 'gen') {
-      if (genSeed !== m.seed) { gen = createGen(m.seed); genSeed = m.seed; }
+      if (genSeed !== m.seed + ':' + m.ver) { gen = createGen(m.seed, m.ver); genSeed = m.seed + ':' + m.ver; }
       const t0 = performance.now();
       const r = gen.generate(m.cx, m.cz);
       self.postMessage({ type: 'gen', id: m.id, token: m.token, cx: m.cx, cz: m.cz, data: r.data, biomes: r.biomes, maxY: r.maxY, ms: performance.now() - t0 }, [r.data.buffer, r.biomes.buffer]);

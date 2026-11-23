@@ -2,20 +2,21 @@
 import { itemName, maxStack, toolOf, itemDef, BLOCKS, ITEMS, creativeList, fuelOf, M_CROSS, I, B, TOOL0, armorOf, ARMOR_SLOT_NAMES } from './blocks.js';
 import { findRecipe, RECIPES, ingredients, wantName, TAGS, smeltResult, SMELT_TIME } from './inventory.js';
 import { isTouchDevice } from '../../engine/kit.js';
-import { CHAPTERS } from './journal.js';
-const BOOK_SVG = '<svg viewBox="0 0 24 24"><path d="M4 4.5C4 3.7 4.7 3 5.5 3H11v17H5.5C4.7 20 4 19.3 4 18.5z M13 3h5.5c.8 0 1.5.7 1.5 1.5v14c0 .8-.7 1.5-1.5 1.5H13z" fill="currentColor"/></svg>';
+import { renderAchievements } from './achievements.js';
 
 const $ = id => document.getElementById(id);
 const el = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; };
 
-const NATURE = [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65, 101, 103, 108, 119, 120, 122, 169, 173];
+const NATURE = [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65, 101, 103, 108, 119, 120, 122, 169, 173, 175, 176, 204];
+const isCirc = id => id < 256 ? !!(BLOCKS[id] && (BLOCKS[id].wire || BLOCKS[id].circ || BLOCKS[id].rep || BLOCKS[id].plate || BLOCKS[id].piston || BLOCKS[id].disp !== undefined || BLOCKS[id].obs !== undefined || BLOCKS[id].interact === 'button' || BLOCKS[id].interact === 'lever' || BLOCKS[id].interact === 'note' || id === 221)) : id === 324;
 const isNature = id => id < 256 && BLOCKS[id] && (BLOCKS[id].model === M_CROSS || (id >= 15 && id <= 20) || NATURE.includes(id));
 const isGear = id => id >= 256 && ITEMS[id] && (ITEMS[id].tool || ITEMS[id].armor || [I.bucket, I.bucket_water, I.bucket_lava, I.compass, I.clock, I.arrow].includes(id));
 const CREATIVE_TABS = [
-  ['Byggblock', id => id < 256 && BLOCKS[id] && !isNature(id)],
+  ['Byggblock', id => id < 256 && BLOCKS[id] && !isNature(id) && !isCirc(id)],
   ['Natur', isNature],
   ['Föremål', id => id >= 256 && !isGear(id)],
   ['Verktyg', isGear],
+  ['Kretsar', isCirc],
   ['Alla', () => true]
 ];
 
@@ -133,28 +134,6 @@ export class UI {
     while (this.logEl.children.length > 6) this.logEl.firstChild.remove();
     setTimeout(() => { d.classList.add('out'); setTimeout(() => d.remove(), 600); }, 6500);
   }
-  /** Mål i äventyrsdagboken (null = dölj) */
-  setQuest(q) {
-    let t = $('tut');
-    if (!q || this.g.creative) { t.classList.add('hidden'); return; }
-    t.classList.remove('hidden');
-    if (!this._qt) {
-      // byggs om för varje ny spelomgång (elementet är delat mellan världar)
-      t.innerHTML = '';
-      const nt = t.cloneNode(false); t.replaceWith(nt); t = nt;
-      const h = el('div', 'kv-qh', t); h.innerHTML = BOOK_SVG; this._qch = el('b', '', h); this._qcount = el('span', '', h);
-      this._qt = el('div', 'kv-qt', t); this._qd = el('div', 'kv-qd', t);
-      const bar = el('div', 'kv-qbar', t); this._qbar = el('i', '', bar); this._qn = el('div', 'kv-qn', t);
-      t.addEventListener('pointerdown', e => { e.stopPropagation(); if (!this.mode && this.g.player.alive) this.g.openInventory('journal'); });
-    }
-    this._qch.textContent = q.side ? 'Utmaning' : 'Äventyrsdagbok';
-    this._qcount.textContent = q.done + '/' + q.total;
-    this._qt.textContent = q.title; this._qd.textContent = q.desc;
-    this._qbar.style.width = Math.round(q.cur / q.max * 100) + '%';
-    this._qn.textContent = (q.max > 1 ? q.cur + '/' + q.max + ' · ' : '') + (isTouchDevice() ? 'Tryck här för dagboken' : 'J öppnar dagboken');
-  }
-  flashQuest() { const t = $('tut'); t.classList.remove('done'); void t.offsetWidth; t.classList.add('done'); }
-
   /* ---------- slots ---------- */
   _slotEl(parent, cls = '') {
     const e = el('div', 'kv-slot ' + cls, parent);
@@ -209,7 +188,13 @@ export class UI {
     const mode = this.mode;
     const inv = this.g.inv;
     const title = el('div', 'kv-invtitle', top);
-    if (mode === 'journal') { this._buildJournal(main, title); return; }
+    if (mode === 'ach') {
+      title.textContent = 'Prestationer';
+      main.classList.add('kv-achmain');
+      renderAchievements(el('div', 'kv-achbox', main), this.g.achievements, this.icons, this.g.creative);
+      const close = el('button', 'btn small kv-close', main); close.textContent = isTouchDevice() ? 'Stäng' : 'Stäng (L)'; close.onclick = () => this.g.closeInventory();
+      return;
+    }
     if (mode === 'creative') {
       title.textContent = 'Kreativt läge – alla block';
       const tabs = el('div', 'kv-tabs', top);
@@ -233,8 +218,12 @@ export class UI {
         const r = this._ref(ar, { kind: 'armor', i, get: () => inv.armor[i], set: v => { inv.armor[i] = v; }, accept: id => { const a = armorOf(id); return !!a && a.slot === i; } });
         r.el.title = ARMOR_SLOT_NAMES[i]; r.el.style.opacity = inv.armor[i] ? '' : '0.75';
       }
+      const off = this._ref(ar, { kind: 'off', get: () => inv.off, set: v => { inv.off = v; } }, 'off');
+      off.el.title = isTouchDevice() ? 'Andra handen (t.ex. sköld)' : 'Andra handen (F byter) – t.ex. sköld';
       const bb = el('button', 'btn small kv-bookbtn', top); bb.textContent = this.showBook ? 'Dölj receptbok' : (isTouchDevice() ? 'Receptbok' : 'Receptbok (R)');
       bb.onclick = () => { this.showBook = !this.showBook; this.build(); this.refresh(); };
+      const ab = el('button', 'btn small kv-bookbtn', top); ab.textContent = isTouchDevice() ? 'Prestationer' : 'Prestationer (L)';
+      ab.onclick = () => { this.close(); this.g.openInventory('ach'); };
     } else if (mode === 'furnace') {
       title.textContent = 'Ugn';
       const f = this.ctx.f;
@@ -247,10 +236,10 @@ export class UI {
       this._ref(fu, { kind: 'fout', get: () => f.out, set: v => { f.out = v; } }, 'big');
       const hint = el('div', 'kv-hint', top); hint.textContent = 'Lägg malm, sand eller mat överst och bränsle (kol, ved, torv) underst.';
     } else if (mode === 'chest') {
-      title.textContent = 'Kista';
+      title.textContent = this.ctx.title || 'Kista';
       const c = this.ctx.c;
       const grid = el('div', 'kv-grid g9', main);
-      for (let i = 0; i < 27; i++) this._ref(grid, { kind: 'chest', i, get: () => c[i], set: v => { c[i] = v; } });
+      for (let i = 0; i < c.length; i++) this._ref(grid, { kind: 'chest', i, get: () => c[i], set: v => { c[i] = v; } });
     }
     // spelarens inventarie
     if (mode !== 'creative') {
@@ -327,6 +316,7 @@ export class UI {
     if (tool) t += ` · ${tool.dur - (st.d || 0)}/${tool.dur}`;
     const fd = itemDef(st.id); if (fd && fd.food) t += ` · mat +${fd.food}`;
     const ad = armorOf(st.id); if (ad) t += ` · skydd +${ad.pts}`;
+    if (fd && fd.desc) t += '\n' + fd.desc;
     this.tip.textContent = t; this.tip.style.display = 'block';
     this._moveCursor();
   }
@@ -443,32 +433,6 @@ export class UI {
     if (this.bookList) this._refreshBook();
     this._moveCursor(); this._showTip();
     this.updateHotbar();
-  }
-
-  /* ---------- äventyrsdagbok ---------- */
-  _buildJournal(main, title) {
-    main.classList.add('kv-jr');
-    const J = this.g.journal, cur = J.current();
-    title.textContent = 'Äventyrsdagbok';
-    el('div', 'kv-hint', main.firstChild).textContent = `${J.count} av ${CHAPTERS.reduce((a, c) => a + c.goals.length, 0)} mål klara. Följ dagboken från första vedträt till diamantverktygen – utmaningarna kan tas i vilken ordning som helst.`;
-    const list = el('div', 'kv-jlist', main);
-    const touch = isTouchDevice();
-    let locked = false;
-    CHAPTERS.forEach(ch => {
-      const n = ch.goals.filter(g => J.isDone(g.id)).length;
-      const h = el('div', 'kv-jch', list); h.textContent = ch.name; el('span', '', h).textContent = n + '/' + ch.goals.length;
-      ch.goals.forEach((goal, i) => {
-        const done = J.isDone(goal.id), isCur = cur === goal;
-        const row = el('div', 'kv-je' + (done ? ' done' : isCur ? ' cur' : (locked && !ch.side) ? ' lock' : ''), list);
-        el('span', 'c', row).textContent = done ? '✓' : String(i + 1);
-        el('b', '', row).textContent = goal.t;
-        el('span', 'p', row).textContent = done ? 'Klart' : goal.n > 1 ? J.progress(goal) + '/' + goal.n : '';
-        el('small', '', row).textContent = (touch && goal.dt) || goal.d || '';
-      });
-      if (!ch.side && n < ch.goals.length) locked = true;
-    });
-    const close = el('button', 'btn small kv-close', main); close.textContent = touch ? 'Stäng' : 'Stäng (J)'; close.onclick = () => this.g.closeInventory();
-    setTimeout(() => { const c = list.querySelector('.cur'); if (c) c.scrollIntoView({ block: 'center' }); }, 0);
   }
 
   /* ---------- receptbok ---------- */

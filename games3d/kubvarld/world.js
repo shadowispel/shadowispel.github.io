@@ -1,7 +1,8 @@
 /** Världen: chunkar, arbetare, terrängmaterial, blockändringar, vatten, strålkastning. */
 import * as THREE from 'three';
 import {
-  CX, CY, CZ, SEA, CHUNK_VOL, BLOCKS, B, T_SOLID, T_OPAQUE, M_CUBE, M_BOX, M_CROSS, M_LIQUID, WATER, isWater, waterLevel, LAVA, isLava
+  CX, CY, CZ, SEA, CHUNK_VOL, BLOCKS, B, T_SOLID, T_OPAQUE, M_CUBE, M_BOX, M_CROSS, M_LIQUID, WATER, isWater, waterLevel, LAVA, isLava,
+  T_CONN, fenceLinks, fenceBoxes, fenceColl, fenceSel
 } from './blocks.js';
 import { createGen } from './worldgen.js';
 
@@ -11,7 +12,7 @@ export const ckey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 const VS = /* glsl */`
 in vec2 aUV; in vec4 aData; in vec4 aLight;
 uniform float uTime;
-out vec3 vUV; out vec4 vL; out vec3 vTint; out float vFog;
+out vec3 vUV; out vec4 vL; out vec3 vTint; out float vFog; out vec3 vWP; out vec2 vLiq;
 #ifdef ENTITY
 uniform vec2 uEntLight;
 #endif
@@ -24,8 +25,10 @@ void main() {
 #ifndef ENTITY
   if ((fi & 8) != 0 && aData.w > 0.5) { wp.x += sin(uTime * 1.7 + wp.x * 0.7 + wp.z * 0.5) * 0.07; wp.z += cos(uTime * 1.3 + wp.z * 0.6 + wp.x * 0.3) * 0.06; }
   if ((fi & 16) != 0) { wp.x += sin(uTime * 1.1 + wp.y * 0.8 + wp.z * 0.4) * 0.022; wp.z += cos(uTime * 0.9 + wp.x * 0.5) * 0.018; }
-  if ((fi & 32) != 0 && face == 2) { wp.y += sin(uTime * 1.6 + wp.x * 0.6 + wp.z * 0.8) * 0.035 - 0.05; }
+  if ((fi & 32) != 0 && face == 2) { wp.y += sin(uTime * 1.6 + wp.x * 0.6 + wp.z * 0.8) * 0.035 + sin(uTime * 2.3 - wp.x * 0.9 + wp.z * 0.4) * 0.02 - 0.06; }
 #endif
+  vWP = wp.xyz;
+  vLiq = (fi & 32) != 0 ? vec2(face == 2 ? 2.0 : 1.0, aData.w) : vec2(0.0);
   vec4 mv = viewMatrix * wp;
   gl_Position = projectionMatrix * mv;
   vFog = length(mv.xyz);
@@ -47,9 +50,26 @@ layout(location = 0) out highp vec4 pc_fragColor;
 uniform sampler2DArray uTex;
 uniform vec3 uSkyLight; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uMinLight; uniform float uTime; uniform float uFlicker;
 uniform float uUnderwater;
-in vec3 vUV; in vec4 vL; in vec3 vTint; in float vFog;
+in vec3 vUV; in vec4 vL; in vec3 vTint; in float vFog; in vec3 vWP; in vec2 vLiq;
 void main() {
   vec4 c = texture(uTex, vUV);
+  if (vLiq.x > 0.5) {
+    // vatten: mjuka, animerade vågor i pixelsteg (ingen upprepad ruta per block), mörkare på djupet
+    vec2 q = floor(vWP.xz * 8.0) / 8.0;
+    float n = sin(q.x * 0.85 + uTime * 0.9) + sin(q.y * 1.15 - uTime * 0.7) + sin((q.x - q.y) * 0.42 + uTime * 0.5) + 0.5 * sin((q.x + q.y) * 2.1 + uTime * 1.6);
+    n = n / 3.5 * 0.5 + 0.5;
+    float d = vLiq.x > 1.5 ? clamp(vLiq.y / 9.0, 0.0, 1.0) : 0.45;
+    vec3 wc = mix(vec3(0.17, 0.47, 0.62), vec3(0.03, 0.14, 0.30), d) * (0.86 + n * 0.28);
+    if (vLiq.x > 1.5) {
+      // glitter: slumpade pixlar som blinkar till (hash, inget rutmönster)
+      float h = fract(sin(dot(q, vec2(12.9898, 78.233))) * 43758.5453);
+      float tw = fract(h * 13.7 + uTime * (0.12 + h * 0.2));
+      wc += vec3(0.5, 0.6, 0.65) * step(0.965, h) * smoothstep(0.75, 1.0, tw) * (uUnderwater > 0.5 ? 0.5 : 0.4);
+      // mjuka ljusa band där vågorna toppar
+      wc += vec3(0.06, 0.08, 0.09) * smoothstep(0.78, 0.95, n);
+    }
+    c = vec4(wc, uUnderwater > 0.5 ? 0.5 : mix(0.6, 0.86, d));
+  }
 #ifdef CUTOUT
   if (c.a < 0.5) discard;
   c.a = 1.0;
@@ -84,6 +104,7 @@ export function createTerrainMaterials(atlas) {
   const base = { uniforms, vertexShader: VS, fragmentShader: FS, glslVersion: THREE.GLSL3 };
   const opaque = new THREE.ShaderMaterial({ ...base, defines: { CUTOUT: 1 } });
   const trans = new THREE.ShaderMaterial({ ...base, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  trans.polygonOffset = true; trans.polygonOffsetFactor = 1; trans.polygonOffsetUnits = 1;
   // föremål/fallande block: ljus från uniform per objekt
   const entUniforms = { ...uniforms, uEntLight: { value: new THREE.Vector2(1, 0) } };
   const entity = new THREE.ShaderMaterial({ uniforms: entUniforms, vertexShader: VS, fragmentShader: FS, glslVersion: THREE.GLSL3, defines: { CUTOUT: 1, ENTITY: 1 } });
@@ -115,13 +136,14 @@ class Pool {
 
 /* ---------- världen ---------- */
 export class World {
-  constructor({ scene, mats, seed, fancy = true }) {
-    this.scene = scene; this.mats = mats; this.seed = seed >>> 0; this.fancy = fancy;
+  constructor({ scene, mats, seed, fancy = true, genVer = 2 }) {
+    this.scene = scene; this.mats = mats; this.seed = seed >>> 0; this.fancy = fancy; this.genVer = genVer;
+    this.onChunkReady = null;
     this.chunks = new Map();
     this.mods = new Map();           // ckey → Map(idx → id)
     this.dirtyMods = new Set();
     this.furnaces = new Map(); this.chests = new Map(); this.saplings = new Map();
-    this.gen = createGen(this.seed);  // för spawnsökning (huvudtråd)
+    this.gen = createGen(this.seed, this.genVer);  // för spawnsökning (huvudtråd)
     this.token = (Math.random() * 1e9) | 0;
     this.radius = 6;
     this.group = new THREE.Group(); scene.add(this.group);
@@ -214,6 +236,12 @@ export class World {
     if (above > 0 && !T_SOLID[id]) {
       const ad = BLOCKS[above];
       if (ad && (ad.model === M_CROSS || above === B.torch || (ad.door && !ad.door.upper) )) { this.breakDrop(x, y + 1, z, above); }
+    }
+    // block som står på detta (ledning, tryckplatta, gnistfackla, förstärkare, golvknapp)
+    if (above > 0 && !T_SOLID[id] && BLOCKS[above] && (BLOCKS[above].support || BLOCKS[above].attach === 4)) this.breakDrop(x, y + 1, z, above);
+    // knappar på väggen: 0 sitter på +x-grannen osv.
+    if (!T_SOLID[id]) for (const [dx, dz, a] of [[-1, 0, 0], [1, 0, 1], [0, -1, 2], [0, 1, 3]]) {
+      const n = this.get(x + dx, y, z + dz); if (n > 0 && BLOCKS[n] && BLOCKS[n].attach === a) this.breakDrop(x + dx, y, z + dz, n);
     }
     // väggfacklor fästa i detta block
     if (!T_SOLID[id]) {
@@ -371,7 +399,7 @@ export class World {
       if (b > 0 && !isWater(b)) {
         const d = BLOCKS[b];
         if (d.model === M_CUBE) { Object.assign(out, { x, y, z, nx, ny, nz, id: b, dist: t }); return out; }
-        const boxes = d.selBox ? [d.selBox] : d.boxes;
+        const boxes = T_CONN[b] === 1 ? fenceSel(this.connMask(x, y, z)) : d.selBox ? [d.selBox] : d.boxes;
         if (boxes) {
           let best = null;
           for (const bx of boxes) {
@@ -388,6 +416,27 @@ export class World {
     return null;
   }
 
+  /** Staketets kopplingsmask (bit 0 +x, 1 −x, 2 +z, 3 −z) */
+  connMask(x, y, z) {
+    let m = 0; const g = (a, b) => { const v = this.get(a, y, b); return v < 0 ? 0 : v; };
+    if (fenceLinks(g(x + 1, z), 0)) m |= 1; if (fenceLinks(g(x - 1, z), 1)) m |= 2;
+    if (fenceLinks(g(x, z + 1), 2)) m |= 4; if (fenceLinks(g(x, z - 1), 3)) m |= 8;
+    return m;
+  }
+  /** Lådor (1/16) för markering/ritning av blocket på en plats */
+  shapeAt(x, y, z, id) {
+    const d = BLOCKS[id]; if (!d) return null;
+    if (T_CONN[id] === 1) return fenceSel(this.connMask(x, y, z));
+    return d.selBox ? [d.selBox] : d.boxes;
+  }
+  /** Kollisionslådor på en plats (staket och stängda grindar är 1,5 block höga) */
+  collBoxes(x, y, z, id) {
+    if (id > 0 && T_CONN[id]) {
+      if (T_CONN[id] === 1) return fenceColl(this.connMask(x, y, z));
+      if (T_SOLID[id]) return T_CONN[id] === 2 ? GATE_COLL[0] : GATE_COLL[1];
+    }
+    return World.boxesOf(id);
+  }
   /** kollisionslådor för ett block (i blockkoordinater 0..1) */
   static boxesOf(id) {
     if (id <= 0) return null;
@@ -443,13 +492,14 @@ export class World {
   _gen(c) {
     c.busy = true;
     const tok = this.token;
-    const ok = this.pool.post({ type: 'gen', seed: this.seed, cx: c.cx, cz: c.cz, token: tok }, null, r => {
+    const ok = this.pool.post({ type: 'gen', seed: this.seed, ver: this.genVer, cx: c.cx, cz: c.cz, token: tok }, null, r => {
       c.busy = false;
       if (this.token !== tok || r.type !== 'gen') { if (this.chunks.get(c.key) === c && this.token === tok) this.chunks.delete(c.key); return; }
       c.data = r.data; c.biomes = r.biomes; c.maxY = r.maxY; c.ver = 1;
       const m = this.mods.get(c.key);
       if (m) for (const [i, id] of m) { c.data[i] = id; if ((i >> 8) > c.maxY) c.maxY = i >> 8; }
       this.stats.genMs += r.ms; this.stats.gens++;
+      if (this.onChunkReady) this.onChunkReady(c, m);
     });
     if (!ok) { c.busy = false; this.chunks.delete(c.key); }
   }
@@ -496,6 +546,7 @@ export class World {
     };
     c.mesh = mk(r.opaque, this.mats.opaque);
     c.tmesh = mk(r.trans, this.mats.trans);
+    if (c.tmesh) c.tmesh.renderOrder = 2; // genomskinligt pass efter allt fast
     c.meshed = true;
   }
   _disposeMeshes(c) {
@@ -550,6 +601,7 @@ export class World {
 
 export const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const CUBE_BOX = [[0, 0, 0, 1, 1, 1]];
+const GATE_COLL = [[[0, 0, 0.375, 1, 1.5, 0.625]], [[0.375, 0, 0, 0.625, 1.5, 1]]];
 
 function makeIndex(quads) {
   const a = new Uint32Array(quads * 6);

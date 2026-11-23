@@ -4,7 +4,7 @@
  */
 import {
   CX, CY, CZ, T_OPAQUE, T_ATT, T_EMIT, T_MODEL, T_CULLSELF, T_PASS, T_FLAGS, T_FACE, T_BOXES, T_TINTTOP,
-  M_CUBE, M_CROSS, M_BOX, M_LIQUID, F_LEAF, F_TINT, F_LIQUID, F_WAVE, WATER, B
+  M_CUBE, M_CROSS, M_BOX, M_LIQUID, F_LEAF, F_TINT, F_LIQUID, F_WAVE, WATER, B, T_CONN, fenceLinks, fenceBoxes
 } from './blocks.js';
 import { hash3 } from './noise.js';
 
@@ -244,7 +244,15 @@ function emitBoxes(i, x, y, z, b) {
   const out = outs[0];
   const def = T_BOXES[b]; if (!def) return;
   const sk0 = sky[i], bl0 = blk[i];
-  for (const bx of def.boxes) {
+  let boxes = def.boxes;
+  if (T_CONN[b] === 1) {
+    // staket: koppla mot grannar (+x, −x, +z, −z)
+    let mask = 0;
+    if (fenceLinks(vol[i + 1], 0)) mask |= 1; if (fenceLinks(vol[i - 1], 1)) mask |= 2;
+    if (fenceLinks(vol[i + W], 2)) mask |= 4; if (fenceLinks(vol[i - W], 3)) mask |= 8;
+    boxes = fenceBoxes(mask);
+  }
+  for (const bx of boxes) {
     const [x0, y0, z0, x1, y1, z1] = bx;
     for (let d = 0; d < 6; d++) {
       const boundary = (d === 0 && x1 === 16) || (d === 1 && x0 === 0) || (d === 2 && y1 === 16) || (d === 3 && y0 === 0) || (d === 4 && z1 === 16) || (d === 5 && z0 === 0);
@@ -310,11 +318,13 @@ function emitLiquid(i, x, y, z, b) {
   const sk = sky[i], bl = blk[i];
   const X = x * 16, Y = y * 16, Z = z * 16;
   const face = F_LIQUID;
-  const put = (d, pts, uvs, s, l) => { for (let v = 0; v < 4; v++) out.vert(v, pts[v][0], pts[v][1], pts[v][2], uvs[v][0], uvs[v][1], layer, d | face, 0, 0, s, l, 3); out.next(); };
+  const put = (d, pts, uvs, s, l, dep = 0) => { for (let v = 0; v < 4; v++) out.vert(v, pts[v][0], pts[v][1], pts[v][2], uvs[v][0], uvs[v][1], layer, d | face, 0, dep, s, l, 3); out.next(); };
   if (!aboveW && !T_OPAQUE[above]) {
     const s = Math.max(sk, sky[i + WW]), l = Math.max(bl, blk[i + WW]);
     // +y (moturs sett uppifrån): c0,c3,c2,c1
-    put(2, [[X, Y + h00, Z], [X, Y + h01, Z + 16], [X + 16, Y + h11, Z + 16], [X + 16, Y + h10, Z]], [[0, 0], [0, 16], [16, 16], [16, 0]], s, l);
+    // djup: antal vattenblock under ytan (för mörkare djupt vatten)
+    let dep = 1; for (let j = i - WW; dep < 15 && j > 0; j -= WW) { const b2 = vol[j]; if (b2 < WATER || b2 > WATER + 7) break; dep++; }
+    put(2, [[X, Y + h00, Z], [X, Y + h01, Z + 16], [X + 16, Y + h11, Z + 16], [X + 16, Y + h10, Z]], [[0, 0], [0, 16], [16, 16], [16, 0]], s, l, dep);
   }
   const below = vol[i - WW];
   if (!(below >= WATER && below <= WATER + 7) && !T_OPAQUE[below]) {
@@ -331,7 +341,7 @@ function emitLiquid(i, x, y, z, b) {
     const n = vol[i + off];
     if (n >= WATER && n <= WATER + 7) continue;
     if (T_OPAQUE[n]) continue;
-    if (n === B.ice) continue;
+    if (n === B.ice || n === B.glass || n === B.packed_ice) continue;
     const s = Math.max(sk, sky[i + off]), l = Math.max(bl, blk[i + off]);
     put(d, pts, [[0, 16], [16, 16], [16, 16 - Math.round(pts[2][1] - Y)], [0, 16 - Math.round(pts[3][1] - Y)]], s, l);
   }

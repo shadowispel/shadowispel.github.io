@@ -15,7 +15,7 @@
     <div class="kv-cross" id="cross"></div>
     <pre class="kv-debug hidden" id="debug"></pre>
     <div class="kv-day" id="dayChip"><span class="kv-dayic" id="dayIc"></span><span class="kv-daytx" id="dayTx">Dag 1</span><span class="kv-daybar"><i id="dayMark"></i></span></div>
-    <div class="kv-quest hidden" id="tut"></div>
+    <div class="kv-achtoasts" id="achToasts"></div>
     <div class="kv-log" id="log"></div>
     <div class="kv-bottom">
       <div class="kv-held" id="heldName"></div>
@@ -47,6 +47,7 @@
       <div class="g3-btns">
         <button class="btn primary" id="btnContinue" hidden>Fortsätt</button>
         <button class="btn" id="btnWorlds">Världar</button>
+        <button class="btn" id="btnSkin">Min figur</button>
         <button class="btn" id="btnSettings">Inställningar</button>
         <button class="btn" id="btnHelp">Hur man spelar</button>
         <a class="btn" href="../../index.html">Till Spelhallen</a>
@@ -107,12 +108,13 @@
         <span><kbd>Ctrl</kbd> / dubbeltryck <kbd>W</kbd></span><span>Spring</span>
         <span><kbd>Skift</kbd></span><span>Smyg – du faller inte av kanter (sjunk när du flyger)</span>
         <span>Vänster musknapp</span><span>Håll för att bryta block, klicka för att slå</span>
-        <span>Höger musknapp</span><span>Placera block, använd (dörr, kista, ugn, säng), ät mat (håll)</span>
+        <span>Höger musknapp</span><span>Placera block, använd (dörr, kista, ugn, säng, knapp, spak), ät mat (håll), parera med sköld (håll)</span>
         <span>Mittenklick</span><span>Välj blocket du tittar på</span>
         <span><kbd>1</kbd>–<kbd>9</kbd> / mushjul</span><span>Välj i snabbfältet</span>
         <span><kbd>E</kbd></span><span>Inventarie och tillverkning</span>
         <span><kbd>R</kbd></span><span>Receptbok</span>
-        <span><kbd>J</kbd></span><span>Äventyrsdagbok – dina mål</span>
+        <span><kbd>L</kbd></span><span>Prestationer</span>
+        <span><kbd>F</kbd></span><span>Byt föremål med andra handen (t.ex. sköld)</span>
         <span><kbd>Q</kbd></span><span>Släpp föremål (Ctrl+Q = hela stapeln)</span>
         <span><kbd>V</kbd> / <kbd>F5</kbd></span><span>Byt kameravy (första/tredje person)</span>
         <span><kbd>F3</kbd> / <kbd>F1</kbd></span><span>Koordinater & felsökning / dölj gränssnittet</span>
@@ -124,11 +126,12 @@
         <span>Höger halva</span><span>Dra för att titta</span>
         <span>Knappar</span><span>Hoppa, Bryt (håll), Använd, Smyg, Väska (inventarie), Vy, Paus</span>
         <span>Snabbfältet</span><span>Tryck på en ruta för att välja</span>
-        <span>Dagboken</span><span>Tryck på målkortet uppe till vänster</span>
+        <span>Prestationer</span><span>Väska → Prestationer, eller via pausmenyn</span>
+        <span>Sköld</span><span>Håll Använd med skölden i handen (eller i andra handen) för att parera</span>
         <span>Handkontroll</span><span>Vänster spak: gå · Höger spak: titta · A: hoppa · RT: bryt · LT: använd · LB/RB: snabbfält · Y: inventarie · B: smyg · L3: spring · Select: vy · Start: paus</span>
       </div>
       <div id="helpTips" class="kv-tips" hidden>
-        <p><b>Äventyrsdagboken</b> (J) visar ditt nästa mål – från första vedträt till diamantverktyg – och vildmarkens utmaningar.</p>
+        <p><b>Prestationer</b> (L) låses upp när du klarar saker – från första trädet till diamanter, kolvar och hemliga bedrifter. De sparas per värld. Under <b>Min figur</b> i menyn ritar du din egen figur pixel för pixel; den syns i tredjepersonsvyn (V).</p>
         <p><b>Första dagen:</b> hugg ved, gör plankor och en arbetsbänk. Gör en trähacka och bryt sten. Bygg ett skydd innan solen går ned – klockan uppe till höger visar hur länge det är kvar.</p>
         <p><b>Natten:</b> zombier går rakt mot dig, skelett håller avstånd och skjuter pilar och spindlar hoppar och klättrar på väggar. Facklor håller dem borta – de kan bara dyka upp i mörker. Zombier och skelett brinner i solljus; spindlar är lugna i dagsljus om du inte slår dem.</p>
         <p><b>Mat:</b> plocka lingon, hjortron och kantareller, eller jaga kor, grisar, får och hönor (hönor värper ibland ägg). Stek kött, fläsk, kyckling och ägg i en ugn för mer mättnad.</p>
@@ -137,7 +140,11 @@
         <p><b>Båge:</b> pinnar och tråd blir en båge, sten, pinne och fjäder blir pilar. Håll in höger musknapp (Använd) för att spänna och släpp för att skjuta. <b>Benmjöl</b> av skelettens ben får plantor och grödor att växa direkt.</p>
         <p><b>Odling:</b> en jordhacka gör gräs till åkerjord. Så vetefrön (från högt gräs), morötter eller potatis – de växer i några steg. Tre vete blir bröd. Vass vid vattnet blir papper, pumpor och meloner växer på ängar.</p>
         <p><b>Rustning</b> av läder, järn, guld eller diamant minskar skadan – lägg den i rustningsrutorna i väskan eller använd den direkt. <b>Hinken</b> öser vatten och lava och mjölkar kor. Lava lyser, brinner och blir obsidian eller kullersten mot vatten.</p>
-        <p><b>Mer:</b> TNT tänds med en fackla, spakar öppnar dörrar i närheten, stegar klättrar du i, städet lagar slitna verktyg, saxen klipper får och fiskespöt fångar fisk. Kompassen pekar hem och klockan visar tiden när du håller dem.</p>
+        <p><b>Sköld</b> av plankor och järn parerar slag och pilar framifrån när du håller in höger musknapp. Lägg den i andra handen (F eller rutan bredvid rustningen) så kan du hålla svärdet samtidigt.</p>
+        <p><b>Gnistkretsar:</b> gnistmalm finns djupt ned (under nivå 18) och ger gnistdamm som läggs ut som ledning. Ström kommer från spakar, knappar, tryckplattor, gnistfacklor (släcks när blocket de står på får ström) och dagsljussensorer, och avtar ett steg per block (max 15). Förstärkaren förnyar strömmen och fördröjer den 1–4 steg (högerklicka för att ställa in). Ström tänder gnistlampor, öppnar dörrar, fälluckor och grindar, tänder TNT, får kolvar att skjuta (klisterkolvar drar även tillbaka blocket), utmatare att kasta ut föremål och notblock att spela (högerklicka för att byta ton). Observatören skickar en puls när blocket framför den ändras.</p>
+        <p><b>Odling:</b> pumpa- och melonfrön (från pumpor och melonskivor) sås på åkerjord och blir stjälkar som sätter frukt på marken bredvid. Ekar växer i skogar och på ängar i nya världar.</p>
+        <p><b>Smaragder</b> är sällsynta och värdefulla – spara dem, de blir valuta för handel. Nio smaragder blir ett smaragdblock.</p>
+        <p><b>Mer:</b> TNT tänds med en fackla, staket och grindar kopplar ihop sig, fälluckor går att klättra genom, stegar klättrar du i, städet lagar slitna verktyg, saxen klipper får och fiskespöt fångar fisk. Kompassen pekar hem och klockan visar tiden när du håller dem.</p>
         <p><b>Poäng:</b> överlevda dagar × 100 + brutna och placerade block ÷ 10 rapporteras när du dör eller sparar och avslutar (endast överlevnad).</p>
       </div>
       <button class="btn primary" id="btnHelpBack">Tillbaka</button>
@@ -151,12 +158,26 @@
       <p class="g3-sub" id="pauseInfo"></p>
       <div class="g3-btns">
         <button class="btn primary" id="btnResume">Fortsätt</button>
+        <button class="btn" id="btnPauseAch">Prestationer</button>
+        <button class="btn" id="btnPauseSkin">Min figur</button>
         <button class="btn" id="btnPauseSet">Inställningar</button>
         <button class="btn" id="btnPauseHelp">Hur man spelar</button>
         <button class="btn" id="btnQuit">Spara och avsluta</button>
       </div>
     </div>
   </div>
+
+  <!-- Prestationer (från pausmenyn) -->
+  <div class="g3-screen hidden" id="achScr">
+    <div class="g3-panel wide kv-achpanel">
+      <h2 class="g3-h2">Prestationer</h2>
+      <div id="achBox" class="kv-achbox"></div>
+      <button class="btn primary" id="btnAchBack">Tillbaka</button>
+    </div>
+  </div>
+
+  <!-- Min figur -->
+  <div class="g3-screen hidden kv-menu" id="skinScr"></div>
 
   <!-- Död -->
   <div class="g3-screen hidden kv-deadscr" id="dead">

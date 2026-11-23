@@ -8,7 +8,7 @@ export const BI = { ang: 0, gran: 1, bjork: 2, fjall: 3, oken: 4, myr: 5, strand
 const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const lerp = (a, b, t) => a + (b - a) * t;
 
-export function createGen(seed) {
+export function createGen(seed, ver = 1) {
   seed = seed >>> 0;
   const N = makeNoise(seed), N2 = makeNoise(seed ^ 0x9e3779b9), N3 = makeNoise((seed * 7 + 13) >>> 0);
   const { fbm2 } = N;
@@ -180,6 +180,16 @@ export function createGen(seed) {
       const i = (y << 8) | (z << 4) | x;
       if (data[i] === B.stone) data[i] = B.emerald_ore;
     }
+    // gnistmalm: små ådror djupt ned (nivå 3–18), egen hash så att övrig slump inte påverkas
+    for (let k = 0; k < 4; k++) {
+      if (hash3(seed, cx * 5 + k, 1777, cz) > 0.7) continue;
+      let x = hash3(seed, cx, 1778 + k, cz) * CX | 0, z = hash3(seed, cx, 1779 + k, cz) * CZ | 0, y = 3 + (hash3(seed, cx, 1780 + k, cz) * 16 | 0);
+      for (let n = 0; n < 6; n++) {
+        if (x >= 0 && x < CX && z >= 0 && z < CZ && y > 0) { const i = (y << 8) | (z << 4) | x; if (data[i] === B.stone) data[i] = B.spark_ore; }
+        const d = hash3(seed, cx * 16 + n, 1781 + k, cz) * 6 | 0;
+        if (d === 0) x++; else if (d === 1) x--; else if (d === 2) y++; else if (d === 3) y--; else if (d === 4) z++; else z--;
+      }
+    }
     // mossig sten i grottor
     for (let t = 0; t < 40; t++) {
       const x = rng() * CX | 0, z = rng() * CZ | 0, y = 6 + (rng() * 40 | 0);
@@ -262,11 +272,12 @@ export function createGen(seed) {
       }
       let type;
       if (bio === BI.gran) type = r() < 0.82 ? 'spruce' : 'pine';
-      else if (bio === BI.bjork) type = r() < 0.8 ? 'birch' : 'spruce';
+      else if (bio === BI.bjork) { type = r() < 0.8 ? 'birch' : 'spruce'; if (ver >= 2 && r() < 0.3) type = 'oak'; }
       else if (bio === BI.tall) type = r() < 0.85 ? 'pine' : 'birch';
       else if (bio === BI.myr) type = 'dwarf';
       else if (bio === BI.fjall) type = 'dwarf';
-      else type = r() < 0.5 ? 'birch' : (r() < 0.5 ? 'pine' : 'spruce');
+      else { type = r() < 0.5 ? 'birch' : (r() < 0.5 ? 'pine' : 'spruce'); if (ver >= 2 && bio === BI.ang && r() < 0.55) type = 'oak'; }
+      if (ver >= 2 && bio === BI.gran && type === 'pine' && r() < 0.5) type = 'oak';
       placeTree((x, y, z, id, f) => setB(data, x, y, z, id, f), type, lx, h + 1, lz, r);
     }
     for (let i = CHUNK_VOL - 1; i >= 0; i--) if (data[i] !== 0) { maxY = Math.max(maxY, i >> 8); break; }
@@ -281,7 +292,7 @@ function setB(data, x, y, z, id, force) {
   if (x < 0 || x >= CX || z < 0 || z >= CZ || y <= 0 || y >= CY) return;
   const i = (y << 8) | (z << 4) | x;
   const cur = data[i];
-  if (force) { if (cur === 0 || cur === B.tallgrass || cur === B.fern || cur >= B.spruce_leaves && cur <= B.pine_leaves || (cur >= 50 && cur <= 64)) data[i] = id; return; }
+  if (force) { if (cur === 0 || cur === B.tallgrass || cur === B.fern || cur >= B.spruce_leaves && cur <= B.pine_leaves || cur === B.oak_leaves || (cur >= 50 && cur <= 64)) data[i] = id; return; }
   if (cur === 0 || cur === B.tallgrass || cur === B.fern || (cur >= 50 && cur <= 64)) data[i] = id;
 }
 export function placeTree(S, type, x, y, z, r) {
@@ -324,6 +335,19 @@ export function placeTree(S, type, x, y, z, r) {
     S(x, y + H + 1, z, B.pine_leaves);
     if (r() < 0.6) { const by = y + H - 6, s = r() < 0.5 ? 1 : -1; for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if (dx === 0 || dz === 0) S(x + dx + s, by, z + dz, B.pine_leaves); }
     for (let i = 0; i < H; i++) S(x, y + i, z, B.pine_log, true);
+  } else if (type === 'oak') {
+    // ek: kraftig stam, bred rundad krona och ibland en sidogren
+    const H = 5 + (r() * 3 | 0);
+    for (let dy = H - 3; dy <= H + 1; dy++) {
+      const rad = dy >= H ? (dy === H + 1 ? 1 : 2) : dy === H - 3 ? 2 : 3;
+      for (let dz = -rad; dz <= rad; dz++) for (let dx = -rad; dx <= rad; dx++) {
+        const d2 = dx * dx + dz * dz;
+        if (d2 > rad * rad + 1 || (d2 >= rad * rad && r() < 0.45)) continue;
+        S(x + dx, y + dy, z + dz, B.oak_leaves);
+      }
+    }
+    if (r() < 0.5) { const s = r() < 0.5 ? 1 : -1, ax = r() < 0.5; const bx = ax ? s * 2 : 0, bz = ax ? 0 : s * 2; S(x + (ax ? s : 0), y + H - 3, z + (ax ? 0 : s), B.oak_log, true); for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) S(x + bx + dx, y + H - 2, z + bz + dz, B.oak_leaves); }
+    for (let i = 0; i < H; i++) S(x, y + i, z, B.oak_log, true);
   } else if (type === 'dwarf') {
     const H = 2 + (r() * 2 | 0);
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) for (let dy = H - 1; dy <= H; dy++) {
