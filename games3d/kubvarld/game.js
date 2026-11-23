@@ -48,13 +48,15 @@ const FOUND_MSG = {
 };
 const KIND_NAME = { village: 'By', mine: 'Gruvgång', ruin: 'Fornlämning', temple: 'Ökentempel', wreck: 'Skeppsvrak', tower: 'Vakttorn', cabin: 'Stuga', portal: 'Förfallen eldport', fortress: 'Surts borg', ashruin: 'Askruin' };
 export class Game {
-  constructor(app, meta) {
+  constructor(app, meta, opts = {}) {
     this.app = app;
+    this.net = opts.net || null; // onlinesession (HostSession/GuestSession) eller null
+    this.inputBlocked = false;
     this.scene = app.scene; this.camera = app.camera; this.input = app.input; this.audio = app.audio; this.settings = app.settings;
     this.atlas = app.atlas; this.mats = app.mats; this.icons = app.icons;
     this.meta = meta;
     this.id = meta.id;
-    this.creative = meta.mode === 'creative';
+    this.creative = (opts.mode || meta.mode) === 'creative';
     this.difficulty = meta.diff ?? 1;
     this.time = 0;
     this.worldTime = meta.worldTime ?? 0.02;
@@ -124,7 +126,8 @@ export class Game {
   async load(progress) {
     // läs ändrade chunkar
     const prefix = 'kubvarld:w:' + this.id + ':c:';
-    const keys = await kv.keys(prefix);
+    const keys = this.net && this.net.guest ? [] : await kv.keys(prefix);
+    if (this.net && this.net.guest) this.net.loadMods(this.world);
     let i = 0;
     for (const k of keys) {
       const arr = await kv.get(k);
@@ -136,6 +139,9 @@ export class Game {
     if (!this.meta.structInit) { this.meta.structInit = 1; if ((this.meta.version || 1) < 3 && this.world.mods.size) this.meta.structSkip = [...this.world.mods.keys()]; }
     if (this.meta.structSkip && this.meta.structSkip.length) this.world.structSkip = new Set(this.meta.structSkip);
     if (!this.spawn) { const s = this.world.findSpawn(); this.spawn = [s.x, s.y, s.z]; }
+    // onlinevärd: båda dimensionerna måste finnas (gäster kan vara i den andra)
+    if (this.net && this.net.host && this.dim !== 'muspel') await this._ensureWorld('muspel');
+    if (this.net && this.net.guest) await this._ensureWorld(this.dim === 'muspel' ? 'over' : 'muspel');
     if (this.dim === 'muspel') {
       progress(0.08, 'Läser Muspelheim…');
       const W = await this._ensureWorld('muspel');
@@ -238,7 +244,23 @@ export class Game {
     if (!this.ready) return;
     const uiOpen = this.ui.open;
     // tid
-    if (this.sleeping > 0) {
+    if (this.net) {
+      // online: tiden går alltid (värden styr, gästen följer); natten hoppas över när alla sover
+      this.worldTime += dt / DAY_LEN;
+      if (this.sleeping > 0) {
+        this.sleeping = Math.min(2.2, this.sleeping + dt);
+        document.getElementById('sleep').style.opacity = Math.min(0.85, this.sleeping / 1.5);
+        if (this.sleeping >= 2.2) {
+          if (this.net.host && this.net.allAsleep(this)) { this.worldTime = Math.floor(this.worldTime) + 1.005; this.net.nightSkipped(); this.wakeUp(true); }
+          else {
+            const n = this.net.sleepN || 0, t = this.net.sleepAll || 0;
+            const txt = t > 1 ? `Väntar på att alla ska sova (${n}/${t})… Rör dig för att gå upp.` : 'Väntar på de andra… Rör dig för att gå upp.';
+            if (txt !== this._sleepTxt) { this._sleepTxt = txt; this.toast(txt); }
+            if (!this.inputBlocked && (inp.pressed('KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Jump') || (inp.sticks.move && Math.hypot(inp.sticks.move.x, inp.sticks.move.y) > 0.5))) this.wakeUp(false);
+          }
+        }
+      }
+    } else if (this.sleeping > 0) {
       this.sleeping += dt;
       document.getElementById('sleep').style.opacity = Math.min(1, this.sleeping / 1.5);
       if (this.sleeping > 2.2) {
@@ -254,7 +276,7 @@ export class Game {
 
     // ---- indata ----
     const ctl = { mx: 0, mz: 0, jump: false, sneak: false, sprint: false, down: false };
-    if (!uiOpen && P.alive && !this.sleeping) {
+    if (!uiOpen && P.alive && !this.sleeping && !this.inputBlocked) {
       const look = inp.lookDelta();
       P.yaw -= look.dx; P.pitch = Math.max(-1.55, Math.min(1.55, P.pitch - look.dy));
       let mx = (inp.down('KeyD', 'ArrowRight') ? 1 : 0) - (inp.down('KeyA', 'ArrowLeft') ? 1 : 0);
@@ -265,8 +287,10 @@ export class Game {
       ctl.jump = inp.down('Space', 'Pad0', 'Jump');
       ctl.sneak = inp.down('ShiftLeft', 'ShiftRight', 'Pad1') || this.touchSneak;
       ctl.down = ctl.sneak;
-      if (inp.pressed('KeyW')) { if (this.time - this.lastW < 0.3) this.sprintLatch = true; this.lastW = this.time; }
-      if (!inp.down('KeyW')) this.sprintLatch = false;
+      // spring: dubbeltryck W (eller pil upp), eller håll/tryck Ctrl medan du går framåt – låses tills du släpper framåt
+      if (inp.pressed('KeyW', 'ArrowUp')) { if (this.time - this.lastW < 0.35) this.sprintLatch = true; this.lastW = this.time; }
+      if (mz > 0.5 && inp.down('ControlLeft', 'ControlRight', 'Pad10')) this.sprintLatch = true;
+      if (mz <= 0.3) this.sprintLatch = false;
       ctl.sprint = inp.down('ControlLeft', 'ControlRight', 'Pad10') || this.sprintLatch || (st && st.y < -0.92);
       if (inp.pressed('Space', 'Pad0', 'Jump') && this.creative) { if (this.time - this.lastSpace < 0.3) { P.flying = !P.flying; P.vel.y = 0; this.log(P.flying ? 'Flygning på.' : 'Flygning av.'); } this.lastSpace = this.time; }
       // snabbfält
@@ -284,7 +308,8 @@ export class Game {
     }
     if (inp.pressed('F3')) { this.debug = !this.debug; document.getElementById('debug').classList.toggle('hidden', !this.debug); }
     if (inp.pressed('F1')) document.getElementById('hud').classList.toggle('nohud');
-    if (inp.pressed('KeyE', 'Pad3', 'Inv') && P.alive) { if (uiOpen) this.closeInventory(); else this.openInventory(); }
+    if (this.inputBlocked) { /* online-paus: världen lever vidare men spelaren står still */ }
+    else if (inp.pressed('KeyE', 'Pad3', 'Inv') && P.alive) { if (uiOpen) this.closeInventory(); else this.openInventory(); }
     if (inp.pressed('KeyL', 'Ach') && P.alive) { if (uiOpen && this.ui.mode === 'ach') this.closeInventory(); else if (!uiOpen) this.openInventory('ach'); }
     if (inp.pressed('KeyF', 'Pad11') && P.alive && !uiOpen) this.swapHands();
     if (inp.pressed('KeyR') && P.alive && !this.creative) { if (!uiOpen) { this.ui.showBook = true; this.openInventory(); } else if (this.ui.mode === 'inv' || this.ui.mode === 'bench') { this.ui.showBook = !this.ui.showBook; this.ui.build(); this.ui.refresh(); } }
@@ -311,37 +336,46 @@ export class Game {
     P.updateCamera(this.camera, dt, this.settings.get('viewBob'));
     if (this.shake > 0) { this.shake = Math.max(0, this.shake - dt * 3); this.camera.rotation.z += (Math.random() - 0.5) * this.shake * 0.06; }
     const eye = P.eye(this._tmp), dir = P.lookDir(this._dir);
-    const reach = this.creative ? REACH_C : REACH;
+    const reach = this.creative ? REACH_C : REACH, MOB_REACH = reach;
     let tgt = (P.alive && !this.sleeping) ? W.raycast(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, reach, this._ray) : null;
-    const mobHit = P.alive ? this.ents.raycast(eye, dir, Math.min(3.6, tgt ? tgt.dist : 3.6)) : null;
+    let mobHit = P.alive ? this.ents.raycast(eye, dir, Math.min(MOB_REACH, tgt ? tgt.dist : MOB_REACH)) : null;
+    // online med PvP: andra spelare kan också vara mål
+    const plHit = this.net && this.net.pvp && P.alive ? this.net.raycastPlayers(eye, dir, Math.min(MOB_REACH, tgt ? tgt.dist : MOB_REACH, mobHit ? mobHit.dist : MOB_REACH)) : null;
+    if (plHit) { mobHit = null; tgt = null; }
     if (mobHit) tgt = null;
-    this.target = tgt; this.mobTarget = mobHit;
+    this.target = tgt; this.mobTarget = mobHit; this.playerTarget = plHit;
     this._updateHighlight();
 
     // ---- handlingar ----
     this.useCd = Math.max(0, this.useCd - dt); this.atkCd = Math.max(0, this.atkCd - dt);
-    if (!uiOpen && P.alive && !this.sleeping) this._actions(dt);
+    if (!uiOpen && P.alive && !this.sleeping && !this.inputBlocked) {
+      if (this.net && this.net.guest) { this.net.beginRec(); try { this._actions(dt); } finally { this.net.endRec(this); } }
+      else this._actions(dt);
+    }
     else { this.mine = null; this.crack.visible = false; this.eatT = 0; P.blocking = false; this.hand.block = 0; }
 
     // ---- överlevnad ----
     if (!this.creative && P.alive) this._survival(dt);
 
     // ---- värld ----
+    const guest = !!(this.net && this.net.guest);
     W.update(P.pos.x, P.pos.z, dt);
     this.ents.update(dt);
-    this.circuits.update(dt);
+    if (!guest) this.circuits.update(dt);
     this._portalTick(dt);
     if (this.spouts.length) this._tickSpouts(dt);
-    if ((this._secT = (this._secT || 0) - dt) <= 0) { this._secT = 1; this._markerTick(); this._discover(); }
+    if ((this._secT = (this._secT || 0) - dt) <= 0) { this._secT = 1; if (!guest) this._markerTick(); this._discover(); }
     if (this.dim === 'muspel') this._muspelFx(dt);
     this._hudExtras(dt);
     if (!this.ready) return;
     this._tickFish(dt);
     if (P.alive && !this.creative) this._lavaContact(dt);
     this._heldInfo();
-    this._tickFurnaces(dt);
-    this._tickSaplings();
-    if (Math.random() < dt * 0.5) this._randomTicks();
+    if (!guest) {
+      this._tickFurnaces(dt);
+      this._tickSaplings();
+      if (Math.random() < dt * 0.5) this._randomTicks();
+    }
 
     // ---- himmel/ljus ----
     this.sky.update(this.tod, this.camera, dt, this.viewDist, Math.floor(this.worldTime + 0.1));
@@ -391,6 +425,65 @@ export class Game {
     // autosparning
     this.saveT -= dt;
     if (this.saveT <= 0) { this.saveT = 45; this.save(); }
+    if (this.net) this.net.update(this, dt);
+  }
+  /* ---------- online ---------- */
+  /** Spelare som varelser kan sikta på (online: även gäster i samma dimension) */
+  targets() { return this.net ? this.net.targets(this) : (this._tg || (this._tg = [this.player])); }
+  /** Skada en spelare – lokalt, eller via nätet om det är en annan spelare */
+  damageTarget(t, amount, dir, kb, source, silent, fire) {
+    if (!t || !t.isRemote) return this.damagePlayer(amount, dir, kb, source, silent);
+    if (this.net && this.net.host) this.net.hurt(t, amount * (this.creative ? 0 : 1), dir, kb, source, fire);
+    return 'remote';
+  }
+  /** Vakna (online: natten hoppades över eller spelaren gick upp) */
+  wakeUp(morning) {
+    this.sleeping = 0; this._sleepTxt = '';
+    document.getElementById('sleep').style.opacity = 0;
+    if (!morning) return;
+    this.log(`God morgon! Dag ${this.day}.`, 'good');
+    this.audio.play('levelup', { vol: 0.5 });
+    this.ents.clearHostiles();
+    this._justSlept = true; this.tally('sleep', 1);
+  }
+  /** Klipp ett får (värden) */
+  shearMob(mob) {
+    mob.sheared = true; mob.regrow = 120 + Math.random() * 120;
+    if (mob.model.parts.wool) for (const w of mob.model.parts.wool) w.visible = false;
+    if (mob.model.parts.skin) mob.model.parts.skin.visible = true;
+    this.ents.drop(B.wool_white, 1 + (Math.random() * 3 | 0), mob.pos.x, mob.pos.y + 1, mob.pos.z);
+  }
+  /** Värden bryter ett block åt en gäst (W kan vara en annan dimension än värdens egen). give = lista att fylla när föremål inte kan läggas på marken. */
+  hostBreak(W, x, y, z, heldId, creative, give) {
+    const id = W.get(x, y, z); if (id <= 0) return;
+    const d = BLOCKS[id], here = W === this.world;
+    const k = x + ',' + y + ',' + z;
+    const out = here ? null : (i, n, dd) => { if (give.length < 48) give.push([i, n, dd || 0]); };
+    const put = s => { if (out) out(s.id, s.n, s.d); else this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5, s.d); };
+    if (id === B.chest) this._openLoot(k, x, y, z, W);
+    if (W.chests.has(k)) { for (const s of W.chests.get(k)) if (s) put(s); W.chests.delete(k); }
+    if (W.furnaces.has(k)) { const f = W.furnaces.get(k); for (const s of [f.in, f.fuel, f.out]) if (s) put(s); W.furnaces.delete(k); }
+    W.saplings.delete(k); if (this.circs[W.dim]) this.circs[W.dim].forget(x, y, z);
+    if (id === B.ice && !creative && W.dim !== 'muspel') W.set(x, y, z, WATER); else W.set(x, y, z, 0);
+    if (here) { this.ents.blockBurst(x, y, z, id, 12); const dd = this.player.pos.distanceTo(this._tmp.set(x, y, z)); if (dd < 24) matSound(this.audio, d.sound, 'break', { vol: Math.max(0.1, 1 - dd / 24) }); }
+    const held = { id: heldId, remote: true };
+    if (!creative && this.canHarvest(id, held)) this._dropsFor(id, x, y, z, held, out);
+  }
+  /** Efter att en gäst placerat ett block hos värden: tidsstyrda block och behållare */
+  netPlaced(W, x, y, z, bid) {
+    const k = x + ',' + y + ',' + z, bd = BLOCKS[bid]; if (!bd) return;
+    if (isSapling(bid)) W.saplings.set(k, this.worldTime + (0.6 + Math.random() * 1.2));
+    if (bd.crop) W.saplings.set(k, this.worldTime + CROP_T());
+    if (bid === B.reed) W.saplings.set(k, this.worldTime + 0.3 + Math.random() * 0.3);
+    if (bid === B.furnace && !W.furnaces.has(k)) W.furnaces.set(k, newFurnace());
+    if (bid === B.chest && !W.chests.has(k)) W.chests.set(k, new Array(27).fill(null));
+  }
+  /** Explosionens utseende (online: även hos gästerna) */
+  boomFx(c) {
+    const E = this.ents, P = this.player;
+    for (let i = 0; i < 40; i++) E.particle(c.x + (Math.random() - 0.5) * 2, c.y + Math.random() * 2, c.z + (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 12, Math.random() * 8, (Math.random() - 0.5) * 12, new THREE.Color(i % 3 ? '#5a5a5a' : '#ffb040'), 0.2 + Math.random() * 0.25, 0.8 + Math.random() * 0.8, i % 3 ? -0.15 : 0.3, i % 3 === 0);
+    this.audio.play('boom', { vol: Math.max(0.2, 1 - P.pos.distanceTo(c) / 40) });
+    this.shake = Math.min(1, this.shake + Math.max(0, 1 - P.pos.distanceTo(c) / 30));
   }
 
   _actions(dt) {
@@ -412,7 +505,14 @@ export class Game {
       if (P.blocking) { this.mine = null; this.crack.visible = false; this.eatT = 0; return; }
     }
     // anfall
-    if (this.mobTarget && lmbP && this.atkCd <= 0) {
+    if (this.playerTarget && lmbP && this.atkCd <= 0) {
+      const t = held ? toolOf(held.id) : null;
+      let dmg = t && t.dmg ? t.dmg : 1; if (!P.ground && P.vel.y < -1) dmg *= 1.5;
+      const r = this.playerTarget.r, d = this._tmp.set(r.vis.x - P.pos.x, 0, r.vis.z - P.pos.z).normalize();
+      this.net.hitPlayer(r, dmg, d);
+      this.hand.swing = 1; P.swing = 1; this.atkCd = 0.5; this.audio.play('hit', { vol: 0.6 });
+      if (t && !this.creative) { if (this.inv.wearHeld(t.type === 'sword' ? 1 : 2)) this._broke(held.id); }
+    } else if (this.mobTarget && lmbP && this.atkCd <= 0) {
       const m = this.mobTarget.mob;
       const t = held ? toolOf(held.id) : null;
       let dmg = t && t.dmg ? t.dmg : 1;
@@ -425,7 +525,7 @@ export class Game {
         this.audio.play('hit', { vol: 0.6 });
       }
       this.mine = null;
-    } else if (lmbP && !this.target && !this.mobTarget) { this.hand.swing = 1; }
+    } else if (lmbP && !this.target && !this.mobTarget && !this.playerTarget) { this.hand.swing = 1; }
     // brytning
     if (lmb && this.target && !this.mobTarget) this._mine(dt, lmbP);
     else { this.mine = null; this.crack.visible = false; }
@@ -492,8 +592,8 @@ export class Game {
     else if (!this.player.ground && !this.player.flying) time *= 2;
     return time;
   }
-  canHarvest(id) {
-    const d = BLOCKS[id]; const held = this.inv.held, t = held ? toolOf(held.id) : null;
+  canHarvest(id, held = this.inv.held) {
+    const d = BLOCKS[id]; const t = held ? toolOf(held.id) : null;
     return d.tier < 0 || (t && t.type === 'pick' && t.tier >= d.tier);
   }
   _mine(dt, pressed) {
@@ -520,6 +620,23 @@ export class Game {
     const W = this.world;
     const id = W.get(x, y, z); if (id <= 0) return;
     const d = BLOCKS[id];
+    if (this.net && this.net.guest) {
+      // onlinegäst: visa direkt, värden bryter på riktigt (och skapar föremålen)
+      this.net.brk(x, y, z, this.inv.held ? this.inv.held.id : 0);
+      this.net.noRec = true; W.set(x, y, z, id === B.ice && !this.creative && this.dim !== 'muspel' ? WATER : 0, { noUpdate: true }); this.net.noRec = false;
+      W.chests.delete(x + ',' + y + ',' + z);
+      this.ents.blockBurst(x, y, z, id, this.creative ? 10 : 18);
+      matSound(this.audio, d.sound, 'break');
+      this.stats.broken++; this.stats.lifeEdits++;
+      if (!this.creative) {
+        if (!this.canHarvest(id) && this.time - (this._toolHintT || -99) > 20) { this._toolHintT = this.time; this.toast(d.tier >= 3 ? 'Det här kräver en diamanthacka.' : d.tier >= 2 ? 'Det här kräver en järnhacka.' : d.tier === 1 ? 'Det här kräver en stenhacka.' : 'Du behöver en hacka för att få något ur det här.'); }
+        const held = this.inv.held, t = held ? toolOf(held.id) : null;
+        if (t && t.type && d.hardness > 0) { if (this.inv.wearHeld(t.type === 'sword' ? 2 : 1)) this._broke(held.id); }
+        if (held && held.id === I.shears && (BLOCKS[id].flags & 16 || id === B.tallgrass || id === B.fern) && this.inv.wearHeld(1)) this._broke(I.shears);
+        this._exh(0.006);
+      }
+      return;
+    }
     // innehåll i kistor/ugnar
     const k = x + ',' + y + ',' + z;
     if (id === B.chest) this._openLoot(k, x, y, z);
@@ -538,8 +655,9 @@ export class Game {
       this._exh(0.006);
     }
   }
-  _dropsFor(id, x, y, z) {
+  _dropsFor(id, x, y, z, heldArg, out = null) {
     const d = BLOCKS[id]; if (!d) return;
+    const emit = (i, n, xx, yy, zz) => { if (out) out(i, n, 0); else this.ents.drop(i, n, xx, yy, zz); };
     const r = Math.random();
     let drop = d.drop, n = 1;
     if (drop === -1) {
@@ -556,12 +674,12 @@ export class Game {
       else if (id === B.oak_leaves) drop = r < 0.07 ? B.oak_sapling : r < 0.12 ? I.stick : r > 0.96 ? I.apple : 0;
       else drop = 0;
       // saxen klipper löv och gräs hela
-      const held = this.inv.held;
-      if (held && held.id === I.shears && (BLOCKS[id].flags & 16 || id === B.tallgrass || id === B.fern)) { drop = id; n = 1; if (!this.creative && this.inv.wearHeld(1)) this._broke(I.shears); }
+      const held = heldArg && heldArg.remote ? heldArg : this.inv.held;
+      if (held && held.id === I.shears && (BLOCKS[id].flags & 16 || id === B.tallgrass || id === B.fern)) { drop = id; n = 1; if (!(heldArg && heldArg.remote) && !this.creative && this.inv.wearHeld(1)) this._broke(I.shears); }
     }
     const cd = d.crop;
     if (cd) {
-      if (cd.kind === 'wheat') { if (cd.stage === cd.max) { this.ents.drop(I.wheat, 1, x + 0.5, y + 0.4, z + 0.5); n = 1 + (Math.random() * 3 | 0); } else n = 1; drop = I.seeds; }
+      if (cd.kind === 'wheat') { if (cd.stage === cd.max) { emit(I.wheat, 1, x + 0.5, y + 0.4, z + 0.5); n = 1 + (Math.random() * 3 | 0); } else n = 1; drop = I.seeds; }
       else if (cd.kind === 'pumpkin' || cd.kind === 'melon') { drop = cd.kind === 'pumpkin' ? I.pumpkin_seeds : I.melon_seeds; n = cd.stage === cd.max ? 1 + (Math.random() * 2 | 0) : 1; }
       else { drop = cd.kind === 'carrot' ? I.carrot : I.potato; n = cd.stage === cd.max ? 2 + (Math.random() * 3 | 0) : 1; }
     }
@@ -570,7 +688,7 @@ export class Game {
     if (id === B.lingon_bush) n = 1 + (Math.random() * 2 | 0);
     if (isDoor(id)) drop = I.door;
     if (isBed(id)) drop = I.bed;
-    if (drop > 0) this.ents.drop(drop, n, x + 0.5, y + 0.4, z + 0.5);
+    if (drop > 0) emit(drop, n, x + 0.5, y + 0.4, z + 0.5);
   }
   /* ---------- utökning: rustning, hinkar, sax, fiske, städ, spak, TNT, lava ---------- */
   armorPoints() { let n = 0; for (const s of this.inv.armor) { const a = s && armorOf(s.id); if (a) n += a.pts; } return n; }
@@ -613,6 +731,10 @@ export class Game {
       return true;
     }
     if (mob && id === I.bucket && mob.type === 'cow') { this._swapHeld(I.bucket_milk); this.log('Du mjölkade kon.'); this.audio.play('pickup', { vol: 0.5, pitch: 0.8 }); this.tally('milk', 1); return true; }
+    if (mob && id === I.shears && mob.type === 'sheep' && this.net && this.net.guest) {
+      if (!mob.sheared) { this.net.act('shear', [mob.nid]); matSound(this.audio, 'wool', 'break'); this.tally('shear', 1); if (!this.creative && inv.wearHeld(1)) this._broke(id); }
+      return true;
+    }
     if (mob && id === I.shears && mob.type === 'sheep') {
       if (mob.sheared) return true;
       mob.sheared = true; mob.regrow = 120 + Math.random() * 120;
@@ -738,12 +860,16 @@ export class Game {
       if (!this.creative && Math.random() < 0.3) this._dropsFor(b, x, y, z);
     }
     const E = this.ents;
-    for (let i = 0; i < 40; i++) E.particle(c.x + (Math.random() - 0.5) * 2, c.y + Math.random() * 2, c.z + (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 12, Math.random() * 8, (Math.random() - 0.5) * 12, new THREE.Color(i % 3 ? '#5a5a5a' : '#ffb040'), 0.2 + Math.random() * 0.25, 0.8 + Math.random() * 0.8, i % 3 ? -0.15 : 0.3, i % 3 === 0);
-    this.audio.play('boom', { vol: Math.max(0.2, 1 - P.pos.distanceTo(c) / 40) });
+    this.boomFx(c);
+    if (this.net && this.net.host) this.net.fx('boom', c);
     const reach = r * 2.2;
     const pd = this._tmp2 || (this._tmp2 = new THREE.Vector3());
+    for (const t of this.targets()) {
+      if (!t.isRemote || !t.alive) continue;
+      pd.set(t.pos.x, t.pos.y + 0.9, t.pos.z).sub(c); const dt2 = pd.length();
+      if (dt2 < reach) this.damageTarget(t, (1 - dt2 / reach) * 24, pd.setY(0).normalize(), 14 * (1 - dt2 / reach), 'tnt', true);
+    }
     pd.set(P.pos.x, P.pos.y + 0.9, P.pos.z).sub(c); const dp = pd.length();
-    this.shake = Math.min(1, this.shake + Math.max(0, 1 - dp / 30));
     if (dp < reach && P.alive) this.damagePlayer((1 - dp / reach) * 24, pd.setY(0).normalize(), 14 * (1 - dp / reach), 'tnt', true);
     for (const m of E.mobs) { if (m.dead) continue; const d = m.pos.distanceTo(c); if (d < reach) { m.hurtT = 0; E.hitMob(m, (1 - d / reach) * 26, { x: (m.pos.x - c.x) / (d || 1), z: (m.pos.z - c.z) / (d || 1) }); } }
   }
@@ -792,8 +918,8 @@ export class Game {
     this.hand.swing = 0.3; this._exh(0.1); this.tally('sh', 'bow');
   }
   /** Benmjöl: plantor växer direkt, gräs får blommor */
-  _boneMeal(T) {
-    const W = this.world, id = T.id;
+  _boneMeal(T, W = this.world, consume = true) {
+    const id = T.id;
     let ok = false;
     const cd = BLOCKS[id] && BLOCKS[id].crop;
     if (cd) {
@@ -805,7 +931,7 @@ export class Game {
       let h = 1; while (W.get(T.x, top - h, T.z) === B.reed) h++;
       if (h < 3 && W.get(T.x, top + 1, T.z) === 0) { W.set(T.x, top + 1, T.z, B.reed); ok = true; }
     } else if (isSapling(id)) {
-      W.saplings.set(T.x + ',' + T.y + ',' + T.z, this.worldTime - 1); this._sapT = -1; this._tickSaplings(); ok = true;
+      W.saplings.set(T.x + ',' + T.y + ',' + T.z, this.worldTime - 1); this._sapT = -1; if (W === this.world) this._tickSaplings(); ok = true;
     } else if (id === B.grass) {
       const fl = [B.tallgrass, B.tallgrass, B.tallgrass, B.fern, B.bluebell, B.buttercup, B.daisy, B.fireweed];
       for (let n = 0; n < 14; n++) {
@@ -815,7 +941,8 @@ export class Game {
     }
     if (!ok) return false;
     const c = new THREE.Color('#9cff7a');
-    for (let i = 0; i < 12; i++) this.ents.particle(T.x + Math.random(), T.y + 0.6 + Math.random() * 0.8, T.z + Math.random(), 0, 0.8, 0, c, 0.07, 0.8, -0.1, true);
+    if (W === this.world) for (let i = 0; i < 12; i++) this.ents.particle(T.x + Math.random(), T.y + 0.6 + Math.random() * 0.8, T.z + Math.random(), 0, 0.8, 0, c, 0.07, 0.8, -0.1, true);
+    if (!consume) return true;
     if (!this.creative) this.inv.useHeld(1);
     this.tally('bm', 1); this.audio.play('power', { vol: 0.3 });
     return true;
@@ -827,6 +954,16 @@ export class Game {
     const T = this.target, W = this.world, P = this.player, inv = this.inv;
     const d = BLOCKS[T.id];
     const k = T.x + ',' + T.y + ',' + T.z;
+    const guest = this.net && this.net.guest;
+    if (guest && d.interact && !P.sneaking && pressed) {
+      // onlinegäst: delade saker sköts av värden
+      const it = d.interact;
+      if (it === 'chest' || it === 'furnace' || it === 'dispenser') { this.net.openContainer(k, it === 'dispenser' ? 'Utmatare' : T.id === B.barrel ? 'Tunna' : undefined); return true; }
+      if (it === 'button') { this.net.act('btn', [T.x, T.y, T.z]); this.audio.play('click', { vol: 0.5 }); return true; }
+      if (it === 'repeater') { this.net.act('rep', [T.x, T.y, T.z]); this.audio.play('click', { vol: 0.4 }); this.toast('Fördröjningen ändrades.'); return true; }
+      if (it === 'note') { this.net.act('note', [T.x, T.y, T.z]); this.audio.play('click', { vol: 0.4 }); return true; }
+      if (it === 'tnt' && inv.held && inv.held.id === B.torch) { this.net.act('tnt', [T.x, T.y, T.z]); this.tally('tnt', 1); return true; }
+    }
     if (d.interact && !P.sneaking && pressed) {
       if (d.interact === 'bench') { this.openInventory('bench'); return true; }
       if (d.interact === 'furnace') { if (!W.furnaces.has(k)) W.furnaces.set(k, newFurnace()); this.openInventory('furnace', { f: W.furnaces.get(k), key: k }); return true; }
@@ -861,6 +998,14 @@ export class Game {
     const held = inv.held;
     if (!held) return false;
     let id = held.id;
+    if (guest && id === I.bone_meal) {
+      if (!pressed) return false;
+      const cd = BLOCKS[T.id] && BLOCKS[T.id].crop;
+      if (!((cd && cd.stage < cd.max) || T.id === B.reed || isSapling(T.id) || T.id === B.grass)) return false;
+      this.net.act('bm', [T.x, T.y, T.z]); if (!this.creative) this.inv.useHeld(1); this.tally('bm', 1); this.audio.play('power', { vol: 0.3 });
+      return true;
+    }
+    if (guest && id === I.glodkarna) { if (pressed && T.id === B.obsidian) { this.net.act('ign', [T.x, T.y, T.z]); if (!this.creative) this.inv.useHeld(1); this.tally('portal', 1); } else if (pressed) this.toast('Använd Glödkärnan på en obsidianbåge (eldport).'); return pressed; }
     if (id === I.bone_meal) return pressed ? this._boneMeal(T) : false;
     if (id === I.glodkarna) { if (pressed && T.id === B.obsidian) this._ignitePortal(T); else if (pressed) this.toast('Använd Glödkärnan på en obsidianbåge (eldport).'); return pressed; }
     if (isHoe(id)) {
@@ -972,7 +1117,9 @@ export class Game {
     this.sleeping = 0.001;
     P.vel.set(0, 0, 0);
   }
-  _onBlockChange(x, y, z, o, n) {
+  _onBlockChange(x, y, z, o, n, W) {
+    if (this.net && this.net.guest) return; // gästen: värden sköter kretsar och portaler
+    if (W && W !== this.world) { const c = this.circs[W.dim]; if (c) c.onBlockChange(x, y, z, o, n); return; }
     if (this.circuits) this.circuits.onBlockChange(x, y, z, o, n);
     if ((o === B.obsidian || isPortal(o)) && n !== B.obsidian && !isPortal(n)) this._collapsePortal(x, y, z);
   }
@@ -982,7 +1129,9 @@ export class Game {
    * ===================================================================== */
   _createWorld(dim) {
     const w = new World({ scene: this.scene, mats: this.mats, seed: this.meta.seed, fancy: this.settings.get('fancyLeaves'), genVer: (this.meta.version || 1) >= 2 ? 2 : 1, dim });
-    w.onBlockChange = (x, y, z, o, n) => this._onBlockChange(x, y, z, o, n);
+    w.onBlockChange = (x, y, z, o, n) => this._onBlockChange(x, y, z, o, n, w);
+    if (this.net && this.net.host) { w.keepData = true; w.onNetChange = (x, y, z, id) => this.net.onBlock(dim, x, y, z, id); }
+    if (this.net && this.net.guest) this.net.worldCreated(w);
     w.onFall = (x, y, z, id) => this.ents.fallBlock(x, y, z, id);
     w.onDrop = (x, y, z, id) => { if (!this.creative) this._dropsFor(id, x, y, z, null); };
     w.onChunkReady = (c, m) => this._onChunkReady(w, c, m);
@@ -1002,7 +1151,8 @@ export class Game {
     if (this.worlds[dim]) return this.worlds[dim];
     const w = this._createWorld(dim);
     const prefix = 'kubvarld:w:' + this.id + (dim === 'muspel' ? ':m:' : ':c:');
-    for (const k of await kv.keys(prefix)) {
+    if (this.net && this.net.guest) this.net.loadMods(w);
+    for (const k of (this.net && this.net.guest ? [] : await kv.keys(prefix))) {
       const arr = await kv.get(k); if (!arr) continue;
       const [cx, cz] = k.slice(prefix.length).split(',').map(Number);
       w.loadMods(ckey(cx, cz), arr instanceof Uint32Array ? arr : new Uint32Array(arr));
@@ -1026,8 +1176,8 @@ export class Game {
     }
   }
   /** Fyll en strukturkista med sitt seedade byte (första gången den öppnas eller går sönder) */
-  _openLoot(k, x, y, z) {
-    const W = this.world, L = W.loot.get(k);
+  _openLoot(k, x, y, z, W = this.world) {
+    const L = W.loot.get(k);
     if (!L || W.chests.has(k)) return null;
     W.loot.delete(k);
     const slots = rollLoot(this.meta.seed + (W.dim === 'muspel' ? 7 : 0), L[0], x, y, z, L[1]);
@@ -1115,8 +1265,7 @@ export class Game {
   /* ---------- eldportar ---------- */
   _portalCells(ox, oy, oz, axis, list) { const ax = axis ? 0 : 1, az = axis ? 1 : 0; return list.map(([du, dy]) => [ox + ax * du, oy + dy, oz + az * du]); }
   /** Glödkärnan används på obsidian: hitta en hel båge och tänd den */
-  _ignitePortal(T) {
-    const W = this.world;
+  _ignitePortal(T, W = this.world, consume = true) {
     for (let axis = 0; axis < 2; axis++) for (const [fu, fy] of PORTAL_FRAME) {
       const ax = axis ? 0 : 1, az = axis ? 1 : 0;
       const ox = T.x - ax * fu, oy = T.y - fy, oz = T.z - az * fu;
@@ -1124,11 +1273,13 @@ export class Game {
       if (!frame.every(([x, y, z]) => W.get(x, y, z) === B.obsidian)) continue;
       if (!inner.every(([x, y, z]) => { const b = W.get(x, y, z); return b === 0 || (b > 0 && BLOCKS[b].replace && !isWater(b)); })) continue;
       this._fillPortal(W, ox, oy, oz, axis);
+      if (!consume) return true;
       if (!this.creative) this.inv.useHeld(1);
       this.tally('portal', 1);
       this.log('Eldporten flammar upp! Stå i elden en stund för att resa.', 'good');
       return true;
     }
+    if (!consume) return false;
     this.toast('Bygg först en båge av 12 obsidian: 3 i botten, 3 upp på var sida, två axlar och en slutsten överst – öppningen är 3 bred.');
     this.audio.play('error', { vol: 0.5 });
     return false;
@@ -1138,6 +1289,7 @@ export class Game {
     for (const [x, y, z] of this._portalCells(ox, oy, oz, axis, PORTAL_INNER)) W.set(x, y, z, id, { noUpdate: true });
     const list = this.portals[W.dim] || (this.portals[W.dim] = []);
     if (!list.some(p => p[0] === ox && p[1] === oy && p[2] === oz)) list.push([ox, oy, oz, axis]);
+    if (W !== this.world) return;
     this.audio.play('power', { vol: 0.6, pitch: 0.6 }); this.audio.noise({ dur: 1.2, vol: 0.15, freq: 300, type: 'lowpass', to: 900 });
     const c = new THREE.Color('#ff8a30');
     const [mx, , mz] = this._portalCells(ox, oy, oz, axis, [[1, 2]])[0];
@@ -1248,6 +1400,7 @@ export class Game {
     if (!best) {
       const sp = this._findPortalSpot(W, Math.floor(tx), Math.floor(tz));
       this._buildPortal(W, sp[0], sp[1], sp[2], sp[3]);
+      if (this.net && this.net.guest) this.net.act('pb', sp);
       best = sp;
     }
     const [cx, cy, cz] = this._portalCells(best[0], best[1], best[2], best[3], [[1, 1]])[0];
@@ -1406,9 +1559,9 @@ export class Game {
     P.alive = false; P.health = 0;
     this.stats.deaths++;
     const days = Math.max(0, Math.floor(this.worldTime) - this.stats.lifeStartDay);
-    const score = this.score;
+    const score = this.net && this.net.guest ? 0 : this.score;
     this.stats.bestDays = Math.max(this.stats.bestDays, days);
-    const res = submitScore('kubvarld', score);
+    const res = !(this.net && this.net.guest) ? submitScore('kubvarld', score) : { best: 0, isNew: false };
     this.lifeScoreSubmitted = true;
     // släpp allt
     for (let i = 0; i < 4; i++) { const s = this.inv.armor[i]; if (s) { this.ents.drop(s.id, 1, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.armor[i] = null; } }
@@ -1417,7 +1570,7 @@ export class Game {
     this.inv.changed();
     this.audio.play('lose', { vol: 0.7 });
     const MD = MOBS[source];
-    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.', arrow: 'Du sköts ihjäl av ett skelett.', tnt: 'Du sprängdes i luften.', lava: 'Du brann upp i lavan.', eld: 'Du brann upp.' }[source] || (MD ? `Du besegrades av ${MD.art} ${MD.name.toLowerCase()}.` : source ? `Du besegrades av ${String(source).toLowerCase()}.` : 'Du dog.');
+    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.', arrow: 'Du sköts ihjäl av ett skelett.', tnt: 'Du sprängdes i luften.', lava: 'Du brann upp i lavan.', eld: 'Du brann upp.' }[source] || (typeof source === 'string' && source[0] === '@' ? `Du besegrades av ${source.slice(1)}.` : MD ? `Du besegrades av ${MD.art} ${MD.name.toLowerCase()}.` : source ? `Du besegrades av ${String(source).toLowerCase()}.` : 'Du dog.');
     this.app.showDeath({ reason, days, score, best: res.best, isNew: res.isNew });
     this.save();
   }
@@ -1456,7 +1609,7 @@ export class Game {
   onInventoryClosed() { this.app.onUiClosed(); }
   onSelChange() { this.ui.updateHotbar(true); this.mine = null; this.eatT = 0; }
   /** Ny figur sparad i Min figur – byt utseende direkt */
-  setSkin(skin) { this.player.setSkin(skin); this.customSkin = true; }
+  setSkin(skin) { this.player.setSkin(skin); this.customSkin = true; if (this.net) this.net.sendSkin(); }
   onPickup(id, n) { this.tally('p', id, n); }
   onCrafted(id, n) { this.tally('c', id, n); this.audio.play('select', { vol: 0.4 }); }
   onKill(type) { this.tally('k', type); }
@@ -1635,6 +1788,7 @@ export class Game {
   }
   async save() {
     if (!this.ready) return;
+    if (this.net && this.net.guest) return this.net.saveGuest(this); // gästen sparar bara sin egen spelare
     // köa sparningar så att två aldrig körs samtidigt (t.ex. autosparning + paus)
     this._saving = (this._saving || Promise.resolve()).then(() => this._save());
     return this._saving;
@@ -1660,7 +1814,7 @@ export class Game {
     } catch (e) { console.warn('Sparning misslyckades', e); }
   }
   /** Rapportera poäng (vid sparning/avslut) */
-  reportScore() { if (!this.creative && this.player.alive && this.score > 0) return submitScore('kubvarld', this.score); return null; }
+  reportScore() { if (!this.creative && !(this.net && this.net.guest) && this.player.alive && this.score > 0) return submitScore('kubvarld', this.score); return null; }
 
   render(renderer) {
     renderer.info.autoReset = false; renderer.info.reset();

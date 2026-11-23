@@ -140,8 +140,11 @@ export class Entities {
   }
 
   /* ---------- föremål på marken ---------- */
-  drop(id, n, x, y, z, d = 0, vel = null) {
+  drop(id, n, x, y, z, d = 0, vel = null, nid = 0) {
     if (!id || n <= 0) return;
+    const net = this.g.net;
+    // onlinegäst: föremål skapas av värden (om värden är i samma dimension) – annars lokalt
+    if (net && net.guest && !nid && net.forwardDrop(id, n, x, y, z, d, vel)) return { age: 0 };
     const cube = isCubeItem(id);
     const mesh = cube ? new THREE.Mesh(blockGeo(id), this.g.mats.entity) : new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMat.clone());
     mesh.scale.setScalar(cube ? 0.28 : 0.4);
@@ -153,6 +156,8 @@ export class Entities {
     };
     this.group.add(mesh);
     this.drops.push(e);
+    if (nid) e.nid = nid;
+    else if (net && net.host) net.dropAdded(e);
     return e;
   }
   _updateDrops(dt) {
@@ -162,14 +167,20 @@ export class Entities {
       e.age += dt;
       const dx = pl.pos.x - e.pos.x, dy = (pl.pos.y + 0.8) - e.pos.y, dz = pl.pos.z - e.pos.z;
       const dist = Math.hypot(dx, dy, dz);
-      if (e.age > 0.5 && dist < 2.3 && pl.alive) {
+      if (e.nid && this.g.net && this.g.net.guest) {
+        // speglat föremål: be värden om det (värden avgör vem som fick det)
+        if (e.age > 0.5 && dist < 1.6 && pl.alive && (e.askT = (e.askT || 0) - dt) <= 0) { e.askT = 0.6; this.g.net.askPickup(e); }
+        e.vel.y -= 20 * dt;
+        const r = moveBody(w, e.pos, e.vel, dt, { hw: 0.12, h: 0.25 });
+        if (r.ground) { e.vel.x *= Math.pow(0.02, dt); e.vel.z *= Math.pow(0.02, dt); }
+      } else if (e.age > 0.5 && dist < 2.3 && pl.alive) {
         e.vel.set(dx, dy, dz).multiplyScalar(9 / Math.max(0.3, dist));
         e.pos.addScaledVector(e.vel, dt);
         if (dist < 0.7) {
           const left = this.g.inv.add(e.id, e.n, e.d);
           if (left < e.n) { this.g.audio.play('pickup', { vol: 0.5, pitch: 0.9 + Math.random() * 0.3, gap: 40 }); this.g.onPickup(e.id, e.n - left); }
           if (left <= 0) { this._removeDrop(i); continue; }
-          e.n = left;
+          e.n = left; if (this.g.net && this.g.net.host) this.g.net.dropAdded(e);
         }
       } else {
         e.vel.y -= 20 * dt;
@@ -192,11 +203,13 @@ export class Entities {
     if (this.drops.length > 30 && Math.random() < 0.1) {
       for (let i = this.drops.length - 1; i > 0; i--) {
         const a = this.drops[i];
-        for (let j = 0; j < i; j++) { const b = this.drops[j]; if (b.id === a.id && !a.d && !b.d && a.pos.distanceToSquared(b.pos) < 1) { b.n += a.n; this._removeDrop(i); break; } }
+        for (let j = 0; j < i; j++) { const b = this.drops[j]; if (b.id === a.id && !a.d && !b.d && a.pos.distanceToSquared(b.pos) < 1 && !(this.g.net && this.g.net.guest)) { b.n += a.n; this._removeDrop(i); if (this.g.net) this.g.net.dropAdded(b); break; } }
       }
     }
   }
-  _removeDrop(i) { const e = this.drops[i]; this.group.remove(e.mesh); if (!e.cube) e.mesh.material.dispose(); this.drops.splice(i, 1); }
+  _removeDrop(i) { const e = this.drops[i]; this.group.remove(e.mesh); if (!e.cube) e.mesh.material.dispose(); this.drops.splice(i, 1); if (e.nid && this.g.net && this.g.net.host) this.g.net.dropRemoved(e); }
+  /** Ta bort ett föremål efter nät-id (värdens beslut) */
+  removeDropNid(nid) { const i = this.drops.findIndex(e => e.nid === nid); if (i >= 0) { const e = this.drops[i]; this._removeDrop(i); return e; } return null; }
 
   /* ---------- fallande block ---------- */
   fallBlock(x, y, z, id) {
@@ -242,6 +255,7 @@ export class Entities {
     model.root.position.copy(m.pos);
     this.group.add(model.root);
     this.mobs.push(m);
+    m.nid = (opts && opts.nid) || (this._nid = (this._nid || 0) + 1);
     return m;
   }
   _killMob(m, byPlayer) {
@@ -253,16 +267,21 @@ export class Entities {
         const n = a + Math.floor(Math.random() * (b - a + 1));
         if (n > 0) this.drop(id, n, m.pos.x, m.pos.y + 0.5, m.pos.z);
       }
-      this.g.stats.kills++; this.g.onKill(m.type);
-      if (m.def.hostile) this.g.log('Du besegrade ' + m.def.art + ' ' + m.def.name.toLowerCase() + '.');
+      if (m._by && this.g.net) this.g.net.creditKill(m._by, m);
+      else {
+        this.g.stats.kills++; this.g.onKill(m.type);
+        if (m.def.hostile) this.g.log('Du besegrade ' + m.def.art + ' ' + m.def.name.toLowerCase() + '.');
+      }
     }
     if (this.g.onMobKilled) this.g.onMobKilled(m, byPlayer);
   }
   _vol(m) { const d = m.pos.distanceTo(this.g.player.pos); const p = this.g.player; const ang = Math.atan2(m.pos.x - p.pos.x, m.pos.z - p.pos.z); return { vol: Math.max(0, 1 - d / 28), pan: Math.max(-1, Math.min(1, Math.sin(ang - p.yaw - Math.PI) * 0.8)) }; }
 
   /** Spelaren (eller spelarens pil) träffar en varelse */
-  hitMob(m, dmg, dir) {
+  hitMob(m, dmg, dir, by = null) {
     if (m.dead || m.hurtT > 0.35) return false;
+    if (m.remote) { m.hurtT = 0.5; this.g.net.hitMob(m, dmg, dir); mobSound(this.g.audio, m.type, 'hurt', this._vol(m)); this.puff(m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.def.blood || '#c84040', 6, 0.4); return true; }
+    m._by = by;
     m.hp -= dmg; m.hurtT = 0.5;
     const kb = 6;
     m.vel.x += dir.x * kb; m.vel.z += dir.z * kb; m.vel.y = Math.max(m.vel.y, 5);
@@ -313,13 +332,21 @@ export class Entities {
     return !this.g.world.raycast(from.x, from.y, from.z, to.x, to.y, to.z, dist, {});
   }
 
+  /** Spelare i den här dimensionen (online: även gäster). Närmaste levande först. */
+  _nearest(p) {
+    const T = this.g.targets ? this.g.targets() : [this.g.player];
+    let best = T[0], bd = 1e9;
+    for (const t of T) { const d = (t.pos.x - p.x) ** 2 + (t.pos.y - p.y) ** 2 * 0.25 + (t.pos.z - p.z) ** 2 + (t.alive ? 0 : 1e6); if (d < bd) { bd = d; best = t; } }
+    return best;
+  }
   _updateMobs(dt) {
-    const g = this.g, w = g.world, pl = g.player;
+    const g = this.g, w = g.world;
     const day = g.sky.daylight;
     const ch = this._ch || (this._ch = { tx: 0, tz: 0, jump: false });
     for (let i = this.mobs.length - 1; i >= 0; i--) {
       const m = this.mobs[i];
       const md = m.def;
+      const pl = this._nearest(m.pos);
       // avlägsna långt borta eller i olastade chunkar
       const dpl = m.pos.distanceTo(pl.pos);
       if (dpl > (md.hostile ? 72 : 110) || !w.isLoaded(Math.floor(m.pos.x), Math.floor(m.pos.z)) || m.pos.y < -20) { this._removeMob(i); continue; }
@@ -397,7 +424,7 @@ export class Entities {
         if (hdist < reach && Math.abs(pl.pos.y - m.pos.y) < Math.max(1.6, m.h * 0.8) && m.atkCd <= 0) {
           m.atkCd = m.type === 'spider' ? 0.8 : md.boss ? 1.6 : 1.0;
           m.swing = 0.4;
-          g.damagePlayer(md.dmg * g.diffDmg(), tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), md.kb || 6, m.type);
+          g.damageTarget(pl, md.dmg * g.diffDmg(), tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), md.kb || 6, m.type);
           mobSound(g.audio, m.type, 'attack', this._vol(m));
         }
         if (hdist < reach * 0.7) { tx = 0; tz = 0; }
@@ -572,7 +599,7 @@ export class Entities {
     for (let i = this.doors.length - 1; i >= 0; i--) {
       const d = this.doors[i]; d.t -= dt; if (d.t > 0) continue;
       // stäng bara om ingen står i dörren
-      const busy = this.mobs.some(m => !m.dead && Math.floor(m.pos.x) === d.x && Math.floor(m.pos.z) === d.z) || (Math.floor(this.g.player.pos.x) === d.x && Math.floor(this.g.player.pos.z) === d.z);
+      const busy = this.mobs.some(m => !m.dead && Math.floor(m.pos.x) === d.x && Math.floor(m.pos.z) === d.z) || (this.g.targets ? this.g.targets() : [this.g.player]).some(p => Math.floor(p.pos.x) === d.x && Math.floor(p.pos.z) === d.z);
       if (busy) { d.t = 0.6; continue; }
       if (w.get(d.x, d.y, d.z) === DOOR0 + 4 + d.f) { w.set(d.x, d.y, d.z, DOOR0 + d.f, { noUpdate: true }); if (w.get(d.x, d.y + 1, d.z) === DOOR0 + 12 + d.f) w.set(d.x, d.y + 1, d.z, DOOR0 + 8 + d.f, { noUpdate: true }); }
       this.doors.splice(i, 1);
@@ -632,7 +659,7 @@ export class Entities {
         g.audio.play('boom', { vol: 0.5 });
         for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; this.particle(m.pos.x + Math.cos(a) * 1.5, m.pos.y + 0.2, m.pos.z + Math.sin(a) * 1.5, Math.cos(a) * 7, 1.5, Math.sin(a) * 7, FIRE[i % 3], 0.18, 0.6, 0.4, true); }
         const d = m.pos.distanceTo(pl.pos);
-        if (d < 6.5) { g.damagePlayer((1 - d / 7) * 9 * g.diffDmg() + 2, tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), 14, m.type); pl.burnT = Math.max(pl.burnT || 0, 2); }
+        for (const t of (g.targets ? g.targets() : [pl])) { const d2 = m.pos.distanceTo(t.pos); if (d2 < 6.5) { g.damageTarget(t, (1 - d2 / 7) * 9 * g.diffDmg() + 2, tmpV.set(t.pos.x - m.pos.x, 0, t.pos.z - m.pos.z).normalize(), 14, m.type); if (!t.isRemote) t.burnT = Math.max(t.burnT || 0, 2); } }
       }
     } else if (m.slamCd <= 0 && hdist < 5.5) { m.slamCd = 6 + Math.random() * 2; m.slamT = 0.7; mobSound(g.audio, 'zombie', 'attack', this._vol(m)); }
     if (m.fireCd <= 0 && hdist > 7 && hdist < 24) {
@@ -649,7 +676,8 @@ export class Entities {
     if (!this._fireGeo) this._fireGeo = new THREE.IcosahedronGeometry(0.28, 0);
     const mesh = new THREE.Mesh(this._fireGeo, EMBER_MAT);
     mesh.position.copy(from); this.group.add(mesh);
-    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 5, mesh, owner: 'mob', dmg, fire: true });
+    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 5, mesh, owner: this.g.net && this.g.net.guest ? 'vis' : 'mob', dmg, fire: true });
+    if (this.g.net && this.g.net.host) this.g.net.arrowFx(from, vel, null, true);
     try { this.g.audio.noise({ dur: 0.35, vol: 0.12 * Math.max(0.15, 1 - from.distanceTo(this.g.player.pos) / 30), freq: 500, type: 'lowpass', to: 200 }); } catch (e) { }
   }
 
@@ -665,11 +693,13 @@ export class Entities {
     return (this._arrowT = grp);
   }
   /** Skjut en pil. owner: 'mob' (skadar spelaren) eller 'player' (skadar varelser) */
-  shootArrow(from, vel, owner, dmg) {
+  shootArrow(from, vel, owner, dmg, by = null) {
+    const net = this.g.net;
+    if (net && owner !== 'vis') { if (net.guest && owner === 'player') { net.shootArrow(from, vel, dmg); owner = 'vis'; } else if (net.host) net.arrowFx(from, vel, by); }
     const mesh = this._arrowTemplate().clone();
     mesh.position.copy(from);
     this.group.add(mesh);
-    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 6, mesh, owner, dmg });
+    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 6, mesh, owner, dmg, by });
     const d = from.distanceTo(this.g.player.pos);
     try { this.g.audio.noise({ dur: 0.12, vol: 0.12 * Math.max(0.15, 1 - d / 25), freq: 1800, type: 'bandpass', to: 600 }); this.g.audio.tone({ freq: 240, to: 150, dur: 0.12, vol: 0.05 * Math.max(0.15, 1 - d / 25), type: 'triangle' }); } catch (e) { }
   }
@@ -685,17 +715,22 @@ export class Entities {
       if (s.fire) { s.mesh.rotation.x += dt * 6; s.mesh.rotation.y += dt * 4; if (Math.random() < dt * 30) this.particle(s.pos.x, s.pos.y, s.pos.z, (Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5), FIRE[Math.random() * 3 | 0], 0.12, 0.4, -0.2, true); }
       else s.mesh.lookAt(tmpV.copy(s.pos).add(s.vel));
       let hit = false;
-      if (s.owner === 'mob') {
-        if (pl.alive && Math.abs(s.pos.x - pl.pos.x) < 0.45 && Math.abs(s.pos.z - pl.pos.z) < 0.45 && s.pos.y > pl.pos.y && s.pos.y < pl.pos.y + 1.85) {
-          const res = this.g.damagePlayer(s.dmg, tmpV.copy(s.vel).setY(0).normalize(), 3, s.fire ? 'eld' : 'arrow');
-          if (s.fire && res !== 'blocked' && !(pl.fireRes > 0)) pl.burnT = Math.max(pl.burnT || 0, 3);
-          hit = true;
+      if (s.owner === 'vis') {
+        // bara utseende (online: den riktiga pilen finns hos värden)
+        for (const m of this.mobs) if (!m.dead && Math.abs(s.pos.x - m.pos.x) < m.hw + 0.1 && Math.abs(s.pos.z - m.pos.z) < m.hw + 0.1 && s.pos.y > m.pos.y - 0.1 && s.pos.y < m.pos.y + m.h + 0.1) { hit = true; break; }
+      } else if (s.owner === 'mob') {
+        for (const t of (this.g.targets ? this.g.targets() : [pl])) {
+          if (t.alive && Math.abs(s.pos.x - t.pos.x) < 0.45 && Math.abs(s.pos.z - t.pos.z) < 0.45 && s.pos.y > t.pos.y && s.pos.y < t.pos.y + 1.85) {
+            const res = this.g.damageTarget(t, s.dmg, tmpV.copy(s.vel).setY(0).normalize(), 3, s.fire ? 'eld' : 'arrow', false, s.fire);
+            if (s.fire && res !== 'blocked' && !t.isRemote && !(t.fireRes > 0)) t.burnT = Math.max(t.burnT || 0, 3);
+            hit = true; break;
+          }
         }
       } else {
         for (const m of this.mobs) {
           if (m.dead) continue;
           if (Math.abs(s.pos.x - m.pos.x) < m.hw + 0.1 && Math.abs(s.pos.z - m.pos.z) < m.hw + 0.1 && s.pos.y > m.pos.y - 0.1 && s.pos.y < m.pos.y + m.h + 0.1) {
-            this.hitMob(m, s.dmg, tmpV.copy(s.vel).setY(0).normalize());
+            this.hitMob(m, s.dmg, tmpV.copy(s.vel).setY(0).normalize(), s.by);
             hit = true; break;
           }
         }
@@ -706,7 +741,7 @@ export class Entities {
         if (s.fire) { for (let k = 0; k < 14; k++) this.particle(s.pos.x, s.pos.y, s.pos.z, (Math.random() - 0.5) * 5, Math.random() * 4, (Math.random() - 0.5) * 5, FIRE[k % 3], 0.12, 0.5, 0.4, true); }
         else if (wall) { this.puff(s.pos.x, s.pos.y, s.pos.z, '#8a7a66', 4, 0.2); matSound(this.g.audio, 'wood', 'hit', { vol: Math.max(0, 1 - s.pos.distanceTo(pl.pos) / 20) }); }
         // spelarens pilar kan oftast plockas upp igen
-        if (wall && !s.fire && s.owner === 'player' && Math.random() < 0.75) this.drop(I.arrow, 1, s.pos.x - s.vel.x * dt * 1.5, s.pos.y - s.vel.y * dt * 1.5, s.pos.z - s.vel.z * dt * 1.5, 0, tmpV.set(0, 0, 0));
+        if (wall && !s.fire && s.owner === 'player' && Math.random() < 0.75 && !(this.g.net && this.g.net.guest)) this.drop(I.arrow, 1, s.pos.x - s.vel.x * dt * 1.5, s.pos.y - s.vel.y * dt * 1.5, s.pos.z - s.vel.z * dt * 1.5, 0, tmpV.set(0, 0, 0));
         this.group.remove(s.mesh); this.shots.splice(i, 1);
       }
     }
@@ -716,8 +751,9 @@ export class Entities {
   _spawnTick(dt) {
     this.spawnT -= dt;
     if (this.spawnT > 0) return;
-    const g = this.g, w = g.world, pl = g.player;
-    if (g.dim === 'muspel') { this.spawnT = 2; this._spawnMuspel(); return; }
+    const g = this.g, w = g.world;
+    const TS = g.targets ? g.targets().filter(t => t.alive) : [g.player], pl = TS[(Math.random() * TS.length) | 0] || g.player;
+    if (g.dim === 'muspel') { this.spawnT = 2; this._spawnMuspel(pl); return; }
     this.spawnT = g.difficulty === 2 ? 1.6 : 2.4;
     let pass = 0, host = 0;
     for (const m of this.mobs) { if (m.def.hostile) host++; else pass++; }
@@ -781,8 +817,8 @@ export class Entities {
   }
 
   /** Muspelheim: askvandrare i flock på golven, glödgaster i luften, salamandrar vid lavan */
-  _spawnMuspel() {
-    const g = this.g, w = g.world, pl = g.player;
+  _spawnMuspel(pl = this.g.player) {
+    const g = this.g, w = g.world;
     if (g.difficulty === 0 || pl.creative) return;
     let host = 0; for (const m of this.mobs) if (m.def.hostile && !m.def.boss) host++;
     const cap = g.difficulty === 2 ? 14 : 9;
@@ -841,6 +877,11 @@ export class Entities {
   }
 
   update(dt) {
+    if (this.g.net && this.g.net.guest) {
+      // onlinegäst: varelser speglas från värden
+      this._updateParticles(dt); this._updateDrops(dt); this._updateShots(dt); this.g.net.updateMirror(this, dt);
+      return;
+    }
     this._updateTnt(dt);
     this._updateParticles(dt);
     this._updateDrops(dt);

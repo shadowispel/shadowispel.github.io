@@ -44,7 +44,7 @@ export class SkinEditor {
     this.open = false;
     this.scr.classList.add('hidden');
     this._stopPreview();
-    removeEventListener('resize', this._onResize); removeEventListener('keydown', this._onKey);
+    removeEventListener('resize', this._onResize); removeEventListener('keydown', this._onKey); if (this._onKeyUp) removeEventListener('keyup', this._onKeyUp);
     if (this.onClose) this.onClose();
   }
 
@@ -78,6 +78,13 @@ export class SkinEditor {
     const mid = el('div', 'kv-skmid', body);
     this.wrap = el('div', 'kv-skwrap', mid);
     this.cv = el('canvas', 'kv-skcanvas', this.wrap);
+    const zr = el('div', 'kv-skzoom', mid);
+    const zb = (t, title, fn) => { const b = el('button', 'btn small', zr, t); b.title = title; b.onclick = fn; return b; };
+    zb('−', 'Zooma ut (−)', () => this._zoomBy(1 / 1.5));
+    this.zoomLbl = el('span', 'kv-skzl', zr, '100 %');
+    zb('+', 'Zooma in (+)', () => this._zoomBy(1.5));
+    zb('Anpassa', 'Visa hela mallen (0)', () => this._zoomReset());
+    el('small', 'kv-skzhint', zr, 'Mushjul/nyp = zooma · mellanslag+dra, högerklick-dra (inzoomat) eller två fingrar = flytta');
     this.status = el('div', 'kv-skstatus', mid, 'Peka på mallen för att se vilken del det är.');
     // sidopanel
     const side = el('div', 'kv-skside', body);
@@ -109,10 +116,14 @@ export class SkinEditor {
     const cancel = el('button', 'btn', row, 'Avbryt'); cancel.onclick = () => this.close(false);
     this._setTool(this.tool); this._setColor(this.color, false); this._renderRecent();
     // händelser
+    this.z = 1; this.ox = 0; this.oy = 0; this.ptrs = new Map(); this.space = false;
     this.cv.addEventListener('pointerdown', e => this._down(e));
     this.cv.addEventListener('pointermove', e => this._move(e));
     this.cv.addEventListener('pointerup', e => this._up(e));
     this.cv.addEventListener('pointercancel', e => this._up(e));
+    this.cv.addEventListener('wheel', e => { e.preventDefault(); const r = this.cv.getBoundingClientRect(); this._zoomAt(this.z * Math.pow(1.0018, -e.deltaY * (e.deltaMode ? 30 : 1)), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+    this._onKeyUp = e => { if (e.code === 'Space') { this.space = false; this.cv.style.cursor = ''; } };
+    addEventListener('keyup', this._onKeyUp);
     this.cv.addEventListener('pointerleave', () => { this.hover = null; this._draw(); });
     this.cv.addEventListener('contextmenu', e => e.preventDefault());
     this.pv.addEventListener('pointerdown', e => { this.pv.setPointerCapture(e.pointerId); this._rot = { x: e.clientX, y: e.clientY, ry: this.rotY, rx: this.rotX }; this.auto = false; });
@@ -129,6 +140,10 @@ export class SkinEditor {
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) this._redo(); else this._undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); this._redo(); return; }
     if (e.key === 'Escape') { e.preventDefault(); this.close(false); return; }
+    if (e.code === 'Space') { e.preventDefault(); this.space = true; this.cv.style.cursor = 'grab'; return; }
+    if (e.key === '+' || e.key === '=') { this._zoomBy(1.5); return; }
+    if (e.key === '-') { this._zoomBy(1 / 1.5); return; }
+    if (e.key === '0') { this._zoomReset(); return; }
     const t = TOOLS.find(x => x[3].toLowerCase() === k); if (t) this._setTool(t[0]);
     if (k === 'm') this.mirrorBtn.click();
   }
@@ -156,14 +171,41 @@ export class SkinEditor {
   }
 
   /* ---------- ritning ---------- */
+  /* ---------- zoom och panorering ---------- */
+  _clampView() {
+    this.z = Math.max(1, Math.min(12, this.z));
+    this.ox = Math.max(0, Math.min(SKIN_W - SKIN_W / this.z, this.ox)); this.oy = Math.max(0, Math.min(SKIN_H - SKIN_H / this.z, this.oy));
+    if (this.zoomLbl) this.zoomLbl.textContent = Math.round(this.z * 100) + ' %';
+  }
+  /** Zooma så att punkten (sx, sy) i canvasens css-pixlar ligger kvar under pekaren */
+  _zoomAt(nz, sx, sy) {
+    const r = this.cv.getBoundingClientRect(); if (!r.width) return;
+    const tx = this.ox + sx / r.width * SKIN_W / this.z, ty = this.oy + sy / r.height * SKIN_H / this.z;
+    this.z = Math.max(1, Math.min(12, nz));
+    this.ox = tx - sx / r.width * SKIN_W / this.z; this.oy = ty - sy / r.height * SKIN_H / this.z;
+    this._clampView(); this._draw();
+  }
+  _zoomBy(f) { const r = this.cv.getBoundingClientRect(); this._zoomAt(this.z * f, r.width / 2, r.height / 2); }
+  _zoomReset() { this.z = 1; this.ox = 0; this.oy = 0; this._clampView(); this._draw(); }
+  _panBy(dx, dy) { const r = this.cv.getBoundingClientRect(); this.ox -= dx / r.width * SKIN_W / this.z; this.oy -= dy / r.height * SKIN_H / this.z; this._clampView(); this._draw(); }
   _texel(e) {
     const r = this.cv.getBoundingClientRect();
-    const x = Math.floor((e.clientX - r.left) / r.width * SKIN_W), y = Math.floor((e.clientY - r.top) / r.height * SKIN_H);
+    const x = Math.floor(this.ox + (e.clientX - r.left) / r.width * SKIN_W / this.z), y = Math.floor(this.oy + (e.clientY - r.top) / r.height * SKIN_H / this.z);
     if (x < 0 || y < 0 || x >= SKIN_W || y >= SKIN_H) return null;
     return [x, y];
   }
   _down(e) {
-    e.preventDefault(); this.cv.setPointerCapture(e.pointerId);
+    e.preventDefault(); try { this.cv.setPointerCapture(e.pointerId); } catch (er) { /* syntetisk pekare */ }
+    this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.ptrs.size === 2) {
+      // två fingrar: nyp för zoom och dra för att flytta (avbryt ett påbörjat penseldrag)
+      if (this.stroke) { this.stroke = null; if (this.undo.length) { this.skin.px = this.undo.pop(); this._changed(true); } }
+      const [a, b] = [...this.ptrs.values()], r = this.cv.getBoundingClientRect();
+      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: this.z, mx: (a.x + b.x) / 2 - r.left, my: (a.y + b.y) / 2 - r.top };
+      return;
+    }
+    if (this.ptrs.size > 2) return;
+    if (e.button === 1 || this.space || (e.button === 2 && this.z > 1.01)) { this.pan = { x: e.clientX, y: e.clientY }; this.cv.style.cursor = 'grabbing'; return; }
     const t = this._texel(e); if (!t) return;
     const erase = e.button === 2;
     if (this.tool === 'pick') { this._pick(t); return; }
@@ -174,6 +216,15 @@ export class SkinEditor {
     this._paintAt(t, erase); this._changed(true);
   }
   _move(e) {
+    if (this.ptrs.has(e.pointerId)) this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.pinch && this.ptrs.size >= 2) {
+      const [a, b] = [...this.ptrs.values()], r = this.cv.getBoundingClientRect();
+      const mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top;
+      this._zoomAt(this.pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / this.pinch.d, this.pinch.mx, this.pinch.my);
+      this._panBy(mx - this.pinch.mx, my - this.pinch.my); this.pinch.mx = mx; this.pinch.my = my;
+      return;
+    }
+    if (this.pan) { this._panBy(e.clientX - this.pan.x, e.clientY - this.pan.y); this.pan.x = e.clientX; this.pan.y = e.clientY; return; }
     const t = this._texel(e);
     this.hover = t;
     if (t) {
@@ -188,7 +239,11 @@ export class SkinEditor {
       this.stroke.last = t; this._changed(true);
     } else this._draw();
   }
-  _up() { if (this.stroke) { this.stroke = null; if (this.tool !== 'erase') this._setColor(this.color, true); this._changed(); } }
+  _up(e) {
+    if (e && this.ptrs) this.ptrs.delete(e.pointerId);
+    if (this.pinch) { if (this.ptrs.size < 2) this.pinch = null; return; }
+    if (this.pan) { this.pan = null; this.cv.style.cursor = this.space ? 'grab' : ''; return; }
+    if (this.stroke) { this.stroke = null; if (this.tool !== 'erase') this._setColor(this.color, true); this._changed(); } }
   _rgb() { const n = parseInt(this.color.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   _set(i, c) {
     if (TEXEL_PART[i] < 0) return;
@@ -247,10 +302,11 @@ export class SkinEditor {
   }
   _draw() {
     if (!this.cv || !this.cell) return;
-    const ctx = this.cv.getContext('2d'), c = this.cell * this.dpr, px = this.skin.px;
+    const ctx = this.cv.getContext('2d'), c = this.cell * this.dpr * (this.z || 1), px = this.skin.px;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.cv.width, this.cv.height);
     ctx.fillStyle = 'rgba(8,12,24,.55)'; ctx.fillRect(0, 0, this.cv.width, this.cv.height);
+    ctx.setTransform(1, 0, 0, 1, -Math.round((this.ox || 0) * c), -Math.round((this.oy || 0) * c));
     // delarnas ytor: rutigt underlag (genomskinligt) + pixlar
     for (const i of USED) {
       const x = i % SKIN_W, y = (i / SKIN_W) | 0, o = i * 4;
@@ -259,8 +315,8 @@ export class SkinEditor {
       ctx.fillRect(x * c, y * c, c, c);
     }
     // rutnät
-    if (this.cell >= 6) {
-      ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
+    if (this.cell * (this.z || 1) >= 6) {
+      ctx.strokeStyle = (this.z || 1) >= 2.5 ? 'rgba(0,0,0,.42)' : 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
       ctx.beginPath();
       for (const k of PART_KEYS) for (const f of FACES) {
         const [x0, y0, w, h] = faceRect(PARTS[k], f);

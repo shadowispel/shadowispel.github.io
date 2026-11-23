@@ -2,7 +2,8 @@
 import * as THREE from 'three';
 import { moveBody, overlaps } from './physics.js';
 import { isWater, BLOCKS, ARMOR_MATS, armorOf, ITEMS } from './blocks.js';
-import { buildSkinModel, loadSkin } from './skin.js';
+import { buildSkinModel, loadSkin, PX } from './skin.js';
+import { blockGeo, extrudedGeo, isCubeItem } from './models.js';
 
 const HW = 0.3, H = 1.8, H_SNEAK = 1.5;
 const HURT = new THREE.Color(1, 0.4, 0.4);
@@ -27,7 +28,22 @@ export class Player {
     this.onLand = null; this.onStep = null;
     this._camTmp = new THREE.Vector3(); this._dir = new THREE.Vector3();
   }
-  dispose() { this.g.scene.remove(this.model.root); this.model.dispose(); }
+  dispose() { this._setHeld(0); this.g.scene.remove(this.model.root); this.model.dispose(); }
+  /** Föremålet i handen i tredjepersonsvyn */
+  _setHeld(id) {
+    const arm = this.model.parts.armR;
+    if (this._held) { arm.remove(this._held); if (!this._held.userData.cube) this._held.material.dispose(); this._held = null; }
+    this._heldId = id;
+    if (!id || (ITEMS[id] && ITEMS[id].shield)) return;
+    const g = this.g, cube = isCubeItem(id), tool = !cube && ITEMS[id] && ITEMS[id].tool;
+    const m = cube ? new THREE.Mesh(blockGeo(id), g.mats.entity) : new THREE.Mesh(extrudedGeo(g.atlas, id), new THREE.MeshLambertMaterial({ vertexColors: true }));
+    m.userData.cube = cube;
+    if (cube) m.onBeforeRender = (r, s, c, gg, mat) => { const L = g.world.light(Math.floor(this.pos.x), Math.floor(this.pos.y + 1), Math.floor(this.pos.z)); mat.uniforms.uEntLight.value.set((L >> 4) / 15, (L & 15) / 15); mat.uniformsNeedUpdate = true; };
+    m.scale.setScalar(cube ? 0.4 : tool ? 0.72 : 0.6);
+    m.position.set(0, -9.5 * PX, tool ? 3 * PX : 2.5 * PX);
+    m.rotation.set(tool ? -0.5 : 0, tool ? 0.85 : 0.6, 0);
+    arm.add(m); this._held = m;
+  }
   /** Byt figurens utseende (skin-objekt från skin.js) */
   setSkin(skin) { this.model.setSkin(skin); }
   get height() { return this.sneaking && !this.flying ? H_SNEAK : H; }
@@ -62,7 +78,7 @@ export class Player {
     if (this.sprinting && (ctl.mz < 0.3 || this.sneaking || (!this.creative && this.food <= 6))) this.sprinting = false;
 
     // önskad hastighet
-    let speed = this.flying ? (this.sprinting ? 21 : 10.9) : this.sneaking ? 1.35 : this.sprinting ? 5.6 : 4.3;
+    let speed = this.flying ? (this.sprinting ? 21 : 10.9) : this.sneaking ? 1.35 : this.sprinting ? 6.4 : 4.3; // spring ≈ 1,5 × gång
     if (this.inWater && !this.flying) speed *= 0.55;
     if (this.blocking && !this.flying) speed = Math.min(speed, 1.6);
     if (this.webbed && !this.flying) speed *= 0.2;
@@ -168,7 +184,10 @@ export class Player {
       const sw = Math.sin(this.bob * 1.0) * 0.9 * this.bobAmt;
       P.legL.rotation.x = sw; P.legR.rotation.x = -sw;
       P.armL.rotation.x = -sw * 0.7;
-      P.armR.rotation.x = sw * 0.7 - (this.swing > 0 ? Math.sin(this.swing * Math.PI) * 1.6 : 0);
+      const hid = this.g.inv && this.g.inv.held ? this.g.inv.held.id : 0;
+      if (hid !== this._heldId) this._setHeld(hid);
+      if (this._held && !this._held.userData.cube) this._held.material.color.copy(this.light);
+      P.armR.rotation.x = sw * 0.7 - (hid ? 0.25 : 0) - (this.swing > 0 ? Math.sin(this.swing * Math.PI) * 1.6 : 0);
       P.head.rotation.x = -this.pitch * 0.8;
       // sköld: syns på vänster arm när den hålls, lyfts när man parerar
       const inv = this.g.inv, isSh = s => !!(s && ITEMS[s.id] && ITEMS[s.id].shield);

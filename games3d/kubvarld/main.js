@@ -9,18 +9,20 @@ import { hashStr } from './noise.js';
 import { B } from './blocks.js';
 import { SkinEditor } from './skineditor.js';
 import { renderAchievements } from './achievements.js';
+import { makeNet, makeLobby, HostSession, GuestSession, emotePanel } from './online.js';
+import { backgroundTicker } from '../../engine/net.js';
 
 Spelhallen.init('kubvarld');
 const $ = id => document.getElementById(id);
 const root = $('root');
-const settings = new Settings('kubvarld', { viewDist: 'auto', fancyLeaves: true, brightness: 0.35, viewBob: true, autoJump: isTouchDevice() });
+const settings = new Settings('kubvarld', { fov: 70, dynFov: true, viewDist: 'auto', fancyLeaves: true, brightness: 0.35, viewBob: true, autoJump: isTouchDevice() });
 const scene = new THREE.Scene();
 const R = createRenderer(root, settings, { scene });
 const renderer = R.renderer;
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.shadowMap.enabled = false;
 renderer.autoClear = true;
-const camera = new THREE.PerspectiveCamera(settings.get('fov'), 1, 0.05, 800);
+const camera = new THREE.PerspectiveCamera(Math.max(30, Math.min(110, +settings.get('fov') || 70)), 1, 0.05, 800);
 R.setCamera(camera);
 scene.add(new THREE.AmbientLight(0xffffff, 1.35));
 const dl = new THREE.DirectionalLight(0xffffff, 1.1); dl.position.set(0.4, 1, 0.25); scene.add(dl);
@@ -76,12 +78,16 @@ const loop = new Loop({
   update(dt) {
     const t0 = performance.now();
     if (state === 'menu' || state === 'loading') updateMenuBg(dt);
-    else if (game && (state === 'play' || state === 'dead')) {
-      if (input.pressed('Escape', 'KeyP', 'Pad9', 'Pause')) { if (game.ui.open) game.closeInventory(); else pause(); }
+    else if (game && (state === 'play' || state === 'dead' || (state === 'pause' && game.net))) {
+      if (state === 'pause') { /* online: världen lever vidare under pausmenyn */ }
+      else if (emo && emo.open) { if (input.pressed('Escape', 'KeyT')) emo.close(); }
+      else if (game.net && state === 'play' && input.pressed('KeyT') && !game.ui.open) openEmotes();
+      else if (input.pressed('Escape', 'KeyP', 'Pad9', 'Pause')) { if (game.ui.open) game.closeInventory(); else pause(); }
       else if (input.pressed('Sneak')) { game.touchSneak = !game.touchSneak; const b = document.querySelector('[data-code="Sneak"]'); if (b) b.classList.toggle('on', game.touchSneak); }
       game.update(dt);
       // springande synfält
-      const base = settings.get('fov') * (game.player.sprinting ? 1.1 : 1) * (game.player.flying && game.player.sprinting ? 1.05 : 1);
+      const dyn = settings.get('dynFov') !== false;
+      const base = Math.max(30, Math.min(110, +settings.get('fov') || 70)) * (dyn && game.player.sprinting ? 1.12 : 1) * (dyn && game.player.flying && game.player.sprinting ? 1.05 : 1);
       if (Math.abs(camera.fov - base) > 0.05) { camera.fov += (base - camera.fov) * Math.min(1, dt * 8); camera.updateProjectionMatrix(); }
     }
     audio.update();
@@ -143,17 +149,22 @@ R.onResize((w, h) => { if (game) game.hand.setAspect(w / h); });
 function pause() {
   if (state !== 'play' || !game) return;
   if (game.ui.open) game.closeInventory();
-  state = 'pause'; loop.setPaused(true);
+  if (emo && emo.open) emo.close();
+  state = 'pause';
+  if (game.net) game.inputBlocked = true; else loop.setPaused(true);
   input.exitLock();
   const P = game.player;
-  $('pauseInfo').textContent = `${game.meta.name} · Dag ${game.day} · ${game.creative ? 'Kreativt' : 'Överlevnad'}${game.creative ? '' : ' · Poäng ' + fmt(game.score)}`;
+  $('pauseInfo').textContent = `${game.meta.name} · Dag ${game.day} · ${game.creative ? 'Kreativt' : 'Överlevnad'}${game.creative || game.net ? '' : ' · Poäng ' + fmt(game.score)}` +
+    (game.net ? ` · Online: ${net.players.length} ${net.players.length === 1 ? 'spelare' : 'spelare'}${net.code ? ' · Rumskod ' + net.code : ''}` : '');
+  $('btnPauseEmote').hidden = !game.net;
+  $('btnQuit').textContent = game.net && game.net.guest ? 'Lämna spelet' : game.net ? 'Spara och avsluta (alla kopplas från)' : 'Spara och avsluta';
   show('pause');
   game.save();
   audio.play('click');
 }
 function resume() {
   if (!game) return;
-  hide('pause'); state = 'play'; loop.setPaused(false);
+  hide('pause'); state = 'play'; loop.setPaused(false); game.inputBlocked = false;
   input.endFrame(); // släng tangenttryck som gjordes i pausen
   if (!touch) lock();
 }
@@ -238,7 +249,7 @@ async function createWorld() {
 }
 
 /* ---------- starta / avsluta ---------- */
-async function startWorld(id) {
+async function startWorld(id, opts = {}) {
   const meta = await kv.get('kubvarld:w:' + id);
   if (!meta) { toast('Världen kunde inte läsas.'); return; }
   audio.play('select');
@@ -250,9 +261,11 @@ async function startWorld(id) {
   await new Promise(r => setTimeout(r, 40));
   stopMenuBg();
   if (game) { game.dispose(); game = null; }
-  game = new Game(app, meta);
+  game = new Game(app, meta, opts);
+  if (opts.net) opts.net.attach(game);
   await game.load((f, t) => ls.set(f, t));
   ls.done();
+  if (opts.net) startBg();
   $('hud').classList.remove('hidden');
   state = 'play'; loop.setPaused(false);
   if (!settings.get('music')) audio.stopMusic();
@@ -264,6 +277,7 @@ async function quitToMenu() {
   game.reportScore();
   await game.save();
   game.dispose(); game = null;
+  endOnline();
   ls.done();
   $('hud').classList.add('hidden');
   state = 'menu'; loop.setPaused(false);
@@ -283,6 +297,93 @@ function showDeath(o) {
 
 /* ---------- knappar ---------- */
 $('btnContinue').onclick = () => { if (worlds[0]) startWorld(worlds[0].id); };
+
+/* ---------- online ---------- */
+let net = null, lobby = null, sess = null, emo = null, bgStop = null;
+function ensureNet() {
+  if (net) return;
+  net = makeNet();
+  lobby = makeLobby(net, {
+    container: $('netScr'), worlds: () => worlds,
+    onBack: () => { lobby.close(); hide('netScr'); show('menu'); },
+    onStartPressed: w => hostStart(w)
+  });
+  net.on('start', p => { if (!net.isHost && !sess && !game) startGuest(p); });
+  net.onMsg('go', p => { if (!net.isHost && !sess && !game) startGuest(p); });
+  net.on('hostleft', () => { if (sess && sess.guest) netEnded('Värden lämnade', 'Värden avslutade spelet eller tappade anslutningen. Din väska och position är sparade till nästa gång.'); });
+  net.on('error', e => { if (e.code === 'hostleft' || e.soft) return; if (sess && sess.guest) netEnded('Anslutningen bröts', e.message || 'Kontakten med värden försvann.'); });
+}
+$('btnOnline').onclick = async () => { audio.play('click'); await loadWorldList(); ensureNet(); hide('menu'); show('netScr'); lobby.open(); };
+async function newWorldMeta(name, mode) {
+  const seed = (Math.random() * 4294967296) >>> 0;
+  const id = 'w' + Date.now().toString(36) + ((Math.random() * 1296) | 0).toString(36);
+  const meta = { id, name, seed, mode, diff: mode === 'creative' ? 0 : 1, created: Date.now(), worldTime: 0.02, version: 3 };
+  await kv.set('kubvarld:w:' + id, meta);
+  await updateWorldList(meta);
+  return meta;
+}
+async function hostStart(wid) {
+  if (sess || game) return;
+  const st = Object.assign({ mode: net.mode === 'creative' ? 'creative' : 'survival', pvp: false }, net.roomState);
+  let meta = wid && wid !== 'new' && net.kind !== 'quick' ? await kv.get('kubvarld:w:' + wid) : null;
+  if (!meta) meta = await newWorldMeta((net.kind === 'quick' ? 'Snabbmatch ' : 'Onlinevärld ') + new Date().toLocaleDateString('sv-SE'), st.mode);
+  const payload = { wid: String(meta.id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'w', name: String(meta.name).slice(0, 40), seed: meta.seed >>> 0, ver: Math.max(1, Math.min(9, meta.version || 1)), mode: st.mode, diff: Math.max(0, Math.min(2, meta.diff ?? 1)), pvp: !!st.pvp };
+  sess = new HostSession(net, app, payload);
+  if (!net.startGame(payload)) { sess.dispose(); sess = null; toast('Kunde inte starta onlinespelet.'); return; }
+  lobby.close(); hide('netScr');
+  await startWorld(meta.id, { net: sess, mode: st.mode });
+}
+async function startGuest(p) {
+  sess = new GuestSession(net, app, p);
+  lobby.close(); ['netScr', 'menu', 'worlds', 'newworld'].forEach(hide);
+  state = 'loading';
+  const ls = loadingScreen($('loading'));
+  $('loadTitle').textContent = p.name; show('loading'); ls.set(0, 'Ansluter till värdens värld…');
+  let snap;
+  try {
+    snap = await Promise.race([sess.requestWorld(f => ls.set(f * 0.45, 'Tar emot världen… ' + Math.round(f * 100) + ' %')), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 90000))]);
+  } catch (e) { ls.done(); netEnded('Det gick inte att ansluta', 'Världen kunde inte hämtas från värden.'); return; }
+  if (!sess) { ls.done(); return; }
+  const saved = await GuestSession.loadSave(p.wid);
+  const meta = { id: 'net-' + p.wid, name: p.name, seed: p.seed, mode: p.mode, diff: p.diff, version: p.ver, created: 0, worldTime: snap.t, structInit: 1, structSkip: snap.skip, spawn: snap.spawn, portals: snap.portals, flags: saved && saved.flags || { bosses: snap.bosses }, stats: saved && saved.stats, inv: saved && saved.inv, player: saved && saved.player, dim: saved && saved.dim, bed: saved && saved.bed };
+  stopMenuBg();
+  if (game) { game.dispose(); game = null; }
+  game = new Game(app, meta, { net: sess, mode: p.mode });
+  sess.game = game;
+  await game.load((f, t) => ls.set(0.45 + f * 0.55, t));
+  if (!sess) { ls.done(); return; }
+  sess.attach(game);
+  ls.done();
+  $('hud').classList.remove('hidden');
+  state = 'play'; loop.setPaused(false);
+  startBg();
+  game.log(saved ? 'Välkommen tillbaka! Din väska och position är kvar.' : 'Du har anslutit till ' + p.name + '. Tryck T för snabbmeddelanden.', 'good');
+}
+function startBg() { if (bgStop) bgStop(); bgStop = backgroundTicker(dt => { if (game && game.net && game.ready && state !== 'loading') { game.update(dt); input.endFrame(); } }, 20); }
+function endOnline() {
+  if (bgStop) { bgStop(); bgStop = null; }
+  if (emo) { emo.destroy(); emo = null; }
+  if (sess) { sess.dispose(); sess = null; }
+  if (net && net.status !== 'idle') net.leave();
+}
+async function netEnded(title, text) {
+  const g = game;
+  if (g) { try { await g.save(); } catch (e) { /* ignorera */ } g.dispose(); game = null; }
+  endOnline();
+  ['pause', 'dead', 'loading', 'netScr'].forEach(hide);
+  $('hud').classList.add('hidden');
+  state = 'menu'; loop.setPaused(false); input.exitLock();
+  startMenuBg(); refreshMenu();
+  $('netMsgTitle').textContent = title; $('netMsgText').textContent = text;
+  show('netMsg');
+}
+$('netMsgOk').onclick = () => { hide('netMsg'); show('menu'); };
+function openEmotes() {
+  if (!net || !game) return;
+  if (!emo) emo = emotePanel(net, $('hud'), () => { if (game) game._suppressPause = false; if (state === 'play' && !touch) lock(); });
+  game._suppressPause = true; input.exitLock(); emo.show();
+}
+$('btnPauseEmote').onclick = () => { resume(); setTimeout(openEmotes, 30); };
 $('btnWorlds').onclick = async () => { audio.play('click'); if (!worlds.length) { hide('menu'); openNew(); return; } await renderWorlds(); hide('menu'); show('worlds'); };
 $('btnWorldsBack').onclick = () => { hide('worlds'); show('menu'); };
 $('btnNew').onclick = () => openNew();
@@ -293,12 +394,20 @@ let setReturn = 'menu';
 function openSettings(from) {
   setReturn = from; hide(from);
   buildSettings($('setBox'), settings, [
+    { key: 'dynFov', label: 'Dynamiskt synfält (vidare när du springer)', type: 'check' },
     { key: 'viewDist', label: 'Siktavstånd', type: 'select', options: [['auto', 'Efter grafikkvalitet'], ['3', '3 chunkar'], ['4', '4 chunkar'], ['5', '5 chunkar'], ['6', '6 chunkar'], ['8', '8 chunkar'], ['10', '10 chunkar'], ['12', '12 chunkar'], ['16', '16 chunkar']] },
     { key: 'fancyLeaves', label: 'Detaljerade löv', type: 'check' },
     { key: 'brightness', label: 'Ljusstyrka i mörker', type: 'range', min: 0, max: 1, step: 0.05, format: v => Math.round(v * 100) + '%' },
     { key: 'viewBob', label: 'Gungande kamera', type: 'check' },
     { key: 'autoJump', label: 'Autohopp', type: 'check' }
   ]);
+  // kitets synfältsreglage: Kubvärld tillåter 30–110°, och "Dynamiskt synfält" ligger direkt under
+  const fv = $('set-fov');
+  if (fv) {
+    fv.min = 30; fv.max = 110; fv.value = settings.get('fov');
+    const row = fv.closest('.g3-set'), lab = row && row.querySelector('label'); if (lab) lab.textContent = 'Synfält (FOV)';
+    const dyn = $('set-dynFov'), drow = dyn && dyn.closest('.g3-set'); if (row && drow) row.after(drow);
+  }
   show('settingsScr');
 }
 $('btnSettings').onclick = () => openSettings('menu');
@@ -323,7 +432,7 @@ $('btnQuit').onclick = () => quitToMenu();
 $('btnRespawn').onclick = () => { hide('dead'); game.respawn(); state = 'play'; if (!touch) lock(); };
 $('btnDeadQuit').onclick = () => { game.respawn(); quitToMenu(); };
 settings.onChange((k, v) => {
-  if (k === 'fov') { camera.fov = v; camera.updateProjectionMatrix(); }
+  if (k === 'fov') { camera.fov = Math.max(30, Math.min(110, +v || 70)); camera.updateProjectionMatrix(); if (game && state === 'pause') game.render(renderer); }
   if (game && (k === 'viewDist' || k === 'quality')) game.applyView();
   if (game && k === 'fancyLeaves') game.world.setFancy(v);
   if (game && k === 'autoJump') game.autoJump = v;
@@ -348,5 +457,5 @@ setInterval(() => {
 startMenuBg();
 refreshMenu();
 show('menu');
-window.__kv = { get game() { return game; }, get state() { return state; }, app, settings, startWorld, quitToMenu, skinEd };
+window.__kv = { get game() { return game; }, get state() { return state; }, get net() { return net; }, get sess() { return sess; }, app, settings, startWorld, quitToMenu, skinEd };
 window.__ok = true;

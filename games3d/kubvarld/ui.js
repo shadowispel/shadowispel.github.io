@@ -178,6 +178,7 @@ export class UI {
   close() {
     if (!this.mode) return;
     const inv = this.g.inv;
+    if (this._drag) { const D = this._drag; this._drag = null; for (const [r, o] of D.orig) r.set(o ? { ...o } : null); inv.cursor = { ...D.start }; }
     // lägg tillbaka hantverksrutnät och muspekare
     for (let i = 0; i < 9; i++) if (inv.craft[i]) { const s = inv.craft[i]; inv.craft[i] = null; this._giveBack(s); }
     if (inv.smith) for (let i = 0; i < 2; i++) if (inv.smith[i]) { const s = inv.smith[i]; inv.smith[i] = null; this._giveBack(s); }
@@ -324,7 +325,15 @@ export class UI {
         this._lp = setTimeout(() => { if (this._touch && this._touch.ref === ref) { this._touch.fired = true; this._click(ref, 1, false); if (navigator.vibrate) navigator.vibrate(15); } }, 380);
         return;
       }
-      this._down = { ref, x: e.clientX, y: e.clientY }; this._click(ref, e.button === 2 ? 1 : 0, e.shiftKey);
+      const btn = e.button === 2 ? 1 : 0, cur = this.g.inv.cursor;
+      // dubbelklick: samla ihop alla av samma sort till markörens stapel
+      if (btn === 0 && !e.shiftKey && this._gather(ref, e)) return;
+      // med en stapel på markören: dra över rutor för att fördela (vänster) eller lägga en i varje (höger)
+      if (cur && !e.shiftKey && this._dragOk(ref, cur)) {
+        this._drag = { btn, start: { ...cur }, refs: [ref], orig: new Map([[ref, ref.get() ? { ...ref.get() } : null]]), x: e.clientX, y: e.clientY };
+        return;
+      }
+      this._down = { ref, x: e.clientX, y: e.clientY }; this._click(ref, btn, e.shiftKey);
     });
     s.el.addEventListener('pointerup', e => {
       if (e.pointerType !== 'touch' || !this._touch) return;
@@ -333,13 +342,71 @@ export class UI {
       if (t.ref === ref && !t.fired) this._click(ref, 0, false);
     });
     s.el.addEventListener('pointercancel', () => { clearTimeout(this._lp); this._touch = null; });
-    s.el.addEventListener('pointerenter', () => { this._hover = ref; this._showTip(); });
+    s.el.addEventListener('pointerenter', e => {
+      this._hover = ref; this._showTip();
+      const D = this._drag;
+      if (D && (e.buttons & (D.btn ? 2 : 1)) && !D.refs.includes(ref) && this._dragOk(ref, D.start)) { D.refs.push(ref); D.orig.set(ref, ref.get() ? { ...ref.get() } : null); this._dragApply(); }
+    });
     s.el.addEventListener('pointerleave', () => { if (this._hover === ref) { this._hover = null; this._showTip(); } });
     s.el.addEventListener('contextmenu', e => e.preventDefault());
     this.refs.push(ref);
     return ref;
   }
+  /** Kan rutan ta emot (en del av) stapeln st vid dragfördelning? */
+  _dragOk(ref, st) {
+    if (['out', 'fout', 'sout', 'creative', 'trash'].includes(ref.kind) || ref.accept) return false;
+    const t = ref.get(); if (!t) return true;
+    return t.id === st.id && !toolOf(st.id) && (t.d || 0) === (st.d || 0) && t.n < maxStack(st.id);
+  }
+  /** Förhandsvisning/utfall av dragfördelningen */
+  _dragApply() {
+    const D = this._drag, inv = this.g.inv, ms = maxStack(D.start.id);
+    for (const [r, o] of D.orig) r.set(o ? { ...o } : null);
+    let left = D.start.n;
+    if (D.refs.length > 1 || D.btn) {
+      const per = D.btn ? 1 : Math.floor(D.start.n / D.refs.length);
+      for (const r of D.refs) {
+        if (left <= 0 || per <= 0) break;
+        const o = D.orig.get(r), room = ms - (o ? o.n : 0), k = Math.min(per, room, left);
+        if (k <= 0) continue;
+        r.set({ id: D.start.id, n: (o ? o.n : 0) + k, d: D.start.d || 0 }); left -= k;
+      }
+    }
+    inv.cursor = left > 0 ? { ...D.start, n: left } : null;
+    this.refresh();
+  }
+  /** Dubbelklick: plocka ihop samma sorts föremål från inventariet och den öppna behållaren till markören */
+  _gather(ref, e) {
+    const inv = this.g.inv, now = performance.now();
+    const dbl = e.detail >= 2 || (this._lastClick && this._lastClick.ref === ref && now - this._lastClick.t < 320);
+    this._lastClick = { ref, t: now };
+    if (!dbl) return false;
+    const cur = inv.cursor; if (!cur || toolOf(cur.id)) return false;
+    const ms = maxStack(cur.id);
+    const pool = this.refs.filter(r => ['inv', 'chest', 'craft'].includes(r.kind));
+    // först ofullständiga staplar, sedan hela
+    for (const pass of [0, 1]) for (const r of pool) {
+      if (cur.n >= ms) break;
+      const t = r.get(); if (!t || t.id !== cur.id || (t.d || 0) !== (cur.d || 0)) continue;
+      if (pass === 0 && t.n >= ms) continue;
+      const k = Math.min(ms - cur.n, t.n); cur.n += k; t.n -= k; if (t.n <= 0) r.set(null);
+    }
+    this._drag = null; this._down = null;
+    this.g.audio.play('pickup', { vol: 0.35 });
+    inv.changed(); this.refresh();
+    return true;
+  }
   _onUp(e) {
+    const D = this._drag;
+    if (D) {
+      if (D.refs.length > 1) { this._dragApply(); this._drag = null; this.g.audio.play('click', { vol: 0.4 }); this.g.inv.changed(); this.refresh(); return; }
+      // bara en ruta: vanligt klick
+      this._drag = null;
+      for (const [r, o] of D.orig) r.set(o ? { ...o } : null);
+      this.g.inv.cursor = { ...D.start };
+      this._click(D.refs[0], D.btn, false);
+      return;
+    }
     const d = this._down; this._down = null;
     if (!d || !this.mode) return;
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 8) return;

@@ -65,7 +65,7 @@ export class Hand {
     this.offId = id; if (!id) return;
     const cube = isCubeItem(id);
     const m = cube ? new THREE.Mesh(blockGeo(id), this.g.mats.entity) : new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMatL);
-    m.scale.setScalar(cube ? 0.28 : ITEMS[id] && ITEMS[id].shield ? 0.62 : 0.4);
+    m.scale.setScalar(cube ? 0.46 : ITEMS[id] && ITEMS[id].shield ? 0.8 : 0.64);
     if (cube) { const self = this; m.onBeforeRender = function (r, s, c, g, mat) { mat.uniforms.uEntLight.value.set(self.sky, self.blk); mat.uniformsNeedUpdate = true; }; m.rotation.y = Math.PI / 4; }
     this._offMesh = m; this.off.add(m);
   }
@@ -83,8 +83,8 @@ export class Hand {
     let m;
     if (isCubeItem(id)) {
       m = new THREE.Mesh(blockGeo(id), this.g.mats.entity);
-      m.scale.setScalar(0.3);
-      m.position.set(-0.02, 0.1, -0.02);
+      m.scale.setScalar(0.5);
+      m.position.set(-0.04, 0.15, -0.05);
       m.rotation.set(0, Math.PI / 4, 0);
       const self = this;
       m.onBeforeRender = function (r, s, c, g, mat) { mat.uniforms.uEntLight.value.set(self.sky, self.blk); mat.uniformsNeedUpdate = true; };
@@ -92,9 +92,9 @@ export class Hand {
       m = new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMatL);
       const tool = !!(ITEMS[id] && ITEMS[id].tool);
       const plant = id > 0 && (id < 256 || id >= 400) && BLOCKS[id] && BLOCKS[id].model === M_CROSS;
-      m.scale.setScalar(tool ? 0.58 : 0.34);
+      m.scale.setScalar(tool ? 0.95 : 0.6);
       m.rotation.set(tool ? -0.2 : 0, tool ? -1.35 : -0.3, tool ? 0.35 : 0);
-      m.position.set(tool ? 0.02 : 0.04, tool ? 0.2 : plant ? 0.12 : 0.1, tool ? -0.08 : -0.02);
+      m.position.set(tool ? 0.04 : 0.05, tool ? 0.32 : plant ? 0.2 : 0.16, tool ? -0.12 : -0.04);
     }
     this._mesh = m;
     this.item.add(m);

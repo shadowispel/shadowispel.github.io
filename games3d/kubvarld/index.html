@@ -47,6 +47,7 @@
       <div class="g3-btns">
         <button class="btn primary" id="btnContinue" hidden>Fortsätt</button>
         <button class="btn" id="btnWorlds">Världar</button>
+        <button class="btn" id="btnOnline">🌐 Spela online</button>
         <button class="btn" id="btnSkin">Min figur</button>
         <button class="btn" id="btnSettings">Inställningar</button>
         <button class="btn" id="btnHelp">Hur man spelar</button>
@@ -116,6 +117,7 @@
         <span><kbd>L</kbd></span><span>Prestationer</span>
         <span><kbd>F</kbd></span><span>Byt föremål med andra handen (t.ex. sköld)</span>
         <span><kbd>Q</kbd></span><span>Släpp föremål (Ctrl+Q = hela stapeln)</span>
+        <span><kbd>T</kbd></span><span>Snabbmeddelanden (online)</span>
         <span><kbd>V</kbd> / <kbd>F5</kbd></span><span>Byt kameravy (första/tredje person)</span>
         <span><kbd>F3</kbd> / <kbd>F1</kbd></span><span>Koordinater & felsökning / dölj gränssnittet</span>
         <span><kbd>Esc</kbd> / <kbd>P</kbd></span><span>Paus</span>
@@ -160,6 +162,7 @@
       <p class="g3-sub" id="pauseInfo"></p>
       <div class="g3-btns">
         <button class="btn primary" id="btnResume">Fortsätt</button>
+        <button class="btn" id="btnPauseEmote" hidden>Snabbmeddelande (T)</button>
         <button class="btn" id="btnPauseAch">Prestationer</button>
         <button class="btn" id="btnPauseSkin">Min figur</button>
         <button class="btn" id="btnPauseSet">Inställningar</button>
@@ -191,6 +194,16 @@
         <button class="btn primary" id="btnRespawn">Återuppstå</button>
         <button class="btn" id="btnDeadQuit">Spara och avsluta</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Online: lobby och meddelanden -->
+  <div class="g3-screen hidden kv-menu" id="netScr"></div>
+  <div class="g3-screen hidden" id="netMsg">
+    <div class="g3-panel">
+      <h2 class="g3-h2" id="netMsgTitle">Värden lämnade</h2>
+      <p class="g3-sub" id="netMsgText"></p>
+      <div class="g3-btns"><button class="btn primary" id="netMsgOk">Till menyn</button></div>
     </div>
   </div>
 

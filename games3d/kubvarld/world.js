@@ -181,6 +181,11 @@ export class World {
   }
   /** Lägg världen åt sidan (dimensionsbyte): släpp chunkar och mesher men behåll ändringar, kistor och ugnar. */
   suspend() {
+    if (this.keepData) {
+      // onlinevärd: gäster kan vara kvar i dimensionen – behåll blockdata, släpp bara mesherna
+      for (const c of this.chunks.values()) { this._disposeMeshes(c); c.meshed = false; c.dirty = true; }
+      this.group.visible = false; return;
+    }
     this.token = (this.token + 7919) | 0;
     for (const c of this.chunks.values()) this._disposeMeshes(c);
     this.chunks.clear(); this._last = null;
@@ -232,6 +237,7 @@ export class World {
 
   set(x, y, z, id, opts = {}) {
     if (y < 0 || y >= CY) return false;
+    if (this.noSim && !opts.noUpdate) opts = { noUpdate: true };
     const cx = x >> 4, cz = z >> 4;
     const c = this.getChunk(cx, cz);
     if (!c || !c.data) return false;
@@ -257,7 +263,8 @@ export class World {
       else if (lightChange) { n.dirty = true; }
     }
     if (!opts.noUpdate) this._neighborUpdate(x, y, z, old, id);
-    if (this.onBlockChange) this.onBlockChange(x, y, z, old, id);
+    if (this.onBlockChange) this.onBlockChange(x, y, z, old, id, opts.remote);
+    if (this.onNetChange) this.onNetChange(x, y, z, id, old, opts.remote);
     return true;
   }
 
@@ -488,25 +495,44 @@ export class World {
   }
 
   /* ----- strömning av chunkar ----- */
+  /**
+   * px/pz = huvudcentrum (spelarens kamera) eller null (osynlig dimension). this.centers = extra centrum
+   * [[x, z], …] (onlinevärdens gäster): chunkar där genereras, meshas (ljus behövs för varelser) och hålls kvar.
+   */
   update(px, pz, dt) {
-    const pcx = Math.floor(px / CX), pcz = Math.floor(pz / CZ);
+    const main = px != null;
+    const pcx = main ? Math.floor(px / CX) : 0, pcz = main ? Math.floor(pz / CZ) : 0;
     const R = this.radius, RG = R + 1;
     const pool = this.pool;
+    const C = this.centers && this.centers.length ? this.centers.map(([x, z]) => [Math.floor(x / CX), Math.floor(z / CZ)]) : null, CR = 3;
+    const nearC = c => { if (!C) return false; for (const [x, z] of C) if (Math.max(Math.abs(c.cx - x), Math.abs(c.cz - z)) <= CR + 3) return true; return false; };
     // avlasta
     if (!this._unloadT || (this._unloadT -= dt) <= 0) {
       this._unloadT = 1;
       for (const c of this.chunks.values()) {
-        if (Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) > RG + 2 && !c.busy) { this._disposeMeshes(c); this.chunks.delete(c.key); if (this._last === c) this._last = null; }
+        const far = !main || Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) > RG + 2;
+        if (far && !c.busy && !nearC(c)) { this._disposeMeshes(c); this.chunks.delete(c.key); if (this._last === c) this._last = null; }
       }
     }
     // brådskande ommeshning
     for (const c of this.chunks.values()) {
-      if (c.urgent && c.dirty && !c.busy && c.data && this._neighborsReady(c)) { if (!this._mesh(c)) break; }
+      if (c.urgent && c.dirty && !c.busy && c.data && this._neighborsReady(c) && (!C || !main || Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) <= R + 1 || nearC(c))) { if (!this._mesh(c)) break; }
     }
     // jobb sorterade efter avstånd (spiral)
-    if (!this._order || this._orderR !== RG) { this._order = spiral(RG); this._orderR = RG; }
     let budget = 6;
-    for (const [dx, dz] of this._order) {
+    if (main) {
+      if (!this._order || this._orderR !== RG) { this._order = spiral(RG); this._orderR = RG; }
+      budget = this._jobs(pcx, pcz, this._order, R, budget);
+    }
+    if (C) {
+      if (!this._orderC) this._orderC = spiral(CR + 1);
+      for (const [x, z] of C) { if (budget <= 0) break; budget = this._jobs(x, z, this._orderC, CR, Math.max(1, Math.min(budget, 3))); }
+    }
+    if (!this.noSim) { this.tickWater(dt); this.tickLava(dt); }
+  }
+  _jobs(pcx, pcz, order, R, budget) {
+    const pool = this.pool;
+    for (const [dx, dz] of order) {
       if (!pool.free() || budget <= 0) break;
       const cx = pcx + dx, cz = pcz + dz;
       const inMesh = Math.max(Math.abs(dx), Math.abs(dz)) <= R;
@@ -515,8 +541,26 @@ export class World {
       if (!c) { c = this._newChunk(cx, cz); this._gen(c); budget--; continue; }
       if (inMesh && c.data && c.dirty && !c.busy && this._neighborsReady(c)) { this._mesh(c); budget--; }
     }
-    this.tickWater(dt);
-    this.tickLava(dt);
+    return budget;
+  }
+  /** Sätt ett block i en chunk som kanske inte är laddad (online: ändring från värden). */
+  setRemote(x, y, z, id) {
+    if (y < 0 || y >= CY) return;
+    if (this.set(x, y, z, id, { noUpdate: true, remote: true })) return;
+    const c = this.getChunk(x >> 4, z >> 4);
+    if (c && c.data) return; // redan samma
+    const k = ckey(x >> 4, z >> 4), i = (y << 8) | ((z & 15) << 4) | (x & 15);
+    let m = this.mods.get(k); if (!m) { m = new Map(); this.mods.set(k, m); }
+    m.set(i, id);
+  }
+  /** Ersätt alla ändringar i en chunk (online: omsynk från värden). */
+  replaceMods(key, arr) {
+    const c = this.chunks.get(key);
+    this.loadMods(key, arr);
+    if (c && c.data) {
+      const x0 = c.cx * CX, z0 = c.cz * CZ;
+      for (const [i, id] of this.mods.get(key)) this.set(x0 + (i & 15), i >> 8, z0 + ((i >> 4) & 15), id, { noUpdate: true, remote: true });
+    }
   }
   _newChunk(cx, cz) {
     const c = { cx, cz, key: ckey(cx, cz), data: null, biomes: null, light: null, maxY: 0, ver: 0, dirty: true, urgent: false, busy: false, mesh: null, tmesh: null, meshed: false };
