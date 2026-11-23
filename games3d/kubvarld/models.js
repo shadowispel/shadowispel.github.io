@@ -32,11 +32,10 @@ function part(mat, w, h, d, color, pos, opts = {}) {
 }
 function add(parent, mat, w, h, d, color, pos, opts) { const p = part(mat, w, h, d, color, pos, opts); parent.add(p); return p; }
 
-export const EYE_MAT = new THREE.MeshBasicMaterial({ color: 0x7ff6ff });
-export const AMBER_MAT = new THREE.MeshBasicMaterial({ color: 0xffb030 });
+export const AMBER_MAT = new THREE.MeshBasicMaterial({ color: 0xffa424 });
 export const BLACK_MAT = new THREE.MeshBasicMaterial({ color: 0x111111 });
-const GLOW_MAT = new THREE.MeshBasicMaterial({ color: 0xffd27a });
-const GHOST_MAT = new THREE.MeshLambertMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.55, vertexColors: true, depthWrite: false });
+const ZOMBIE_EYE = new THREE.MeshBasicMaterial({ color: 0xe8e070 });
+const SKEL_EYE = new THREE.MeshBasicMaterial({ color: 0x9fd8ff });
 
 /**
  * Bygger en modell. Returnerar { root, mat, parts:{...}, height, width }
@@ -73,92 +72,197 @@ export function buildModel(type) {
     add(P.head, mat, 0.08, 0.06, 0.02, '#e8907e', [0.17, 0.15, 0.236]);
     add(P.head, mat, 0.1, 0.34, 0.1, '#e2c06a', [-0.26, 0.05, -0.05]);
     add(P.head, mat, 0.1, 0.34, 0.1, '#e2c06a', [0.26, 0.05, -0.05]);
-    return { root, mat, parts: P, height: 1.8, width: 0.6 };
+    // rustning (dold tills den bärs): egen färg per del via eget material
+    const am = [0, 1, 2, 3].map(() => new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const W = '#ffffff', A = (par, i, w, h, d, pos) => add(par, am[i], w, h, d, W, pos, { mat: am[i] });
+    P.armor = [
+      [A(P.head, 0, 0.54, 0.16, 0.54, [0, 0.45, 0]), A(P.head, 0, 0.05, 0.26, 0.52, [-0.27, 0.27, -0.01]), A(P.head, 0, 0.05, 0.26, 0.52, [0.27, 0.27, -0.01]), A(P.head, 0, 0.54, 0.3, 0.05, [0, 0.26, -0.26])],
+      [A(P.torso, 1, 0.56, 0.6, 0.32, [0, 0.03, 0]), A(P.armL, 1, 0.28, 0.24, 0.28, [0, -0.06, 0]), A(P.armR, 1, 0.28, 0.24, 0.28, [0, -0.06, 0])],
+      [A(P.torso, 2, 0.55, 0.12, 0.31, [0, -0.3, 0]), A(P.legL, 2, 0.28, 0.46, 0.28, [0, -0.22, 0]), A(P.legR, 2, 0.28, 0.46, 0.28, [0, -0.22, 0])],
+      [A(P.legL, 3, 0.29, 0.2, 0.3, [0, -0.63, 0.01]), A(P.legR, 3, 0.29, 0.2, 0.3, [0, -0.63, 0.01])]
+    ];
+    for (const list of P.armor) for (const g of list) g.visible = false;
+    return { root, mat, parts: P, height: 1.8, width: 0.6, armorMats: am };
   }
-  if (type === 'sheep') { // tovfår
-    P.body = add(body, mat, 0.9, 0.72, 1.15, '#e9e5da', [0, 0.85, 0]);
-    add(P.body, mat, 0.96, 0.18, 0.9, '#f2efe6', [0, 0.36, 0]);
-    P.head = add(body, mat, 0.42, 0.42, 0.46, '#3b3330', [0, 1.05, 0.66], { pivot: [0, 0, -0.18] });
-    add(P.head, mat, 0.44, 0.16, 0.3, '#e9e5da', [0, 0.25, -0.08]);
-    add(P.head, mat, 0.14, 0.08, 0.2, '#3b3330', [-0.27, 0.08, -0.08]);
-    add(P.head, mat, 0.14, 0.08, 0.2, '#3b3330', [0.27, 0.08, -0.08]);
-    add(P.head, null, 0.06, 0.06, 0.02, '#fff', [-0.12, 0.07, 0.235], { mat: BLACK_MAT });
-    add(P.head, null, 0.06, 0.06, 0.02, '#fff', [0.12, 0.07, 0.235], { mat: BLACK_MAT });
-    legs4(P, body, mat, 0.18, 0.5, '#3b3330', 0.27, 0.4, 0.5);
-    return { root, mat, parts: P, height: 1.3, width: 0.9 };
+  if (type === 'cow') { // ko: rödbrun lantras med ljus mule, bläs och koskälla
+    const R = '#9a4a2e', R2 = '#84391f', Lt = '#ead8c4';
+    legs4(P, body, mat, 0.2, 0.6, '#8a4028', 0.28, 0.48, 0.6);
+    for (const l of P.legs) { add(l, mat, 0.21, 0.12, 0.21, '#3a2a22', [0, -0.54, 0]); add(l, mat, 0.205, 0.16, 0.205, Lt, [0, -0.4, 0]); }
+    P.body = add(body, mat, 0.86, 0.74, 1.36, R, [0, 0.98, 0], { faces: [null, null, null, Lt, null, null] });
+    add(P.body, mat, 0.5, 0.05, 1.24, R2, [0, 0.38, 0]);
+    add(P.body, mat, 0.88, 0.3, 0.34, '#f0e4d2', [0, -0.1, 0.42]); // ljus bringa-fläck
+    add(P.body, mat, 0.3, 0.14, 0.28, '#eaa6a0', [0, -0.42, -0.36]); // juver
+    add(body, mat, 0.5, 0.07, 0.1, '#5a3a22', [0, 1.06, 0.66]); // halsrem
+    add(body, mat, 0.14, 0.15, 0.12, '#d8b040', [0, 0.95, 0.73], { faces: [null, null, null, '#3a3020', null, null] }); // skälla
+    P.head = add(body, mat, 0.46, 0.44, 0.46, R, [0, 1.22, 0.68], { pivot: [0, 0, -0.2] });
+    add(P.head, mat, 0.4, 0.24, 0.18, '#e2b8a0', [0, -0.11, 0.48]);
+    add(P.head, null, 0.06, 0.05, 0.02, '#000', [-0.09, -0.08, 0.575], { mat: BLACK_MAT });
+    add(P.head, null, 0.06, 0.05, 0.02, '#000', [0.09, -0.08, 0.575], { mat: BLACK_MAT });
+    add(P.head, mat, 0.12, 0.2, 0.02, '#f0e6d6', [0, 0.08, 0.435]); // bläs
+    add(P.head, null, 0.06, 0.07, 0.02, '#000', [-0.16, 0.08, 0.435], { mat: BLACK_MAT });
+    add(P.head, null, 0.06, 0.07, 0.02, '#000', [0.16, 0.08, 0.435], { mat: BLACK_MAT });
+    add(P.head, mat, 0.22, 0.08, 0.12, '#b8664a', [0, 0.25, 0.3]); // lugg
+    for (const s of [-1, 1]) { const ear = add(P.head, mat, 0.2, 0.08, 0.12, R2, [s * 0.31, 0.1, 0.16]); ear.rotation.z = s * -0.3; add(ear, mat, 0.12, 0.02, 0.08, '#e8a090', [s * 0.02, -0.04, 0.01]); }
+    P.tail = add(body, mat, 0.07, 0.55, 0.07, R2, [0, 1.3, -0.69], { pivot: [0, 0.27, 0] });
+    add(P.tail, mat, 0.13, 0.14, 0.13, '#3a2018', [0, -0.55, 0]);
+    return { root, mat, parts: P, height: 1.45, width: 0.9 };
   }
-  if (type === 'hare') { // fjällhare
-    P.body = add(body, mat, 0.34, 0.32, 0.55, '#cfc8ba', [0, 0.3, 0], { faces: [null, null, '#b8ab96', '#f0ece4', null, null] });
-    P.head = add(body, mat, 0.26, 0.26, 0.3, '#cfc8ba', [0, 0.48, 0.3], { pivot: [0, 0, -0.1] });
-    P.earL = add(P.head, mat, 0.07, 0.3, 0.05, '#d8d2c6', [-0.07, 0.25, -0.05], { pivot: [0, -0.15, 0], faces: [null, null, '#222', null, null, null] });
-    P.earR = add(P.head, mat, 0.07, 0.3, 0.05, '#d8d2c6', [0.07, 0.25, -0.05], { pivot: [0, -0.15, 0], faces: [null, null, '#222', null, null, null] });
-    add(P.head, null, 0.04, 0.05, 0.02, '#000', [-0.09, 0.04, 0.15], { mat: BLACK_MAT });
-    add(P.head, null, 0.04, 0.05, 0.02, '#000', [0.09, 0.04, 0.15], { mat: BLACK_MAT });
-    add(P.body, mat, 0.12, 0.12, 0.1, '#ffffff', [0, 0.06, -0.31]);
-    legs4(P, body, mat, 0.09, 0.16, '#bfb6a6', 0.11, 0.18, 0.16);
-    return { root, mat, parts: P, height: 0.6, width: 0.4 };
+  if (type === 'pig') { // gris: ljusrosa med mörka sadelfläckar, borstrygg, hängöron och knorr
+    const C = '#e6b2a2';
+    legs4(P, body, mat, 0.16, 0.32, '#d89a8a', 0.22, 0.34, 0.32);
+    for (const l of P.legs) add(l, mat, 0.17, 0.07, 0.17, '#6a4a40', [0, -0.29, 0]);
+    P.body = add(body, mat, 0.7, 0.58, 1.04, C, [0, 0.61, 0]);
+    add(P.body, mat, 0.72, 0.24, 0.3, '#5c4040', [0, 0.06, -0.18]);
+    add(P.body, mat, 0.3, 0.2, 0.22, '#5c4040', [0.21, 0.12, 0.28]);
+    add(P.body, mat, 0.12, 0.06, 0.86, '#c88a7a', [0, 0.31, 0]);
+    P.head = add(body, mat, 0.48, 0.42, 0.36, C, [0, 0.72, 0.48], { pivot: [0, 0, -0.17] });
+    add(P.head, mat, 0.26, 0.2, 0.12, '#f0a4a0', [0, -0.07, 0.4]);
+    add(P.head, null, 0.05, 0.07, 0.02, '#000', [-0.06, -0.07, 0.465], { mat: BLACK_MAT });
+    add(P.head, null, 0.05, 0.07, 0.02, '#000', [0.06, -0.07, 0.465], { mat: BLACK_MAT });
+    add(P.head, null, 0.05, 0.05, 0.02, '#000', [-0.13, 0.07, 0.355], { mat: BLACK_MAT });
+    add(P.head, null, 0.05, 0.05, 0.02, '#000', [0.13, 0.07, 0.355], { mat: BLACK_MAT });
+    for (const s of [-1, 1]) { const ear = add(P.head, mat, 0.17, 0.05, 0.2, '#d48c7c', [s * 0.15, 0.22, 0.3]); ear.rotation.x = 0.55; ear.rotation.z = s * -0.15; }
+    P.tail = add(body, mat, 0.06, 0.06, 0.12, '#e0a090', [0, 0.8, -0.56]);
+    add(P.tail, mat, 0.06, 0.12, 0.06, '#e0a090', [0, 0.06, -0.06]);
+    add(P.tail, mat, 0.08, 0.06, 0.06, '#e0a090', [0.04, 0.12, -0.02]);
+    return { root, mat, parts: P, height: 0.95, width: 0.75 };
   }
-  if (type === 'moose') { // älg
-    P.body = add(body, mat, 0.9, 0.95, 1.8, '#4a3424', [0, 1.65, 0]);
-    add(P.body, mat, 0.8, 0.3, 0.7, '#3e2b1d', [0, 0.55, 0.45]);
-    P.neck = add(body, mat, 0.45, 0.6, 0.5, '#4a3424', [0, 2.0, 0.95], { pivot: [0, -0.2, -0.1] });
-    P.head = add(P.neck, mat, 0.4, 0.42, 0.8, '#4a3424', [0, 0.15, 0.45], { pivot: [0, 0, -0.3], faces: [null, null, null, null, '#2a1d14', null] });
-    add(P.head, mat, 0.36, 0.3, 0.3, '#2e2018', [0, -0.08, 0.4]);
-    add(P.head, mat, 0.12, 0.35, 0.12, '#3e2b1d', [0, -0.35, 0.05]);
+  if (type === 'sheep') { // får: gräddvit tovig ull, mörkbrunt ansikte och små krökta horn
+    const W = '#ece6d6';
+    P.body = add(body, mat, 0.9, 0.72, 1.15, W, [0, 0.85, 0]);
+    add(P.body, mat, 0.96, 0.18, 0.9, '#f4f0e6', [0, 0.36, 0]);
+    P.skin = add(body, mat, 0.66, 0.54, 0.98, '#d8c4a8', [0, 0.85, 0]); P.skin.visible = false; // klippt får
+    P.wool = [P.body];
+    for (const [x, y, z] of [[-0.42, 0.1, 0.3], [0.43, -0.05, -0.2], [0.2, 0.37, -0.35], [-0.25, 0.37, 0.15], [0, -0.3, 0.5]]) add(P.body, mat, 0.2, 0.18, 0.2, '#e2dac6', [x, y, z]);
+    P.head = add(body, mat, 0.4, 0.4, 0.44, '#3b3330', [0, 1.05, 0.66], { pivot: [0, 0, -0.18] });
+    add(P.head, mat, 0.44, 0.16, 0.3, W, [0, 0.24, -0.06]);
     for (const s of [-1, 1]) {
-      const ant = add(P.head, mat, 0.6, 0.07, 0.36, '#d6c49c', [s * 0.48, 0.38, -0.1]);
-      ant.rotation.z = s * 0.35;
-      add(ant, mat, 0.07, 0.18, 0.07, '#e2d2ac', [s * 0.25, 0.12, 0.12]);
-      add(ant, mat, 0.07, 0.18, 0.07, '#e2d2ac', [s * 0.12, 0.12, -0.14]);
-      add(ant, mat, 0.07, 0.2, 0.07, '#e2d2ac', [s * 0.3, 0.12, -0.1]);
-      add(P.head, null, 0.06, 0.06, 0.02, '#000', [s * 0.2, 0.08, 0.1], { mat: BLACK_MAT });
+      add(P.head, mat, 0.14, 0.07, 0.18, '#3b3330', [s * 0.26, 0.08, -0.06]);
+      const horn = add(P.head, mat, 0.08, 0.18, 0.08, '#cdbf9a', [s * 0.2, 0.24, -0.02]); horn.rotation.x = -0.6;
+      add(horn, mat, 0.08, 0.08, 0.12, '#bfae86', [0, 0.1, -0.06]);
     }
-    legs4(P, body, mat, 0.2, 1.25, '#8a7a66', 0.3, 0.7, 1.25);
-    return { root, mat, parts: P, height: 2.4, width: 1.2 };
+    add(P.head, null, 0.06, 0.06, 0.02, '#fff', [-0.12, 0.07, 0.225], { mat: BLACK_MAT });
+    add(P.head, null, 0.06, 0.06, 0.02, '#fff', [0.12, 0.07, 0.225], { mat: BLACK_MAT });
+    add(P.head, mat, 0.16, 0.08, 0.02, '#5a4a44', [0, -0.1, 0.225]);
+    legs4(P, body, mat, 0.17, 0.5, '#3b3330', 0.27, 0.4, 0.5);
+    return { root, mat, parts: P, height: 1.25, width: 0.9 };
   }
-  if (type === 'wolf') { // skuggvarg
-    P.body = add(body, mat, 0.5, 0.5, 1.1, '#2a2238', [0, 0.72, 0]);
-    for (let i = 0; i < 4; i++) add(P.body, mat, 0.12, 0.14, 0.12, '#4a3a6a', [0, 0.28, 0.35 - i * 0.24]);
-    P.head = add(body, mat, 0.44, 0.4, 0.42, '#2a2238', [0, 0.92, 0.66], { pivot: [0, 0, -0.15] });
-    add(P.head, mat, 0.26, 0.2, 0.3, '#1e1828', [0, -0.08, 0.32]);
-    add(P.head, mat, 0.1, 0.16, 0.08, '#2a2238', [-0.14, 0.27, -0.05]);
-    add(P.head, mat, 0.1, 0.16, 0.08, '#2a2238', [0.14, 0.27, -0.05]);
-    add(P.head, null, 0.09, 0.06, 0.02, '#7ff6ff', [-0.12, 0.06, 0.215], { mat: EYE_MAT });
-    add(P.head, null, 0.09, 0.06, 0.02, '#7ff6ff', [0.12, 0.06, 0.215], { mat: EYE_MAT });
-    P.tail = add(body, mat, 0.14, 0.14, 0.55, '#3a2e50', [0, 0.85, -0.55], { pivot: [0, 0, 0.27] });
-    P.tail.rotation.x = 0.5;
-    legs4(P, body, mat, 0.15, 0.48, '#1e1828', 0.16, 0.36, 0.48);
-    return { root, mat, parts: P, height: 0.95, width: 0.7 };
+  if (type === 'chicken') { // höna: spräcklig brun "blommehöna" med mörk stjärt och röd kam
+    const Br = '#a8673a';
+    for (const s of [-1, 1]) {
+      const leg = add(body, mat, 0.05, 0.22, 0.05, '#c8a040', [s * 0.08, 0.22, 0], { pivot: [0, 0.11, 0] });
+      add(leg, mat, 0.12, 0.03, 0.14, '#c8a040', [0, -0.21, 0.03]);
+      if (s < 0) P.legL = leg; else P.legR = leg;
+    }
+    P.body = add(body, mat, 0.36, 0.34, 0.46, Br, [0, 0.4, 0]);
+    add(P.body, mat, 0.3, 0.22, 0.06, '#c88a50', [0, -0.02, 0.23]);
+    for (const [x, y, z, c] of [[0.185, 0.05, 0.1, '#f0e8dc'], [-0.185, 0.0, -0.06, '#f0e8dc'], [0.185, -0.06, -0.12, '#2a2420'], [-0.185, 0.08, 0.12, '#2a2420'], [0.05, 0.175, -0.1, '#f0e8dc'], [-0.08, 0.175, 0.08, '#2a2420']]) add(P.body, mat, 0.02 + (Math.abs(x) < 0.1 ? 0.06 : 0), Math.abs(x) < 0.1 ? 0.02 : 0.06, 0.06, c, [x, y, z]);
+    P.wingL = add(body, mat, 0.06, 0.22, 0.32, '#7a4a2a', [-0.2, 0.5, -0.02], { pivot: [0, 0.1, 0] });
+    P.wingR = add(body, mat, 0.06, 0.22, 0.32, '#7a4a2a', [0.2, 0.5, -0.02], { pivot: [0, 0.1, 0] });
+    const tail = add(P.body, mat, 0.16, 0.3, 0.1, '#1e2a24', [0, 0.22, -0.25]); tail.rotation.x = -0.45;
+    add(tail, mat, 0.1, 0.12, 0.11, '#2e5a46', [0, 0.1, 0]);
+    P.head = add(body, mat, 0.2, 0.24, 0.2, '#b87a44', [0, 0.62, 0.2], { pivot: [0, -0.08, -0.04] });
+    add(P.head, mat, 0.05, 0.1, 0.14, '#d0302a', [0, 0.25, 0.04]);
+    add(P.head, mat, 0.08, 0.05, 0.1, '#e8b030', [0, 0.1, 0.18]);
+    add(P.head, mat, 0.05, 0.07, 0.04, '#d0302a', [0, 0.02, 0.15]);
+    add(P.head, null, 0.02, 0.04, 0.04, '#000', [-0.1, 0.14, 0.08], { mat: BLACK_MAT });
+    add(P.head, null, 0.02, 0.04, 0.04, '#000', [0.1, 0.14, 0.08], { mat: BLACK_MAT });
+    return { root, mat, parts: P, height: 0.8, width: 0.45 };
   }
-  if (type === 'giant') { // mossbjässe
-    P.legL = add(body, mat, 0.45, 0.85, 0.45, '#5f635f', [-0.35, 0.85, 0], { pivot: [0, 0.42, 0] });
-    P.legR = add(body, mat, 0.45, 0.85, 0.45, '#5f635f', [0.35, 0.85, 0], { pivot: [0, 0.42, 0] });
-    P.torso = add(body, mat, 1.3, 1.2, 0.85, '#6f736f', [0, 1.45, 0]);
-    add(P.torso, mat, 1.36, 0.3, 0.9, '#4f7a34', [0, 0.5, 0]);
-    add(P.torso, mat, 0.5, 0.2, 0.5, '#5e8a3a', [-0.35, 0.68, 0.1]);
-    add(P.torso, mat, 0.3, 0.3, 0.1, '#55594f', [0.2, -0.1, 0.45]);
-    P.head = add(body, mat, 0.66, 0.6, 0.6, '#6a6e6a', [0, 2.35, 0.12], { pivot: [0, -0.3, 0] });
-    add(P.head, mat, 0.7, 0.14, 0.2, '#4f7a34', [0, 0.25, 0.22]);
-    add(P.head, null, 0.13, 0.1, 0.02, '#ffb030', [-0.16, 0.05, 0.31], { mat: AMBER_MAT });
-    add(P.head, null, 0.13, 0.1, 0.02, '#ffb030', [0.16, 0.05, 0.31], { mat: AMBER_MAT });
-    add(P.head, mat, 0.4, 0.12, 0.1, '#3e423e', [0, -0.15, 0.32]);
-    P.armL = add(body, mat, 0.4, 1.4, 0.4, '#666a66', [-0.88, 1.95, 0], { pivot: [0, 0.6, 0], faces: [null, null, '#4f7a34', null, null, null] });
-    P.armR = add(body, mat, 0.4, 1.4, 0.4, '#666a66', [0.88, 1.95, 0], { pivot: [0, 0.6, 0], faces: [null, null, '#4f7a34', null, null, null] });
-    add(P.armL, mat, 0.46, 0.4, 0.46, '#5a5e5a', [0, -1.25, 0]);
-    add(P.armR, mat, 0.46, 0.4, 0.46, '#5a5e5a', [0, -1.25, 0]);
-    return { root, mat, parts: P, height: 2.7, width: 1.4 };
+  if (type === 'zombie') { // zombie: blekgrön, framåtlutad vandrare i trasig ockrafärgad kolt
+    const Sk = '#8fa284', Sk2 = '#7a9070', Tu = '#8a6a3a';
+    P.legL = add(body, mat, 0.24, 0.78, 0.24, '#3c3f46', [-0.13, 0.78, 0], { pivot: [0, 0.39, 0] });
+    P.legR = add(body, mat, 0.24, 0.78, 0.24, '#3c3f46', [0.13, 0.78, 0], { pivot: [0, 0.39, 0] });
+    add(P.legL, mat, 0.25, 0.12, 0.27, Sk2, [0, -0.72, 0.01]);
+    add(P.legR, mat, 0.25, 0.14, 0.27, Sk2, [0, -0.71, 0.01]);
+    add(P.legR, mat, 0.26, 0.08, 0.26, '#55585f', [0, -0.5, 0]);
+    P.torso = add(body, mat, 0.5, 0.68, 0.28, Tu, [0, 1.12, 0.04]); P.torso.rotation.x = 0.16;
+    add(P.torso, mat, 0.52, 0.06, 0.3, '#5a4630', [0, -0.24, 0]);
+    add(P.torso, mat, 0.14, 0.16, 0.02, Sk, [0.12, 0.08, 0.145]);
+    for (const x of [-0.18, -0.02, 0.15]) add(P.torso, mat, 0.12, 0.1, 0.29, '#7a5c30', [x, -0.37, 0]);
+    P.armL = add(body, mat, 0.2, 0.72, 0.2, Tu, [-0.36, 1.42, 0.06], { pivot: [0, 0.3, 0] });
+    add(P.armL, mat, 0.21, 0.2, 0.21, Sk, [0, -0.6, 0]);
+    P.armR = add(body, mat, 0.19, 0.72, 0.19, Sk, [0.36, 1.42, 0.06], { pivot: [0, 0.3, 0] });
+    add(P.armR, mat, 0.2, 0.08, 0.2, '#d8d0b8', [0, -0.25, 0]);
+    add(P.armR, mat, 0.2, 0.06, 0.2, '#d8d0b8', [0, -0.36, 0]);
+    P.head = add(body, mat, 0.44, 0.44, 0.44, Sk, [0, 1.47, 0.12], { pivot: [0, -0.22, 0] });
+    add(P.head, mat, 0.16, 0.12, 0.02, Sk2, [-0.1, 0.36, 0.225]);
+    add(P.head, null, 0.11, 0.08, 0.02, '#000', [-0.1, 0.25, 0.225], { mat: BLACK_MAT });
+    add(P.head, null, 0.11, 0.08, 0.02, '#000', [0.1, 0.25, 0.225], { mat: BLACK_MAT });
+    add(P.head, null, 0.04, 0.04, 0.02, '#fff', [-0.09, 0.25, 0.232], { mat: ZOMBIE_EYE });
+    add(P.head, null, 0.04, 0.04, 0.02, '#fff', [0.11, 0.25, 0.232], { mat: ZOMBIE_EYE });
+    add(P.head, null, 0.2, 0.05, 0.02, '#000', [0.03, 0.1, 0.225], { mat: BLACK_MAT });
+    add(P.head, null, 0.06, 0.03, 0.02, '#000', [-0.06, 0.08, 0.225], { mat: BLACK_MAT });
+    add(P.head, mat, 0.36, 0.08, 0.32, '#4a4038', [-0.03, 0.46, -0.04]);
+    add(P.head, mat, 0.1, 0.16, 0.1, '#4a4038', [0.17, 0.4, -0.15]);
+    add(P.head, mat, 0.06, 0.12, 0.1, Sk2, [-0.25, 0.22, 0]);
+    return { root, mat, parts: P, height: 1.85, width: 0.6 };
   }
-  if (type === 'ghost') { // lyktgast
-    const gm = GHOST_MAT.clone();
-    P.shell = add(body, gm, 0.75, 0.8, 0.75, '#cfe6ff', [0, 1.1, 0], { mat: gm });
-    add(P.shell, gm, 0.55, 0.3, 0.55, '#dceeff', [0, 0.5, 0], { mat: gm });
-    P.core = add(P.shell, null, 0.32, 0.32, 0.32, '#ffd27a', [0, -0.05, 0], { mat: GLOW_MAT });
-    add(P.shell, null, 0.1, 0.12, 0.02, '#000', [-0.16, 0.18, 0.38], { mat: BLACK_MAT });
-    add(P.shell, null, 0.1, 0.12, 0.02, '#000', [0.16, 0.18, 0.38], { mat: BLACK_MAT });
-    P.t1 = add(body, gm, 0.55, 0.3, 0.55, '#cfe6ff', [0, 0.6, 0], { mat: gm });
-    P.t2 = add(P.t1, gm, 0.35, 0.25, 0.35, '#cfe6ff', [0, -0.27, 0], { mat: gm });
-    P.t3 = add(P.t2, gm, 0.18, 0.2, 0.18, '#cfe6ff', [0, -0.22, 0], { mat: gm });
-    return { root, mat: gm, parts: P, height: 1.6, width: 0.8, ghost: true };
+  if (type === 'skeleton') { // skelett: gulnat ben med glesa revben, käke för sig, trasig mörk huva och båge
+    const Bo = '#d8cfb4', Bo2 = '#c4ba9c', Cl = '#2e3a44';
+    for (const s of [-1, 1]) {
+      const leg = add(body, mat, 0.1, 0.78, 0.1, Bo, [s * 0.11, 0.78, 0], { pivot: [0, 0.39, 0] });
+      add(leg, mat, 0.14, 0.08, 0.14, Bo2, [0, -0.38, 0]);
+      add(leg, mat, 0.14, 0.06, 0.22, Bo2, [0, -0.75, 0.04]);
+      if (s < 0) P.legL = leg; else P.legR = leg;
+    }
+    add(body, mat, 0.34, 0.12, 0.18, Bo2, [0, 0.82, 0]);
+    add(body, mat, 0.08, 0.62, 0.08, Bo2, [0, 1.12, -0.06]);
+    for (let i = 0; i < 4; i++) add(body, mat, 0.38 - i * 0.04, 0.05, 0.22, '#e2dac2', [0, 1.33 - i * 0.1, 0]);
+    add(body, mat, 0.5, 0.07, 0.14, Bo, [0, 1.42, 0]);
+    add(body, mat, 0.5, 0.5, 0.05, Cl, [0, 1.2, -0.13]);
+    for (const [x, h] of [[-0.18, 0.16], [0.02, 0.24], [0.17, 0.12]]) add(body, mat, 0.13, h, 0.05, Cl, [x, 0.95 - h / 2 + 0.02, -0.13]);
+    for (const s of [-1, 1]) {
+      const arm = add(body, mat, 0.09, 0.72, 0.09, Bo, [s * 0.3, 1.42, 0], { pivot: [0, 0.32, 0] });
+      add(arm, mat, 0.12, 0.12, 0.12, Bo2, [0, -0.66, 0]);
+      if (s < 0) P.armL = arm; else P.armR = arm;
+    }
+    // båge i vänster hand (staven ligger tvärs armen så att den står upprätt när skelettet siktar)
+    P.bow = add(P.armL, mat, 0.05, 0.05, 0.36, '#6a4a2a', [0, -0.68, 0.06]);
+    add(P.bow, mat, 0.05, 0.05, 0.26, '#5a3a20', [0, 0.08, 0.28]).rotation.x = -0.5;
+    add(P.bow, mat, 0.05, 0.05, 0.26, '#5a3a20', [0, 0.08, -0.28]).rotation.x = 0.5;
+    add(P.bow, mat, 0.06, 0.06, 0.1, '#c8a070', [0, 0, 0]);
+    add(P.bow, mat, 0.015, 0.015, 0.78, '#e8e8e0', [0, 0.17, 0]);
+    P.head = add(body, mat, 0.4, 0.38, 0.4, '#e6dec6', [0, 1.46, 0], { pivot: [0, -0.19, 0] });
+    add(P.head, null, 0.13, 0.12, 0.02, '#000', [-0.1, 0.22, 0.205], { mat: BLACK_MAT });
+    add(P.head, null, 0.13, 0.12, 0.02, '#000', [0.1, 0.22, 0.205], { mat: BLACK_MAT });
+    add(P.head, null, 0.03, 0.03, 0.02, '#fff', [-0.1, 0.21, 0.212], { mat: SKEL_EYE });
+    add(P.head, null, 0.03, 0.03, 0.02, '#fff', [0.1, 0.21, 0.212], { mat: SKEL_EYE });
+    add(P.head, null, 0.05, 0.06, 0.02, '#000', [0, 0.12, 0.205], { mat: BLACK_MAT });
+    P.jaw = add(P.head, mat, 0.3, 0.1, 0.32, Bo, [0, 0.0, 0.03], { pivot: [0, 0, -0.12] });
+    add(P.jaw, null, 0.22, 0.02, 0.02, '#000', [0, 0.04, 0.29], { mat: BLACK_MAT });
+    add(P.head, mat, 0.46, 0.13, 0.46, Cl, [0, 0.42, -0.01]);
+    add(P.head, mat, 0.46, 0.36, 0.08, Cl, [0, 0.24, -0.22]);
+    add(P.head, mat, 0.06, 0.26, 0.3, Cl, [-0.23, 0.26, -0.06]);
+    add(P.head, mat, 0.06, 0.26, 0.3, Cl, [0.23, 0.26, -0.06]);
+    return { root, mat, parts: P, height: 1.85, width: 0.6 };
+  }
+  if (type === 'spider') { // spindel: korsspindel – rostbrun bakkropp med vitt kors, bandade ben och bärnstensögon
+    const Dk = '#3a281c';
+    P.body = add(body, mat, 0.5, 0.32, 0.5, '#4a3424', [0, 0.5, 0.22]);
+    P.abd = add(body, mat, 0.78, 0.6, 0.8, '#8a5a2e', [0, 0.62, -0.42]);
+    add(P.abd, mat, 0.12, 0.02, 0.52, '#f0e6d0', [0, 0.305, 0]);
+    add(P.abd, mat, 0.42, 0.02, 0.12, '#f0e6d0', [0, 0.305, 0.08]);
+    add(P.abd, mat, 0.8, 0.12, 0.16, '#5a3a1e', [0, 0.12, -0.24]);
+    add(P.abd, mat, 0.8, 0.1, 0.12, '#5a3a1e', [0, -0.02, 0.1]);
+    add(P.body, mat, 0.36, 0.24, 0.14, Dk, [0, 0.02, 0.3]);
+    add(P.body, null, 0.09, 0.09, 0.02, '#fff', [-0.08, 0.08, 0.375], { mat: AMBER_MAT });
+    add(P.body, null, 0.09, 0.09, 0.02, '#fff', [0.08, 0.08, 0.375], { mat: AMBER_MAT });
+    for (const [x, y] of [[-0.15, 0.1], [0.15, 0.1], [-0.04, 0.16], [0.04, 0.16]]) add(P.body, null, 0.04, 0.04, 0.02, '#fff', [x, y, 0.375], { mat: AMBER_MAT });
+    add(P.body, mat, 0.06, 0.12, 0.06, '#2a1c14', [-0.07, -0.12, 0.35]);
+    add(P.body, mat, 0.06, 0.12, 0.06, '#2a1c14', [0.07, -0.12, 0.35]);
+    P.slegs = [];
+    for (const s of [-1, 1]) for (let i = 0; i < 4; i++) {
+      const up = add(body, mat, 0.6, 0.07, 0.07, Dk, [s * 0.22, 0.52, 0.36 - i * 0.12], { pivot: [-s * 0.3, 0, 0] });
+      const yaw = s * (0.75 - i * 0.5);
+      up.rotation.order = 'YZX'; up.rotation.y = -yaw; up.rotation.z = s * 0.55;
+      const lo = add(up, mat, 0.07, 0.8, 0.07, '#4a3424', [s * 0.6, 0, 0], { pivot: [0, 0.4, 0] });
+      lo.rotation.z = -s * 0.8;
+      add(lo, mat, 0.08, 0.08, 0.08, '#b08850', [0, -0.25, 0]);
+      add(lo, mat, 0.08, 0.06, 0.08, '#b08850', [0, -0.5, 0]);
+      P.slegs.push({ g: up, s, i, yaw: -yaw });
+    }
+    return { root, mat, parts: P, height: 0.95, width: 1.2 };
   }
   return { root, mat, parts: P, height: 1, width: 1 };
 }

@@ -41,24 +41,26 @@ export function mobSound(audio, type, kind, { vol = 1, pan = 0 } = {}) {
   if (!audio || audio.muted || vol < 0.03) return;
   try {
     const r = 0.92 + Math.random() * 0.16;
-    if (type === 'sheep') {
+    if (type === 'cow') { // råmande
+      if (kind === 'hurt') audio.tone({ freq: 190 * r, to: 130, dur: 0.35, vol: 0.1 * vol, type: 'sawtooth', pan });
+      else { audio.tone({ freq: 150 * r, to: 175 * r, dur: 0.35, vol: 0.07 * vol, type: 'sawtooth', attack: 0.12, pan }); audio.tone({ freq: 175 * r, to: 120, dur: 0.6, vol: 0.07 * vol, type: 'sawtooth', delay: 0.33, pan }); }
+    } else if (type === 'pig') { // grymtningar
+      const n = kind === 'hurt' ? 1 : 2 + (Math.random() * 2 | 0);
+      for (let i = 0; i < n; i++) { audio.tone({ freq: (kind === 'hurt' ? 420 : 240) * r, to: 180, dur: 0.09, vol: 0.06 * vol, type: 'square', delay: i * 0.13, pan }); audio.noise({ dur: 0.08, vol: 0.05 * vol, freq: 500, type: 'lowpass', delay: i * 0.13, pan }); }
+    } else if (type === 'sheep') {
       if (kind === 'hurt') audio.tone({ freq: 520 * r, to: 380, dur: 0.25, vol: 0.08 * vol, type: 'sawtooth', pan });
       else { audio.tone({ freq: 390 * r, to: 360 * r, dur: 0.18, vol: 0.06 * vol, type: 'sawtooth', pan }); audio.tone({ freq: 400 * r, to: 330 * r, dur: 0.28, vol: 0.06 * vol, type: 'sawtooth', delay: 0.17, pan }); }
-    } else if (type === 'hare') {
-      audio.tone({ freq: 1300 * r, to: 1700, dur: 0.07, vol: 0.04 * vol, type: 'sine', pan });
-    } else if (type === 'moose') {
-      if (kind === 'hurt') audio.tone({ freq: 170 * r, to: 110, dur: 0.4, vol: 0.12 * vol, type: 'sawtooth', pan });
-      else audio.tone({ freq: 120 * r, to: 95, dur: 0.9, vol: 0.08 * vol, type: 'sawtooth', attack: 0.2, pan });
-    } else if (type === 'wolf') {
-      if (kind === 'howl') { audio.tone({ freq: 380, to: 620, dur: 0.9, vol: 0.06 * vol, type: 'sine', attack: 0.3, pan }); audio.tone({ freq: 620, to: 470, dur: 1.1, vol: 0.05 * vol, type: 'sine', delay: 0.85, pan }); }
-      else if (kind === 'hurt') audio.tone({ freq: 700 * r, to: 400, dur: 0.18, vol: 0.08 * vol, type: 'square', pan });
-      else { audio.noise({ dur: 0.45, vol: 0.12 * vol, freq: 280, type: 'lowpass', pan }); audio.tone({ freq: 85 * r, to: 70, dur: 0.45, vol: 0.08 * vol, type: 'sawtooth', pan }); }
-    } else if (type === 'giant') {
-      if (kind === 'hurt') audio.noise({ dur: 0.3, vol: 0.2 * vol, freq: 900, type: 'bandpass', pan });
-      else { audio.tone({ freq: 60 * r, to: 40, dur: 0.8, vol: 0.14 * vol, type: 'sawtooth', attack: 0.1, pan }); audio.noise({ dur: 0.6, vol: 0.12 * vol, freq: 200, type: 'lowpass', pan }); }
-    } else if (type === 'ghost') {
-      if (kind === 'hurt') audio.tone({ freq: 1500 * r, to: 600, dur: 0.25, vol: 0.06 * vol, type: 'triangle', pan });
-      else { audio.tone({ freq: 880 * r, to: 1180, dur: 0.7, vol: 0.04 * vol, type: 'sine', attack: 0.2, pan }); audio.tone({ freq: 890 * r, to: 1170, dur: 0.7, vol: 0.03 * vol, type: 'sine', attack: 0.2, delay: 0.02, pan }); }
+    } else if (type === 'chicken') { // kluckande
+      const n = kind === 'hurt' ? 1 : 3;
+      for (let i = 0; i < n; i++) audio.tone({ freq: (kind === 'hurt' ? 1400 : 900 + i * 120) * r, to: 700, dur: 0.06, vol: 0.045 * vol, type: 'triangle', delay: i * 0.1, pan });
+    } else if (type === 'zombie') { // stön
+      if (kind === 'hurt') audio.tone({ freq: 160 * r, to: 90, dur: 0.3, vol: 0.12 * vol, type: 'sawtooth', pan });
+      else { audio.tone({ freq: 95 * r, to: 70, dur: 0.9, vol: 0.1 * vol, type: 'sawtooth', attack: 0.25, pan }); audio.noise({ dur: 0.8, vol: 0.07 * vol, freq: 350, type: 'lowpass', pan }); }
+    } else if (type === 'skeleton') { // skrammel
+      for (let i = 0; i < (kind === 'hurt' ? 3 : 5); i++) audio.noise({ dur: 0.03, vol: 0.09 * vol, freq: 2400 + Math.random() * 1600, type: 'bandpass', delay: i * 0.05 + Math.random() * 0.02, pan });
+    } else if (type === 'spider') { // väsning
+      if (kind === 'hurt') audio.noise({ dur: 0.2, vol: 0.12 * vol, freq: 3200, type: 'highpass', pan });
+      else { audio.noise({ dur: 0.5, vol: 0.08 * vol, freq: 4200, type: 'highpass', to: 2400, pan }); for (let i = 0; i < 4; i++) audio.tone({ freq: 2600 * r, dur: 0.02, vol: 0.02 * vol, type: 'square', delay: 0.1 + i * 0.06, pan }); }
     }
     if (kind === 'death') audio.noise({ dur: 0.35, vol: 0.12 * vol, freq: 600, to: 120, pan });
   } catch (e) { }

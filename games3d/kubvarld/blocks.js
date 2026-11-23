@@ -13,18 +13,28 @@ export const TILES = [
   'snow', 'snow_side', 'ice', 'clay', 'peat', 'mossy_cobble',
   'spruce_log', 'spruce_log_top', 'spruce_leaves', 'birch_log', 'birch_log_top', 'birch_leaves', 'pine_log', 'pine_log_top', 'pine_leaves',
   'spruce_planks', 'birch_planks', 'pine_planks',
-  'coal_ore', 'iron_ore', 'gold_ore', 'crystal_ore', 'glass', 'stone_bricks', 'bricks',
+  'coal_ore', 'iron_ore', 'gold_ore', 'diamond_ore', 'glass', 'stone_bricks', 'bricks',
   'bench_top', 'bench_side', 'bench_front', 'furnace_side', 'furnace_front', 'furnace_lit', 'furnace_top',
   'chest_side', 'chest_front', 'chest_top', 'torch', 'torch_top', 'lantern', 'lantern_top',
   'wool_white', 'wool_blue', 'wool_yellow', 'wool_pink', 'wool_red', 'wool_green', 'wool_black',
-  'crystal_block', 'gold_block', 'iron_block',
+  'diamond_block', 'gold_block', 'iron_block',
   'tallgrass', 'fern', 'bluebell', 'buttercup', 'fireweed', 'daisy', 'lingon_bush', 'chanterelle', 'cottongrass', 'cloudberry_plant',
   'beachgrass', 'dead_bush', 'spruce_sapling', 'birch_sapling', 'pine_sapling',
   'water0', 'water1', 'water2', 'water3',
   'door_lower', 'door_upper', 'bed_head', 'bed_foot', 'bed_side', 'bed_side_head',
   // föremål
-  'i_stick', 'i_coal', 'i_iron', 'i_gold', 'i_crystal', 'i_glowdust', 'i_lingon', 'i_cloudberry', 'i_chanterelle', 'i_meat', 'i_meat_cooked',
-  'i_moose', 'i_moose_cooked', 'i_chanterelle_fried', 'i_door', 'i_bed', 'i_moss', 'i_shadowfur',
+  'i_stick', 'i_coal', 'i_iron', 'i_gold', 'i_diamond', 'i_bone_meal', 'i_lingon', 'i_cloudberry', 'i_chanterelle', 'i_meat', 'i_meat_cooked',
+  'i_pork', 'i_pork_cooked', 'i_chanterelle_fried', 'i_door', 'i_bed', 'i_string', 'i_leather',
+  'i_chicken', 'i_chicken_cooked', 'i_feather', 'i_egg', 'i_egg_fried', 'i_rotten', 'i_bone', 'i_arrow', 'i_bow',
+  // utökning: byggblock, odling, funktioner
+  'smooth_stone', 'smooth_stone_top', 'obsidian', 'terracotta', 'packed_ice', 'bookshelf', 'barrel_side', 'barrel_top', 'tnt_side', 'tnt_top', 'tnt_bottom',
+  'anvil', 'farmland', 'wheat0', 'wheat1', 'wheat2', 'wheat3', 'carrot0', 'carrot1', 'carrot2', 'potato0', 'potato1', 'potato2', 'reed',
+  'pumpkin_side', 'pumpkin_top', 'jack_face', 'melon_side', 'melon_top', 'candle', 'flowerpot', 'flowerpot_top',
+  'wool_orange', 'wool_purple', 'wool_lightblue', 'wool_grey', 'wool_brown', 'ladder', 'painting', 'lever', 'lava', 'emerald_ore', 'emerald_block',
+  'i_hoe', 'i_seeds', 'i_wheat', 'i_bread', 'i_carrot', 'i_potato', 'i_potato_baked', 'i_apple', 'i_paper', 'i_melon', 'i_pie',
+  'i_bucket', 'i_bucket_water', 'i_bucket_lava', 'i_bucket_milk', 'i_emerald', 'i_shears', 'i_compass', 'i_clock', 'i_rod', 'i_fish', 'i_fish_cooked',
+  'i_helmet_0', 'i_chest_0', 'i_legs_0', 'i_boots_0', 'i_helmet_1', 'i_chest_1', 'i_legs_1', 'i_boots_1',
+  'i_helmet_2', 'i_chest_2', 'i_legs_2', 'i_boots_2', 'i_helmet_3', 'i_chest_3', 'i_legs_3', 'i_boots_3',
   'i_pick_0', 'i_axe_0', 'i_shovel_0', 'i_sword_0', 'i_pick_1', 'i_axe_1', 'i_shovel_1', 'i_sword_1',
   'i_pick_2', 'i_axe_2', 'i_shovel_2', 'i_sword_2', 'i_pick_3', 'i_axe_3', 'i_shovel_3', 'i_sword_3'
 ];
@@ -77,7 +87,7 @@ D(23, 'pine_planks', 'Tallplankor', { tex: T6('pine_planks'), hardness: 2, tool:
 D(24, 'coal_ore', 'Kolmalm', { tex: T6('coal_ore'), hardness: 3, tool: 'pick', tier: 0, drop: 257 });
 D(25, 'iron_ore', 'Järnmalm', { tex: T6('iron_ore'), hardness: 3, tool: 'pick', tier: 1 });
 D(26, 'gold_ore', 'Guldmalm', { tex: T6('gold_ore'), hardness: 3, tool: 'pick', tier: 2 });
-D(27, 'crystal_ore', 'Kristallmalm', { tex: T6('crystal_ore'), hardness: 3, tool: 'pick', tier: 2, drop: 260, light: 7 });
+D(27, 'diamond_ore', 'Diamantmalm', { tex: T6('diamond_ore'), hardness: 3.5, tool: 'pick', tier: 2, drop: 260, light: 3 });
 D(28, 'glass', 'Glas', { tex: T6('glass'), hardness: 0.3, opaque: false, cullSelf: true, sound: 'glass', drop: 0 });
 D(29, 'stone_bricks', 'Stenkloss', { tex: T6('stone_bricks'), hardness: 1.5, tool: 'pick', tier: 0 });
 D(30, 'bricks', 'Tegel', { tex: T6('bricks'), hardness: 2, tool: 'pick', tier: 0 });
@@ -101,7 +111,7 @@ for (let i = 0; i < 4; i++) {
 D(40, 'lantern', 'Lykta', { tex: ['lantern', 'lantern', 'lantern_top', 'lantern_top', 'lantern', 'lantern'], model: M_BOX, boxes: [[4, 0, 4, 12, 9, 12], [6, 9, 6, 10, 11, 10]], opaque: false, hardness: 1, tool: 'pick', light: 15, sound: 'metal', selBox: [4, 0, 4, 12, 11, 12] });
 const WOOL = [['white', 'Vit ull'], ['blue', 'Blå ull'], ['yellow', 'Gul ull'], ['pink', 'Rosa ull'], ['red', 'Röd ull'], ['green', 'Grön ull'], ['black', 'Svart ull']];
 WOOL.forEach(([c, n], i) => D(41 + i, 'wool_' + c, n, { tex: T6('wool_' + c), hardness: 0.8, sound: 'wool', fuel: 5 }));
-D(48, 'crystal_block', 'Kristallblock', { tex: T6('crystal_block'), hardness: 1.5, tool: 'pick', tier: 0, light: 12, sound: 'glass' });
+D(48, 'diamond_block', 'Diamantblock', { tex: T6('diamond_block'), hardness: 5, tool: 'pick', tier: 2, light: 4, sound: 'glass' });
 D(49, 'gold_block', 'Guldblock', { tex: T6('gold_block'), hardness: 4, tool: 'pick', tier: 2, sound: 'metal' });
 const PLANT = (id, key, name, tile, o = {}) => D(id, key, name, Object.assign({ tex: T6(tile), model: M_CROSS, solid: false, opaque: false, hardness: 0, sound: 'grass', flags: F_WAVE, selBox: [3, 0, 3, 13, 13, 13] }, o));
 PLANT(50, 'tallgrass', 'Gräs', 'tallgrass', { replace: true, drop: -1, flags: F_WAVE | F_TINT });
@@ -144,7 +154,56 @@ export const isBed = id => id >= BED0 && id < BED0 + 8;
 D(97, 'cobble_slab', 'Kullerstensplatta', { tex: T6('cobble'), model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16]], opaque: false, hardness: 2, tool: 'pick', tier: 0 });
 D(98, 'plank_slab', 'Plankplatta', { tex: T6('spruce_planks'), model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16]], opaque: false, hardness: 2, tool: 'axe', sound: 'wood', fuel: 8 });
 D(99, 'iron_block', 'Järnblock', { tex: T6('iron_block'), hardness: 4, tool: 'pick', tier: 1, sound: 'metal' });
-export const NUM_BLOCKS = 100;
+/* ---------- utökning (id 100–174) ---------- */
+const PK = { tool: 'pick', tier: 0 };
+D(100, 'smooth_stone', 'Slät sten', Object.assign({ tex: TS('smooth_stone_top', 'smooth_stone'), hardness: 2 }, PK));
+D(101, 'obsidian', 'Obsidian', { tex: T6('obsidian'), hardness: 14, tool: 'pick', tier: 3 });
+D(102, 'terracotta', 'Terrakotta', Object.assign({ tex: T6('terracotta'), hardness: 1.4 }, PK));
+D(103, 'packed_ice', 'Packad is', { tex: T6('packed_ice'), hardness: 0.6, tool: 'pick', sound: 'glass' });
+D(104, 'bookshelf', 'Bokhylla', { tex: ['bookshelf', 'bookshelf', 'spruce_planks', 'spruce_planks', 'bookshelf', 'bookshelf'], hardness: 1.5, tool: 'axe', sound: 'wood', fuel: 15 });
+D(105, 'barrel', 'Tunna', { tex: TS('barrel_top', 'barrel_side'), hardness: 2.5, tool: 'axe', sound: 'wood', interact: 'chest', fuel: 15 });
+D(106, 'tnt', 'TNT', { tex: TS('tnt_top', 'tnt_side', 'tnt_bottom'), hardness: 0, sound: 'grass', interact: 'tnt' });
+D(107, 'anvil', 'Städ', { tex: T6('anvil'), model: M_BOX, boxes: [[2, 0, 2, 14, 4, 14], [5, 4, 4, 11, 10, 12], [1, 10, 3, 15, 16, 13]], opaque: false, hardness: 5, tool: 'pick', tier: 0, sound: 'metal', interact: 'anvil' });
+D(108, 'farmland', 'Åkerjord', { tex: ['dirt', 'dirt', 'farmland', 'dirt', 'dirt', 'dirt'], model: M_BOX, boxes: [[0, 0, 0, 16, 15, 16]], opaque: false, hardness: 0.6, tool: 'shovel', sound: 'dirt', drop: 2 });
+const CROP = (id, key, name, tile, kind, stage, max) => PLANT(id, key, name, tile, { drop: -1, creative: false, flags: F_WAVE, crop: { kind, stage, max }, selBox: [2, 0, 2, 14, 4 + stage * 3, 14] });
+for (let s = 0; s < 4; s++) CROP(109 + s, 'wheat_' + s, 'Vete', 'wheat' + s, 'wheat', s, 3);
+for (let s = 0; s < 3; s++) CROP(113 + s, 'carrot_' + s, 'Morötter', 'carrot' + s, 'carrot', s, 2);
+for (let s = 0; s < 3; s++) CROP(116 + s, 'potato_' + s, 'Potatis', 'potato' + s, 'potato', s, 2);
+PLANT(119, 'reed', 'Vass', 'reed', { flags: 0, selBox: [2, 0, 2, 14, 16, 14] });
+D(120, 'pumpkin', 'Pumpa', { tex: TS('pumpkin_top', 'pumpkin_side'), hardness: 1, tool: 'axe', sound: 'wood' });
+D(121, 'jack', 'Lyktgubbe', { tex: ['jack_face', 'jack_face', 'pumpkin_top', 'pumpkin_top', 'jack_face', 'jack_face'], hardness: 1, tool: 'axe', sound: 'wood', light: 15 });
+D(122, 'melon', 'Melon', { tex: TS('melon_top', 'melon_side'), hardness: 1, tool: 'axe', sound: 'wood', drop: 308 });
+D(123, 'candle', 'Stearinljus', { tex: T6('candle'), model: M_BOX, boxes: [[6, 0, 6, 10, 8, 10], [7, 8, 7, 9, 10, 9]], solid: false, opaque: false, hardness: 0, light: 11, sound: 'wool', selBox: [5, 0, 5, 11, 10, 11] });
+D(124, 'flowerpot', 'Blomkruka', { tex: ['flowerpot', 'flowerpot', 'flowerpot_top', 'flowerpot', 'flowerpot', 'flowerpot'], model: M_BOX, boxes: [[5, 0, 5, 11, 6, 11], [7, 6, 7, 9, 11, 9], [6, 10, 6, 10, 14, 10]], opaque: false, hardness: 0.3, sound: 'stone', selBox: [5, 0, 5, 11, 14, 11] });
+const WOOL_C = [['white', 'Vit'], ['blue', 'Blå'], ['yellow', 'Gul'], ['pink', 'Rosa'], ['red', 'Röd'], ['green', 'Grön'], ['black', 'Svart']];
+WOOL_C.forEach(([c, n], i) => D(125 + i, 'carpet_' + c, n + ' matta', { tex: T6('wool_' + c), model: M_BOX, boxes: [[0, 0, 0, 16, 1, 16]], opaque: false, hardness: 0.1, sound: 'wool', fuel: 3 }));
+[['orange', 'Orange ull'], ['purple', 'Lila ull'], ['lightblue', 'Ljusblå ull'], ['grey', 'Grå ull'], ['brown', 'Brun ull']].forEach(([c, n], i) => D(132 + i, 'wool_' + c, n, { tex: T6('wool_' + c), hardness: 0.8, sound: 'wool', fuel: 5 }));
+D(137, 'fence', 'Staket', { tex: T6('spruce_planks'), model: M_BOX, boxes: [[6, 0, 6, 10, 16, 10], [0, 6, 7, 16, 9, 9], [7, 6, 0, 9, 9, 16], [0, 12, 7, 16, 15, 9], [7, 12, 0, 9, 15, 16]], opaque: false, hardness: 2, tool: 'axe', sound: 'wood', fuel: 8 });
+// väggfästa tunna block (stege, tavla): 0 fäst mot +x, 1 mot -x, 2 mot +z, 3 mot -z
+const WALL = [[[15, 0, 0, 16, 16, 16]], [[0, 0, 0, 1, 16, 16]], [[0, 0, 15, 16, 16, 16]], [[0, 0, 0, 16, 16, 1]]];
+for (let i = 0; i < 4; i++) D(138 + i, 'ladder_' + i, 'Stege', { tex: T6('ladder'), model: M_BOX, boxes: WALL[i], solid: false, opaque: false, hardness: 0.5, tool: 'axe', sound: 'wood', drop: 138, creative: i === 0, climb: true, wall: i, fuel: 4 });
+D(142, 'glass_pane', 'Glasruta', { tex: T6('glass'), model: M_BOX, boxes: [[0, 0, 7, 16, 16, 9]], opaque: false, hardness: 0.3, sound: 'glass', drop: 0 });
+D(143, 'glass_pane_1', 'Glasruta', { tex: T6('glass'), model: M_BOX, boxes: [[7, 0, 0, 9, 16, 16]], opaque: false, hardness: 0.3, sound: 'glass', drop: 0, creative: false });
+// trappor: 4 material × 4 riktningar (övre halvan bort från spelaren)
+const STAIR_UP = [[0, 8, 0, 16, 16, 8], [8, 8, 0, 16, 16, 16], [0, 8, 8, 16, 16, 16], [0, 8, 0, 8, 16, 16]];
+export const STAIR0 = 144;
+[['cobble', 'Kullerstenstrappa', T6('cobble'), 'pick', 'stone'], ['plank', 'Plankstrappa', T6('spruce_planks'), 'axe', 'wood'], ['brick', 'Stenklosstrappa', T6('stone_bricks'), 'pick', 'stone'], ['sandstone', 'Sandstenstrappa', TS('sandstone_top', 'sandstone_side'), 'pick', 'stone']].forEach(([k, n, tex, tool, sound], m) => {
+  for (let f = 0; f < 4; f++) D(STAIR0 + m * 4 + f, k + '_stairs_' + f, n, { tex, model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16], STAIR_UP[f]], opaque: false, hardness: 2, tool, tier: tool === 'pick' ? 0 : -1, sound, drop: STAIR0 + m * 4, creative: f === 0, stair: f, fuel: tool === 'axe' ? 8 : 0 });
+});
+export const isStair = id => id >= STAIR0 && id < STAIR0 + 16;
+D(160, 'brick_slab', 'Stenklossplatta', { tex: T6('stone_bricks'), model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16]], opaque: false, hardness: 2, tool: 'pick', tier: 0, full: 29 });
+D(161, 'sandstone_slab', 'Sandstensplatta', { tex: TS('sandstone_top', 'sandstone_side'), model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16]], opaque: false, hardness: 1, tool: 'pick', tier: 0, full: 7 });
+D(162, 'smooth_slab', 'Slät stenplatta', { tex: TS('smooth_stone_top', 'smooth_stone'), model: M_BOX, boxes: [[0, 0, 0, 16, 8, 16]], opaque: false, hardness: 2, tool: 'pick', tier: 0, full: 100 });
+const PWALL = [[[15, 1, 1, 16, 15, 15]], [[0, 1, 1, 1, 15, 15]], [[1, 1, 15, 15, 15, 16]], [[1, 1, 0, 15, 15, 1]]];
+for (let i = 0; i < 4; i++) D(163 + i, 'painting_' + i, 'Tavla', { tex: T6('painting'), model: M_BOX, boxes: PWALL[i], solid: false, opaque: false, hardness: 0.3, sound: 'wood', drop: 163, creative: i === 0, wall: i, fuel: 4 });
+D(167, 'lever', 'Spak', { tex: T6('lever'), model: M_BOX, boxes: [[5, 0, 4, 11, 2, 12], [7, 2, 4, 9, 9, 6]], solid: false, opaque: false, hardness: 0.5, sound: 'wood', interact: 'lever', selBox: [5, 0, 4, 11, 9, 12] });
+D(168, 'lever_on', 'Spak', { tex: T6('lever'), model: M_BOX, boxes: [[5, 0, 4, 11, 2, 12], [7, 2, 10, 9, 9, 12]], solid: false, opaque: false, hardness: 0.5, sound: 'wood', interact: 'lever', drop: 167, creative: false, selBox: [5, 0, 4, 11, 9, 12] });
+export const LAVA = 169;
+for (let l = 0; l < 4; l++) D(LAVA + l, l ? 'lava_' + l : 'lava', 'Lava', { tex: T6('lava'), model: M_BOX, boxes: [[0, 0, 0, 16, [15, 12, 9, 6][l], 16]], solid: false, opaque: false, light: 15, hardness: -1, drop: 0, sound: 'water', creative: l === 0, lava: l });
+export const isLava = id => id >= LAVA && id <= LAVA + 3;
+D(173, 'emerald_ore', 'Smaragdmalm', { tex: T6('emerald_ore'), hardness: 3, tool: 'pick', tier: 2, drop: 314 });
+D(174, 'emerald_block', 'Smaragdblock', { tex: T6('emerald_block'), hardness: 5, tool: 'pick', tier: 2, sound: 'metal' });
+export const NUM_BLOCKS = 175;
 
 // Fyll tomma id:n med luft-liknande så att tabeller blir kompletta
 for (let i = 0; i < 256; i++) if (!BLOCKS[i]) BLOCKS[i] = null;
@@ -172,24 +231,64 @@ It(256, 'stick', 'Pinne', 'i_stick', { fuel: 5 });
 It(257, 'coal', 'Kol', 'i_coal', { fuel: 80 });
 It(258, 'iron_ingot', 'Järntacka', 'i_iron');
 It(259, 'gold_ingot', 'Guldtacka', 'i_gold');
-It(260, 'crystal', 'Kristall', 'i_crystal');
-It(261, 'glowdust', 'Glimtstoft', 'i_glowdust');
+// id 260 hette förr Kristall, 261 Glimtstoft, 267/268 älgstek, 272 mossa, 273 skuggskinn – id:na återanvänds så att gamla sparfiler laddas
+It(260, 'diamond', 'Diamant', 'i_diamond');
+It(261, 'bone_meal', 'Benmjöl', 'i_bone_meal');
 It(262, 'lingon', 'Lingon', 'i_lingon', { food: 2 });
 It(263, 'cloudberry', 'Hjortron', 'i_cloudberry', { food: 3 });
 It(264, 'chanterelle_item', 'Kantarell', 'i_chanterelle', { food: 2, place: 57 });
 It(265, 'meat', 'Rått kött', 'i_meat', { food: 2 });
 It(266, 'meat_cooked', 'Stekt kött', 'i_meat_cooked', { food: 7 });
-It(267, 'moose', 'Rå älgstek', 'i_moose', { food: 3 });
-It(268, 'moose_cooked', 'Älgstek', 'i_moose_cooked', { food: 9 });
+It(267, 'pork', 'Rått fläsk', 'i_pork', { food: 3 });
+It(268, 'pork_cooked', 'Stekt fläsk', 'i_pork_cooked', { food: 8 });
 It(269, 'door', 'Dörr', 'i_door', { stack: 16, fuel: 10 });
 It(270, 'bed', 'Säng', 'i_bed', { stack: 1 });
 It(271, 'chanterelle_fried', 'Stekt kantarell', 'i_chanterelle_fried', { food: 6 });
-It(272, 'moss', 'Mossa', 'i_moss');
-It(273, 'shadowfur', 'Skuggskinn', 'i_shadowfur');
-export const TIER_NAMES = ['Trä', 'Sten', 'Järn', 'Kristall'];
+It(272, 'string', 'Tråd', 'i_string');
+It(273, 'leather', 'Läder', 'i_leather');
+It(274, 'chicken', 'Rå kyckling', 'i_chicken', { food: 2 });
+It(275, 'chicken_cooked', 'Grillad kyckling', 'i_chicken_cooked', { food: 6 });
+It(276, 'feather', 'Fjäder', 'i_feather');
+It(277, 'egg', 'Ägg', 'i_egg', { stack: 16 });
+It(278, 'rotten_flesh', 'Ruttet kött', 'i_rotten', { food: 2 });
+It(279, 'bone', 'Ben', 'i_bone');
+It(296, 'arrow', 'Pil', 'i_arrow');
+It(297, 'bow', 'Båge', 'i_bow', { stack: 1, fuel: 5, tool: { type: 'bow', tier: 0, speed: 1, dur: 240, dmg: 1 } });
+It(298, 'egg_fried', 'Stekt ägg', 'i_egg_fried', { food: 5, sat: 0.8 });
+// utökning: odling, verktyg och utrustning (sat = mättnad per matpoäng, standard 0,6)
+It(299, 'hoe', 'Jordhacka', 'i_hoe', { stack: 1, tool: { type: 'hoe', tier: 1, speed: 1, dur: 200, dmg: 1 } });
+It(300, 'seeds', 'Vetefrön', 'i_seeds', { place: 109 });
+It(301, 'wheat', 'Vete', 'i_wheat');
+It(302, 'bread', 'Bröd', 'i_bread', { food: 5, sat: 1.2 });
+It(303, 'carrot', 'Morot', 'i_carrot', { food: 3, sat: 1.2, place: 113 });
+It(304, 'potato', 'Potatis', 'i_potato', { food: 1, sat: 0.3, place: 116 });
+It(305, 'potato_baked', 'Bakad potatis', 'i_potato_baked', { food: 5, sat: 1.2 });
+It(306, 'apple', 'Äpple', 'i_apple', { food: 4, sat: 0.6 });
+It(307, 'paper', 'Papper', 'i_paper', { fuel: 2 });
+It(308, 'melon_slice', 'Melonskiva', 'i_melon', { food: 2, sat: 0.3 });
+It(309, 'pie', 'Pumpapaj', 'i_pie', { food: 8, sat: 0.6 });
+It(310, 'bucket', 'Hink', 'i_bucket', { stack: 16 });
+It(311, 'bucket_water', 'Vattenhink', 'i_bucket_water', { stack: 1 });
+It(312, 'bucket_lava', 'Lavahink', 'i_bucket_lava', { stack: 1, fuel: 1000 });
+It(313, 'bucket_milk', 'Mjölkhink', 'i_bucket_milk', { stack: 1, drink: 4 });
+It(314, 'emerald', 'Smaragd', 'i_emerald');
+It(315, 'shears', 'Sax', 'i_shears', { stack: 1, tool: { type: 'shears', tier: 1, speed: 1, dur: 238, dmg: 1 } });
+It(316, 'compass', 'Kompass', 'i_compass', { stack: 1 });
+It(317, 'clock', 'Klocka', 'i_clock', { stack: 1 });
+It(318, 'rod', 'Fiskespö', 'i_rod', { stack: 1, tool: { type: 'rod', tier: 0, speed: 1, dur: 64, dmg: 1 } });
+It(319, 'fish', 'Rå fisk', 'i_fish', { food: 2, sat: 0.2 });
+It(320, 'fish_cooked', 'Stekt fisk', 'i_fish_cooked', { food: 6, sat: 1.0 });
+// rustning: 4 material × 4 delar (id 330–345)
+export const ARMOR0 = 330;
+export const ARMOR_MATS = [['Läder', 0x9a6232, 80], ['Järn', 0xc8ccd2, 240], ['Guld', 0xf2c63a, 110], ['Diamant', 0x8fe0f0, 520]];
+const ARMOR_PTS = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
+const ARMOR_PARTS = [['helmet', 'hjälm'], ['chest', 'bröstplåt'], ['legs', 'benskydd'], ['boots', 'kängor']];
+for (let m = 0; m < 4; m++) for (let p = 0; p < 4; p++) It(ARMOR0 + m * 4 + p, ARMOR_PARTS[p][0] + '_' + m, ARMOR_MATS[m][0] + ARMOR_PARTS[p][1], 'i_' + ARMOR_PARTS[p][0] + '_' + m, { stack: 1, armor: { slot: p, mat: m, pts: ARMOR_PTS[m][p], dur: Math.round(ARMOR_MATS[m][2] * [0.8, 1.15, 1.1, 0.95][p]) } });
+export const ARMOR_SLOT_NAMES = ['Hjälm', 'Bröstplåt', 'Benskydd', 'Kängor'];
+export const TIER_NAMES = ['Trä', 'Sten', 'Järn', 'Diamant'];
 const TOOL_TYPES = [['pick', 'hacka'], ['axe', 'yxa'], ['shovel', 'spade'], ['sword', 'svärd']];
-const TOOL_SPEED = [2, 4, 6, 9], TOOL_DUR = [60, 132, 251, 1200];
-const TOOL_DMG = { pick: [2, 3, 4, 5], axe: [3, 4, 5, 7], shovel: [1.5, 2.5, 3, 4], sword: [4, 5, 6, 8] };
+const TOOL_SPEED = [2, 4, 6, 10], TOOL_DUR = [60, 132, 251, 1561];
+const TOOL_DMG = { pick: [2, 3, 4, 5], axe: [3, 4, 5, 7], shovel: [1.5, 2.5, 3, 4], sword: [4, 5, 6, 8.5] };
 export const TOOL0 = 280;
 for (let t = 0; t < 4; t++) for (let k = 0; k < 4; k++) {
   const [type, sv] = TOOL_TYPES[k];
@@ -201,7 +300,8 @@ export function isBlockId(id) { return id > 0 && id < 256; }
 export function itemDef(id) { return id < 256 ? BLOCKS[id] : ITEMS[id]; }
 export function itemName(id) { const d = itemDef(id); return d ? d.name : '?'; }
 export function maxStack(id) { if (id < 256) return 64; const d = ITEMS[id]; return d ? d.stack : 64; }
-export function toolOf(id) { return id >= 256 && ITEMS[id] ? ITEMS[id].tool : null; }
+export function toolOf(id) { return id >= 256 && ITEMS[id] ? ITEMS[id].tool || ITEMS[id].armor || null : null; }
+export function armorOf(id) { return id >= 256 && ITEMS[id] ? ITEMS[id].armor || null : null; }
 export function foodOf(id) { const d = itemDef(id); return d ? d.food || 0 : 0; }
 export function fuelOf(id) { const d = itemDef(id); return d ? d.fuel || 0 : 0; }
 /** Vilket block placerar föremålet? (0 = inget) */
@@ -224,5 +324,6 @@ export function creativeList() {
 /** Smältrecept: insats → resultat */
 export const SMELT = {
   [B.cobble]: B.stone, [B.sand]: B.glass, [B.iron_ore]: 258, [B.gold_ore]: 259, [B.clay]: B.bricks,
-  [B.spruce_log]: 257, [B.birch_log]: 257, [B.pine_log]: 257, [265]: 266, [267]: 268, [264]: 271, [B.peat]: 257
+  [B.spruce_log]: 257, [B.birch_log]: 257, [B.pine_log]: 257, [265]: 266, [267]: 268, [264]: 271, [B.peat]: 257, [274]: 275, [277]: 298,
+  [B.stone]: B.smooth_stone, [304]: 305, [319]: 320, [B.terracotta]: B.bricks
 };

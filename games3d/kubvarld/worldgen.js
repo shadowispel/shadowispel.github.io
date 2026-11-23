@@ -152,12 +152,13 @@ export function createGen(seed) {
       // om ytan grävts bort under gräs: inget att göra – gräset ligger kvar som tak
     }
     // malmer
-    const ore = (id, tries, size, ymin, ymax) => {
+    // yTop: valfri övre gräns för själva placeringen (slumpföljden är densamma, så gamla världar behåller sin övriga terräng)
+    const ore = (id, tries, size, ymin, ymax, yTop = CY) => {
       for (let t = 0; t < tries; t++) {
         let x = rng() * CX | 0, y = ymin + (rng() * (ymax - ymin) | 0), z = rng() * CZ | 0;
         const n = 1 + (rng() * size | 0);
         for (let k = 0; k < n; k++) {
-          if (x >= 0 && x < CX && z >= 0 && z < CZ && y > 0 && y < CY) {
+          if (x >= 0 && x < CX && z >= 0 && z < CZ && y > 0 && y < CY && y <= yTop) {
             const i = (y << 8) | (z << 4) | x;
             if (data[i] === B.stone) data[i] = id;
           }
@@ -169,9 +170,16 @@ export function createGen(seed) {
     ore(B.coal_ore, 18, 10, 6, 92);
     ore(B.iron_ore, 12, 7, 4, 62);
     ore(B.gold_ore, 3, 6, 3, 30);
-    ore(B.crystal_ore, 2, 4, 3, 17);
+    ore(B.diamond_ore, 2, 4, 3, 17, 10); // diamanter: sällsynta, bara allra djupast (nivå 3–10)
     ore(B.gravel, 5, 14, 5, 60);
     ore(B.clay, 2, 10, 20, SEA);
+    // smaragder: sällsynta enstaka kristaller (egen hash, påverkar inte övrig slump)
+    for (let k = 0; k < 2; k++) {
+      if (hash3(seed, cx * 3 + k, 777, cz) > 0.45) continue;
+      const x = hash3(seed, cx, 778 + k, cz) * CX | 0, z = hash3(seed, cx, 779 + k, cz) * CZ | 0, y = 5 + (hash3(seed, cx, 780 + k, cz) * 26 | 0);
+      const i = (y << 8) | (z << 4) | x;
+      if (data[i] === B.stone) data[i] = B.emerald_ore;
+    }
     // mossig sten i grottor
     for (let t = 0; t < 40; t++) {
       const x = rng() * CX | 0, z = rng() * CZ | 0, y = 6 + (rng() * 40 | 0);
@@ -214,6 +222,20 @@ export function createGen(seed) {
       } else if (below === B.sand) {
         if (bio === BI.strand && r < 0.08) p = B.beachgrass;
         else if (bio === BI.oken && r < 0.015) p = B.dead_bush; else if (bio === BI.oken && r < 0.04) p = B.beachgrass;
+      }
+      // pumpor, meloner och vass (egna hashvärden – resten av världen påverkas inte)
+      if (!p) {
+        const r3 = hash3(seed, wx, 555, wz);
+        if (below === B.grass && (bio === BI.ang || bio === BI.bjork) && r3 < 0.0022) p = B.pumpkin;
+        else if (below === B.grass && bio === BI.ang && r3 > 0.9985) p = B.melon;
+        else if ((below === B.grass || below === B.sand || below === B.dirt || below === B.peat) && h === SEA && r3 > 0.55 && r3 < 0.85) {
+          const wet = (dx, dz) => { const x = lx + dx, z = lz + dz; return x >= 0 && x < CX && z >= 0 && z < CZ && data[(h << 8) | (z << 4) | x] === B.water; };
+          if (wet(1, 0) || wet(-1, 0) || wet(0, 1) || wet(0, -1)) {
+            p = B.reed;
+            const tall = 1 + (hash3(seed, wx, 556, wz) * 3 | 0);
+            for (let k = 1; k < tall && h + 1 + k < CY - 1; k++) data[((h + 1 + k) << 8) | (lz << 4) | lx] = B.reed;
+          }
+        }
       }
       if (p) data[ai] = p;
     }

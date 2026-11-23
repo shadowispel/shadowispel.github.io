@@ -1,11 +1,11 @@
 /** En spelomgång i en värld: binder ihop värld, spelare, varelser, inventarie, HUD och sparning. */
 import * as THREE from 'three';
-import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0 } from './blocks.js';
+import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0, armorOf, LAVA, isLava, waterLevel } from './blocks.js';
 import { World, DIR4, ckey } from './world.js';
 import { Sky } from './sky.js';
 import { Player } from './player.js';
-import { Entities, lightColor } from './entities.js';
-import { Inventory, newFurnace, tickFurnace } from './inventory.js';
+import { Entities, lightColor, MOBS } from './entities.js';
+import { Inventory, newFurnace, tickFurnace, wantName } from './inventory.js';
 import { UI } from './ui.js';
 import { Hand } from './hand.js';
 import { matSound, birdChirp } from './sfx.js';
@@ -19,6 +19,7 @@ const SUN_SVG = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="cu
 const MOON_SVG = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/><circle cx="18" cy="5" r="1" fill="currentColor"/><circle cx="21" cy="9" r=".7" fill="currentColor"/></svg>';
 const REACH = 5, REACH_C = 6;
 
+const CROP_T = () => 0.1 + Math.random() * 0.1; // dagar per växtsteg
 export class Game {
   constructor(app, meta) {
     this.app = app;
@@ -278,6 +279,9 @@ export class Game {
     // ---- värld ----
     W.update(P.pos.x, P.pos.z, dt);
     this.ents.update(dt);
+    this._tickFish(dt);
+    if (P.alive && !this.creative) this._lavaContact(dt);
+    this._heldInfo();
     this._tickFurnaces(dt);
     this._tickSaplings();
     if (Math.random() < dt * 0.5) this._randomTicks();
@@ -333,7 +337,7 @@ export class Game {
     if (this.mobTarget && lmbP && this.atkCd <= 0) {
       const m = this.mobTarget.mob;
       const t = held ? toolOf(held.id) : null;
-      let dmg = t ? t.dmg : 1;
+      let dmg = t && t.dmg ? t.dmg : 1;
       if (!P.ground && P.vel.y < -1) dmg *= 1.5; // fallande hugg
       const d = this._tmp.set(m.pos.x - P.pos.x, 0, m.pos.z - P.pos.z).normalize();
       if (this.ents.hitMob(m, dmg, d)) {
@@ -350,20 +354,32 @@ export class Game {
     // ät
     const food = held ? foodOf(held.id) : 0;
     const interactable = this.target && BLOCKS[this.target.id] && BLOCKS[this.target.id].interact && !P.sneaking;
-    if (rmb && food && !interactable && (P.food < 20 || this.creative) && !(this.target && held.id === I.chanterelle_item && false)) {
+    const planting = this.target && this.target.id === B.farmland && ITEMS[held && held.id] && ITEMS[held.id].place;
+    if (rmb && food && !interactable && !planting && (P.food < 20 || this.creative)) {
       this.eatT += dt;
       if ((this.eatT * 6 | 0) !== ((this.eatT - dt) * 6 | 0)) this.audio.noise({ dur: 0.08, vol: 0.06, freq: 900 + Math.random() * 600, type: 'bandpass' });
       if (this.eatT >= 1.2) {
         this.eatT = 0;
-        P.food = Math.min(20, P.food + food); P.sat = Math.min(P.food, P.sat + food * 0.6);
+        const fdef = itemDef(held.id); P.food = Math.min(20, P.food + food); P.sat = Math.min(P.food, P.sat + food * (fdef && fdef.sat != null ? fdef.sat : 0.6));
         this.tally('e', held.id);
         if (!this.creative) this.inv.useHeld(1);
         this.audio.play('power', { vol: 0.35 });
         if (held.id === I.lingon || held.id === I.cloudberry) this.log('Mums, ' + itemName(held.id).toLowerCase() + '!');
+        if (held.id === I.rotten_flesh && Math.random() < 0.5) { P.sat = 0; P.exh += 10; this.log('Usch! Det ruttna köttet gjorde dig illamående.', 'bad'); }
       }
       return;
     }
     this.eatT = 0;
+    // båge: håll in Använd för att spänna, släpp för att skjuta
+    if (held && held.id === I.bow && !interactable) {
+      if (rmb) this.bowT = (this.bowT || 0) + dt;
+      else if (this.bowT > 0) { this._shootBow(); this.bowT = 0; }
+      this.hand.pull = Math.min(1, (this.bowT || 0) / 0.9);
+      return;
+    }
+    this.bowT = 0; this.hand.pull = 0;
+    // föremål med egna handlingar (rustning, hinkar, sax, mjölk, fiskespö)
+    if (rmbP && held && !interactable && this._useSpecial(held)) { this.useCd = 0.25; return; }
     // använd/placera
     if (rmb && (rmbP || this.useCd <= 0)) {
       if (this.target) {
@@ -433,9 +449,9 @@ export class Game {
     this.stats.broken++; this.stats.lifeEdits++;
     if (!this.creative) {
       if (this.canHarvest(id)) this._dropsFor(id, x, y, z, this.inv.held);
-      else if (this.time - (this._toolHintT || -99) > 20) { this._toolHintT = this.time; this.toast(d.tier >= 2 ? 'Det här kräver en järnhacka.' : d.tier === 1 ? 'Det här kräver en stenhacka.' : 'Du behöver en hacka för att få något ur det här.'); }
+      else if (this.time - (this._toolHintT || -99) > 20) { this._toolHintT = this.time; this.toast(d.tier >= 3 ? 'Det här kräver en diamanthacka.' : d.tier >= 2 ? 'Det här kräver en järnhacka.' : d.tier === 1 ? 'Det här kräver en stenhacka.' : 'Du behöver en hacka för att få något ur det här.'); }
       const held = this.inv.held, t = held ? toolOf(held.id) : null;
-      if (t && d.hardness > 0) { if (this.inv.wearHeld(t.type === 'sword' ? 2 : 1)) this._broke(held.id); }
+      if (t && t.type && d.hardness > 0) { if (this.inv.wearHeld(t.type === 'sword' ? 2 : 1)) this._broke(held.id); }
       this._exh(0.006);
     }
   }
@@ -450,13 +466,260 @@ export class Game {
       else if (id === B.pine_leaves && r < 0.06) drop = B.pine_sapling;
       else if ((id === B.spruce_leaves || id === B.pine_leaves) && r < 0.1) drop = I.stick;
       else if (id === B.tallgrass && r < 0.04) drop = I.lingon;
+      else if ((id === B.tallgrass || id === B.fern) && r < 0.16) drop = I.seeds;
+      else if (id === B.tallgrass && r < 0.172) drop = I.carrot;
+      else if (id === B.tallgrass && r < 0.184) drop = I.potato;
+      else if ((id === B.birch_leaves || id === B.spruce_leaves) && r > 0.98) drop = I.apple;
       else drop = 0;
+      // saxen klipper löv och gräs hela
+      const held = this.inv.held;
+      if (held && held.id === I.shears && (BLOCKS[id].flags & 16 || id === B.tallgrass || id === B.fern)) { drop = id; n = 1; if (!this.creative && this.inv.wearHeld(1)) this._broke(I.shears); }
     }
-    if (id === B.crystal_ore) n = 1 + (Math.random() < 0.4 ? 1 : 0);
+    const cd = d.crop;
+    if (cd) {
+      if (cd.kind === 'wheat') { if (cd.stage === cd.max) { this.ents.drop(I.wheat, 1, x + 0.5, y + 0.4, z + 0.5); n = 1 + (Math.random() * 3 | 0); } else n = 1; drop = I.seeds; }
+      else { drop = cd.kind === 'carrot' ? I.carrot : I.potato; n = cd.stage === cd.max ? 2 + (Math.random() * 3 | 0) : 1; }
+    }
+    if (id === B.melon) n = 3 + (Math.random() * 5 | 0);
+    if (id === B.diamond_ore) n = 1;
     if (id === B.lingon_bush) n = 1 + (Math.random() * 2 | 0);
     if (isDoor(id)) drop = I.door;
     if (isBed(id)) drop = I.bed;
     if (drop > 0) this.ents.drop(drop, n, x + 0.5, y + 0.4, z + 0.5);
+  }
+  /* ---------- utökning: rustning, hinkar, sax, fiske, städ, spak, TNT, lava ---------- */
+  armorPoints() { let n = 0; for (const s of this.inv.armor) { const a = s && armorOf(s.id); if (a) n += a.pts; } return n; }
+  _armorReduce(amount) {
+    const pts = this.armorPoints(); if (!pts) return amount;
+    const inv = this.inv;
+    for (let i = 0; i < 4; i++) { const s = inv.armor[i]; const a = s && armorOf(s.id); if (!a) continue; s.d = (s.d || 0) + 1; if (s.d >= a.dur) { inv.armor[i] = null; this._broke(s.id); } }
+    inv.changed();
+    return amount * (1 - Math.min(0.8, pts * 0.04));
+  }
+  _swapHeld(newId) {
+    const inv = this.inv, h = inv.held;
+    if (h && h.n > 1) { h.n--; const left = inv.add(newId, 1); if (left) this.throwItem({ id: newId, n: 1, d: 0 }); }
+    else inv.slots[inv.sel] = { id: newId, n: 1, d: 0 };
+    inv.changed(); this.onSelChange();
+  }
+  /** Första vätskecell längs blicken (källa, eller valfri vattencell för fiske) */
+  _liquidRay(maxD = 5, anyWater = false) {
+    const P = this.player, W = this.world, e = P.eye(new THREE.Vector3()), d = P.lookDir(new THREE.Vector3());
+    let lx = null, ly, lz;
+    for (let t = 0; t < maxD; t += 0.05) {
+      const x = Math.floor(e.x + d.x * t), y = Math.floor(e.y + d.y * t), z = Math.floor(e.z + d.z * t);
+      if (x === lx && y === ly && z === lz) continue; lx = x; ly = y; lz = z;
+      const b = W.get(x, y, z);
+      if (b === WATER || b === LAVA || (anyWater && isWater(b))) return { x, y, z, id: b };
+      if (b > 0 && T_SOLID[b]) return null;
+    }
+    return null;
+  }
+  _useSpecial(held) {
+    const id = held.id, P = this.player, W = this.world, inv = this.inv;
+    const mob = this.mobTarget && this.mobTarget.mob;
+    const ar = armorOf(id);
+    if (ar) {
+      const cur = inv.armor[ar.slot];
+      inv.armor[ar.slot] = { id, n: 1, d: held.d || 0 }; inv.slots[inv.sel] = cur;
+      inv.changed(); this.onSelChange();
+      matSound(this.audio, ar.mat === 0 ? 'wool' : 'metal', 'place'); this.tally('eq', id);
+      this.log(itemName(id) + ' på. Skydd: ' + this.armorPoints() + '.');
+      return true;
+    }
+    if (mob && id === I.bucket && mob.type === 'cow') { this._swapHeld(I.bucket_milk); this.log('Du mjölkade kon.'); this.audio.play('pickup', { vol: 0.5, pitch: 0.8 }); this.tally('milk', 1); return true; }
+    if (mob && id === I.shears && mob.type === 'sheep') {
+      if (mob.sheared) return true;
+      mob.sheared = true; mob.regrow = 120 + Math.random() * 120;
+      if (mob.model.parts.wool) for (const w of mob.model.parts.wool) w.visible = false;
+      if (mob.model.parts.skin) mob.model.parts.skin.visible = true;
+      this.ents.drop(B.wool_white, 1 + (Math.random() * 3 | 0), mob.pos.x, mob.pos.y + 1, mob.pos.z);
+      matSound(this.audio, 'wool', 'break'); if (!this.creative && inv.wearHeld(1)) this._broke(id);
+      return true;
+    }
+    if (id === I.bucket_milk) { P.food = Math.min(20, P.food + 4); P.sat = Math.min(P.food, P.sat + 3); this._swapHeld(I.bucket); this.audio.play('power', { vol: 0.35 }); this.tally('e', id); return true; }
+    if (id === I.bucket) {
+      const L = this._liquidRay(); if (!L) return false;
+      W.set(L.x, L.y, L.z, 0); this._swapHeld(L.id === LAVA ? I.bucket_lava : I.bucket_water);
+      matSound(this.audio, 'water', 'break'); this.tally('bk', 1); return true;
+    }
+    if (id === I.bucket_water || id === I.bucket_lava) {
+      const T = this.target; if (!T) return false;
+      let tx = T.x + T.nx, ty = T.y + T.ny, tz = T.z + T.nz;
+      if (BLOCKS[T.id].replace && !isWater(T.id)) { tx = T.x; ty = T.y; tz = T.z; }
+      const cur = W.get(tx, ty, tz);
+      if (cur < 0 || !(cur === 0 || (BLOCKS[cur] && BLOCKS[cur].replace) || isLava(cur))) return false;
+      if (cur > 0 && !isWater(cur) && !isLava(cur) && BLOCKS[cur].model === M_CROSS) this._dropsFor(cur, tx, ty, tz);
+      W.set(tx, ty, tz, id === I.bucket_water ? WATER : LAVA);
+      if (!this.creative) this._swapHeld(I.bucket);
+      matSound(this.audio, 'water', 'place'); return true;
+    }
+    if (id === I.rod) return this._fish();
+    return false;
+  }
+  _fish() {
+    const W = this.world;
+    if (this.bob) {
+      const f = this.bob; this._endFish();
+      if (f.biteT > 0) {
+        const r = Math.random(), got = r < 0.86 ? I.fish : r < 0.92 ? I.leather : r < 0.97 ? I.bone : I.emerald;
+        const left = this.inv.add(got, 1); if (left) this.throwItem({ id: got, n: 1, d: 0 });
+        this.onPickup(got, 1); this.log('Du fick ' + itemName(got).toLowerCase() + '!', 'good'); this.audio.play('pickup', { vol: 0.6 });
+      }
+      if (!this.creative && this.inv.wearHeld(1)) this._broke(I.rod);
+      this.hand.swing = 0.6; return true;
+    }
+    const hit = this._liquidRay(16, true);
+    if (!hit || !isWater(hit.id)) { this.toast('Kasta mot öppet vatten.'); return true; }
+    let y = hit.y; while (isWater(W.get(hit.x, y + 1, hit.z))) y++;
+    if (!this._bobGeo) { this._bobGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16); this._bobMat = new THREE.MeshBasicMaterial({ color: 0xe23a2a }); }
+    const mesh = new THREE.Mesh(this._bobGeo, this._bobMat);
+    mesh.position.set(hit.x + 0.5, y + 0.92, hit.z + 0.5); this.scene.add(mesh);
+    this.bob = { mesh, t: 0, bite: 4 + Math.random() * 9, biteT: 0, y };
+    this.hand.swing = 0.6; matSound(this.audio, 'water', 'step', { vol: 1.5 });
+    return true;
+  }
+  _tickFish(dt) {
+    const f = this.bob; if (!f) return;
+    const held = this.inv.held;
+    if (!held || held.id !== I.rod || !this.player.alive || this.player.pos.distanceTo(f.mesh.position) > 24) { this._endFish(); return; }
+    f.t += dt; const base = f.y + 0.92;
+    if (f.biteT > 0) {
+      f.biteT -= dt; f.mesh.position.y = base - 0.2;
+      if (f.biteT <= 0) f.bite = f.t + 3 + Math.random() * 8;
+    } else {
+      f.mesh.position.y = base + Math.sin(f.t * 3) * 0.03;
+      if (f.t >= f.bite) {
+        f.biteT = 1.3; this.ents.puff(f.mesh.position.x, base, f.mesh.position.z, '#cfe8f4', 10, 0.5);
+        matSound(this.audio, 'water', 'break', { vol: 1.2 });
+        if (!this.flags.fishTip) { this.flags.fishTip = true; this.toast('Napp! Använd spöt igen för att dra in.'); }
+      }
+    }
+  }
+  _endFish() { if (!this.bob) return; this.scene.remove(this.bob.mesh); this.bob = null; }
+  _anvil(held) {
+    const t = held && toolOf(held.id);
+    if (!t || !held.d) { this.toast('Håll ett slitet verktyg eller en rustningsdel och använd städet för att laga det.'); return; }
+    const a = armorOf(held.id);
+    const mat = a ? [I.leather, I.iron_ingot, I.gold_ingot, I.diamond][a.mat] : (held.id === I.bow || held.id === I.rod) ? I.string : held.id === I.shears ? I.iron_ingot : held.id === I.hoe ? '#stone' : ['#planks', '#stone', I.iron_ingot, I.diamond][t.tier];
+    if (!this.creative && this.inv.count(mat) <= 0) { this.toast('Du behöver ' + wantName(mat).toLowerCase() + ' för att laga det.'); this.audio.play('error'); return; }
+    if (!this.creative) this.inv.take(mat, 1);
+    held.d = Math.max(0, held.d - Math.ceil(t.dur * 0.3));
+    this.inv.changed(); matSound(this.audio, 'metal', 'break'); this.tally('fix', 1);
+    this.log('Du lagade ' + itemName(held.id).toLowerCase() + ' på städet.', 'good');
+  }
+  _lever(T) {
+    const W = this.world, on = T.id === B.lever;
+    W.set(T.x, T.y, T.z, on ? B.lever_on : B.lever, { noUpdate: true });
+    let n = 0;
+    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) {
+      const x = T.x + dx, y = T.y + dy, z = T.z + dz, b = W.get(x, y, z);
+      if (!isDoor(b)) continue;
+      const dd = BLOCKS[b].door; if (dd.upper) continue;
+      W.set(x, y, z, DOOR0 + (on ? 4 : 0) + dd.f, { noUpdate: true });
+      if (isDoor(W.get(x, y + 1, z))) W.set(x, y + 1, z, DOOR0 + 8 + (on ? 4 : 0) + dd.f, { noUpdate: true });
+      n++;
+    }
+    matSound(this.audio, 'wood', 'hit', { vol: 1.2 }); this.audio.play('click', { vol: 0.5 });
+    if (n) matSound(this.audio, 'wood', 'place', { vol: 0.8 });
+  }
+  _ignite(x, y, z, fuse) { this.world.set(x, y, z, 0); this.ents.primeTnt(x, y, z, fuse); }
+  explode(c, r = 3.3) {
+    const W = this.world, P = this.player;
+    const cx = Math.floor(c.x), cy = Math.floor(c.y), cz = Math.floor(c.z), R = Math.ceil(r);
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) for (let dz = -R; dz <= R; dz++) {
+      if (dx * dx + dy * dy + dz * dz > r * r * (0.7 + Math.random() * 0.3)) continue;
+      const x = cx + dx, y = cy + dy, z = cz + dz, b = W.get(x, y, z);
+      if (b <= 0) continue;
+      const d = BLOCKS[b];
+      if (!d || d.hardness < 0 || b === B.obsidian || isWater(b) || isLava(b)) continue;
+      if (b === B.tnt) { this._ignite(x, y, z, 0.4 + Math.random() * 0.6); continue; }
+      const k = x + ',' + y + ',' + z;
+      if (W.chests.has(k)) { for (const s of W.chests.get(k)) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5, s.d); W.chests.delete(k); }
+      if (W.furnaces.has(k)) { const f = W.furnaces.get(k); for (const s of [f.in, f.fuel, f.out]) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5); W.furnaces.delete(k); }
+      W.saplings.delete(k);
+      W.set(x, y, z, 0);
+      if (!this.creative && Math.random() < 0.3) this._dropsFor(b, x, y, z);
+    }
+    const E = this.ents;
+    for (let i = 0; i < 40; i++) E.particle(c.x + (Math.random() - 0.5) * 2, c.y + Math.random() * 2, c.z + (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 12, Math.random() * 8, (Math.random() - 0.5) * 12, new THREE.Color(i % 3 ? '#5a5a5a' : '#ffb040'), 0.2 + Math.random() * 0.25, 0.8 + Math.random() * 0.8, i % 3 ? -0.15 : 0.3, i % 3 === 0);
+    this.audio.play('boom', { vol: Math.max(0.2, 1 - P.pos.distanceTo(c) / 40) });
+    const reach = r * 2.2;
+    const pd = this._tmp2 || (this._tmp2 = new THREE.Vector3());
+    pd.set(P.pos.x, P.pos.y + 0.9, P.pos.z).sub(c); const dp = pd.length();
+    this.shake = Math.min(1, this.shake + Math.max(0, 1 - dp / 30));
+    if (dp < reach && P.alive) this.damagePlayer((1 - dp / reach) * 24, pd.setY(0).normalize(), 14 * (1 - dp / reach), 'tnt', true);
+    for (const m of E.mobs) { if (m.dead) continue; const d = m.pos.distanceTo(c); if (d < reach) { m.hurtT = 0; E.hitMob(m, (1 - d / reach) * 26, { x: (m.pos.x - c.x) / (d || 1), z: (m.pos.z - c.z) / (d || 1) }); } }
+  }
+  _lavaContact(dt) {
+    const P = this.player, W = this.world;
+    const fx = Math.floor(P.pos.x), fz = Math.floor(P.pos.z);
+    const inLava = isLava(W.get(fx, Math.floor(P.pos.y + 0.1), fz)) || isLava(W.get(fx, Math.floor(P.pos.y + 0.9), fz));
+    if (inLava) { P.burnT = 4; P.vel.x *= 0.85; P.vel.z *= 0.85; }
+    if (P.inWater) P.burnT = 0;
+    if (P.burnT > 0) {
+      P.burnT -= dt; this._burnAcc = (this._burnAcc || 0) + dt;
+      if (Math.random() < dt * 20) this.ents.particle(P.pos.x + (Math.random() - 0.5) * 0.6, P.pos.y + Math.random() * 1.6, P.pos.z + (Math.random() - 0.5) * 0.6, 0, 1.5, 0, new THREE.Color('#ff9a30'), 0.1, 0.5, -0.2, true);
+      if (this._burnAcc >= 0.5) { this._burnAcc = 0; this.damagePlayer(inLava ? 3 : 1, null, 0, 'lava', true); }
+    }
+  }
+  /** Kompass och klocka: visar en liten rad i HUD:en när de hålls */
+  _heldInfo() {
+    const h = this.inv.held, id = h ? h.id : 0;
+    let txt = '';
+    if (id === I.compass) {
+      const P = this.player, sp = this.bed || this.spawn;
+      const dx = sp[0] - P.pos.x, dz = sp[2] - P.pos.z, dist = Math.hypot(dx, dz);
+      const ang = Math.atan2(dx, -dz) * 180 / Math.PI; const dirs = ['norr', 'nordost', 'öster', 'sydost', 'söder', 'sydväst', 'väster', 'nordväst'];
+      const rel = (((Math.atan2(-dx, -dz) - P.yaw) * 180 / Math.PI) % 360 + 540) % 360 - 180;
+      const arrow = Math.abs(rel) < 22 ? '↑' : Math.abs(rel) > 158 ? '↓' : rel > 0 ? (rel < 68 ? '↖' : rel < 112 ? '←' : '↙') : (rel > -68 ? '↗' : rel > -112 ? '→' : '↘');
+      txt = dist < 3 ? '🧭 Du är hemma' : `🧭 ${this.bed ? 'Sängen' : 'Startplatsen'}: ${Math.round(dist)} m åt ${dirs[Math.round(((ang % 360) + 360) % 360 / 45) % 8]} ${arrow}`;
+    } else if (id === I.clock) {
+      const t = this.tod * 24 + 6; const hh = Math.floor(t % 24), mm = Math.floor((t % 1) * 60);
+      txt = `🕰 Klockan ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}` + (this.isNight ? ' · natt' : '');
+    }
+    if (txt === this._infoTxt) return;
+    this._infoTxt = txt;
+    if (!this._infoEl) { const e = this._infoEl = document.createElement('div'); e.style.cssText = 'position:absolute;left:50%;bottom:96px;transform:translateX(-50%);padding:6px 12px;border-radius:10px;background:rgba(10,16,34,.72);color:#fff;font:600 14px Rubik,system-ui,sans-serif;pointer-events:none;white-space:nowrap;z-index:5'; (document.getElementById('hud') || document.body).appendChild(e); }
+    this._infoEl.textContent = txt; this._infoEl.style.display = txt ? 'block' : 'none';
+  }
+  _shootBow() {
+    const P = this.player, pow = Math.min(1, (this.bowT || 0) / 0.9);
+    if (pow < 0.15) return;
+    if (!this.creative && this.inv.count(I.arrow) <= 0) { this.toast('Du har inga pilar.'); this.audio.play('error'); return; }
+    const eye = P.eye(new THREE.Vector3()), dir = P.lookDir(new THREE.Vector3());
+    if (!this.creative) { this.inv.take(I.arrow, 1); if (this.inv.wearHeld(1)) this._broke(I.bow); }
+    eye.addScaledVector(dir, 0.4);
+    this.ents.shootArrow(eye, dir.multiplyScalar(12 + 22 * pow), 'player', 2 + 6 * pow * pow);
+    this.hand.swing = 0.3; this._exh(0.1); this.tally('sh', 'bow');
+  }
+  /** Benmjöl: plantor växer direkt, gräs får blommor */
+  _boneMeal(T) {
+    const W = this.world, id = T.id;
+    let ok = false;
+    const cd = BLOCKS[id] && BLOCKS[id].crop;
+    if (cd) {
+      if (cd.stage >= cd.max) return false;
+      W.set(T.x, T.y, T.z, id - cd.stage + cd.max, { noUpdate: true }); W.saplings.delete(T.x + ',' + T.y + ',' + T.z); ok = true;
+    } else if (id === B.reed) {
+      let top = T.y; while (W.get(T.x, top + 1, T.z) === B.reed) top++;
+      let h = 1; while (W.get(T.x, top - h, T.z) === B.reed) h++;
+      if (h < 3 && W.get(T.x, top + 1, T.z) === 0) { W.set(T.x, top + 1, T.z, B.reed); ok = true; }
+    } else if (id >= B.spruce_sapling && id <= B.pine_sapling) {
+      W.saplings.set(T.x + ',' + T.y + ',' + T.z, this.worldTime - 1); this._sapT = -1; this._tickSaplings(); ok = true;
+    } else if (id === B.grass) {
+      const fl = [B.tallgrass, B.tallgrass, B.tallgrass, B.fern, B.bluebell, B.buttercup, B.daisy, B.fireweed];
+      for (let n = 0; n < 14; n++) {
+        const x = T.x + (Math.random() * 7 | 0) - 3, z = T.z + (Math.random() * 7 | 0) - 3;
+        for (let y = T.y + 1; y >= T.y - 1; y--) if (W.get(x, y, z) === B.grass && W.get(x, y + 1, z) === 0) { W.set(x, y + 1, z, fl[Math.random() * fl.length | 0]); ok = true; break; }
+      }
+    }
+    if (!ok) return false;
+    const c = new THREE.Color('#9cff7a');
+    for (let i = 0; i < 12; i++) this.ents.particle(T.x + Math.random(), T.y + 0.6 + Math.random() * 0.8, T.z + Math.random(), 0, 0.8, 0, c, 0.07, 0.8, -0.1, true);
+    if (!this.creative) this.inv.useHeld(1);
+    this.tally('bm', 1); this.audio.play('power', { vol: 0.3 });
+    return true;
   }
   _broke(id) { this.audio.play('break', { vol: 0.8 }); this.log(itemName(id) + ' gick sönder!', 'bad'); }
 
@@ -479,16 +742,31 @@ export class Game {
         return true;
       }
       if (d.interact === 'bed') { this._sleep(T); return true; }
+      if (d.interact === 'anvil') { this._anvil(inv.held); return true; }
+      if (d.interact === 'lever') { this._lever(T); return true; }
+      if (d.interact === 'tnt' && inv.held && inv.held.id === B.torch) { this._ignite(T.x, T.y, T.z, 3); this.tally('tnt', 1); return true; }
     }
     const held = inv.held;
     if (!held) return false;
     let id = held.id;
+    if (id === I.bone_meal) return pressed ? this._boneMeal(T) : false;
+    if (id === I.hoe) {
+      if (!pressed) return false;
+      if ((T.id === B.grass || T.id === B.dirt || T.id === B.snowgrass) && T.ny === 1 && W.get(T.x, T.y + 1, T.z) <= 0) {
+        if (W.get(T.x, T.y + 1, T.z) < 0) return false;
+        W.set(T.x, T.y, T.z, B.farmland); matSound(this.audio, 'dirt', 'place');
+        if (!this.creative && this.inv.wearHeld(1)) this._broke(id);
+        this.tally('hoe', 1); return true;
+      }
+      return false;
+    }
     // vart?
     let tx = T.x + T.nx, ty = T.y + T.ny, tz = T.z + T.nz;
     if (BLOCKS[T.id].replace && !isWater(T.id)) { tx = T.x; ty = T.y; tz = T.z; }
     // platta på platta → helt block
-    if ((id === B.cobble_slab || id === B.plank_slab) && T.id === id && T.ny === 1) {
-      W.set(T.x, T.y, T.z, id === B.cobble_slab ? B.cobble : B.spruce_planks);
+    const fullOf = id === B.cobble_slab ? B.cobble : id === B.plank_slab ? B.spruce_planks : (id < 256 && BLOCKS[id] && BLOCKS[id].full) || 0;
+    if (fullOf && T.id === id && T.ny === 1) {
+      W.set(T.x, T.y, T.z, fullOf);
       this._placed(id, T.x, T.y, T.z); return true;
     }
     if (ty < 1 || ty >= CY) return false;
@@ -514,7 +792,14 @@ export class Game {
     }
     let bid = placeOf(id);
     if (!bid) return false;
-    const bd = BLOCKS[bid];
+    let bd = BLOCKS[bid];
+    if (bd.wall !== undefined) {
+      // stege och tavla fästs mot väggen man klickar på
+      if (T.ny !== 0) return false;
+      bid = bid - bd.wall + (T.nx === 1 ? 1 : T.nx === -1 ? 0 : T.nz === 1 ? 3 : 2);
+    } else if (bd.stair !== undefined) bid = bid - bd.stair + f;
+    else if (bid === B.glass_pane && f % 2) bid = B.glass_pane_1;
+    bd = BLOCKS[bid];
     if (bid === B.torch) {
       if (T.ny === -1) return false;
       if (T.ny === 0) bid = T.nx === 1 ? 37 : T.nx === -1 ? 36 : T.nz === 1 ? 39 : 38;
@@ -522,12 +807,17 @@ export class Game {
     }
     if (bd.model === M_CROSS) {
       const below = W.get(tx, ty - 1, tz);
-      const okGround = [B.grass, B.dirt, B.peat, B.snowgrass, B.sand, B.gravel].includes(below) || (bid === B.chanterelle && T_SOLID[Math.max(0, below)]);
+      let okGround;
+      if (bd.crop) okGround = below === B.farmland;
+      else if (bid === B.reed) okGround = below === B.reed || ([B.grass, B.dirt, B.sand, B.peat].includes(below) && DIR4.some(([dx, dz]) => isWater(W.get(tx + dx, ty - 1, tz + dz))));
+      else okGround = [B.grass, B.dirt, B.peat, B.snowgrass, B.sand, B.gravel].includes(below) || (bid === B.chanterelle && T_SOLID[Math.max(0, below)]);
       if (!okGround) return false;
     }
     if (T_SOLID[bid] && this._blocked(tx, ty, tz)) return false;
     W.set(tx, ty, tz, bid);
     if (bid >= B.spruce_sapling && bid <= B.pine_sapling) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + (0.6 + Math.random() * 1.2) / 1);
+    if (bd.crop) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + CROP_T());
+    if (bid === B.reed) W.saplings.set(tx + ',' + ty + ',' + tz, this.worldTime + 0.3 + Math.random() * 0.3);
     if (bid === B.furnace) W.furnaces.set(tx + ',' + ty + ',' + tz, newFurnace());
     if (bid === B.chest) W.chests.set(tx + ',' + ty + ',' + tz, new Array(27).fill(null));
     if (bid === B.workbench) this.flags.bench = true;
@@ -582,6 +872,7 @@ export class Game {
     const P = this.player;
     if (this.creative || !P.alive || amount <= 0) return;
     if (P.hurtT > 0.15 && !silent) return;
+    if (source !== 'fall' && source !== 'svält' && source !== 'drunkning') amount = this._armorReduce(amount);
     P.health -= amount; P.hurtT = 0.5;
     if (dir) { P.vel.x += dir.x * kb; P.vel.z += dir.z * kb; P.vel.y = Math.max(P.vel.y, 4.5); }
     this.audio.play('hurt', { vol: 0.8 });
@@ -611,10 +902,12 @@ export class Game {
     const res = submitScore('kubvarld', score);
     this.lifeScoreSubmitted = true;
     // släpp allt
+    for (let i = 0; i < 4; i++) { const s = this.inv.armor[i]; if (s) { this.ents.drop(s.id, 1, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.armor[i] = null; } }
     for (let i = 0; i < 36; i++) { const s = this.inv.slots[i]; if (s) { this.ents.drop(s.id, s.n, P.pos.x, P.pos.y + 1, P.pos.z, s.d, new THREE.Vector3((Math.random() - 0.5) * 6, 4, (Math.random() - 0.5) * 6)); this.inv.slots[i] = null; } }
     this.inv.changed();
     this.audio.play('lose', { vol: 0.7 });
-    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.' }[source] || (source ? `Du besegrades av en ${String(source).toLowerCase()}.` : 'Du dog.');
+    const MD = MOBS[source];
+    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.', arrow: 'Du sköts ihjäl av ett skelett.', tnt: 'Du sprängdes i luften.', lava: 'Du brann upp i lavan.' }[source] || (MD ? `Du besegrades av ${MD.art} ${MD.name.toLowerCase()}.` : source ? `Du besegrades av ${String(source).toLowerCase()}.` : 'Du dog.');
     this.app.showDeath({ reason, days, score, best: res.best, isNew: res.isNew });
     this.save();
   }
@@ -685,6 +978,16 @@ export class Game {
       const id = W.get(x, y, z);
       if (id < 0) continue;
       W.saplings.delete(k);
+      const cd = BLOCKS[id] && BLOCKS[id].crop;
+      if (cd) {
+        if (cd.stage < cd.max && W.get(x, y - 1, z) === B.farmland) { W.set(x, y, z, id + 1, { noUpdate: true }); if (cd.stage + 1 < cd.max) W.saplings.set(k, this.worldTime + CROP_T()); }
+        continue;
+      }
+      if (id === B.reed) {
+        let h = 1; while (h < 4 && W.get(x, y - h, z) === B.reed) h++;
+        if (h < 3 && W.get(x, y + 1, z) === 0) { W.set(x, y + 1, z, B.reed, { noUpdate: true }); W.saplings.set(x + ',' + (y + 1) + ',' + z, this.worldTime + 0.4 + Math.random() * 0.3); }
+        continue;
+      }
       if (id < B.spruce_sapling || id > B.pine_sapling) continue;
       // plats?
       let free = true;
@@ -742,7 +1045,8 @@ export class Game {
       `Biom: ${bio}  Ljus: himmel ${L >> 4} block ${L & 15}\n` +
       `Dag ${this.day}  Klockan ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}\n` +
       `Chunkar: ${loaded} laddade, ${meshed} meshade, radie ${W.radius}  Frö: ${this.meta.seed}\n` +
-      `Varelser: ${this.ents.mobs.length}  Föremål: ${this.ents.drops.length}  Ritanrop: ${info.render.calls}  Trianglar: ${(info.render.triangles / 1000).toFixed(0)}k\n` +
+      `Varelser: ${this.ents.mobs.length}${this.ents.mobs.length ? ' (' + this.ents.census() + ')' : ''}\n` +
+      `Föremål: ${this.ents.drops.length}  Ritanrop: ${info.render.calls}  Trianglar: ${(info.render.triangles / 1000).toFixed(0)}k\n` +
       `Generering: ${(W.stats.genMs / Math.max(1, W.stats.gens)).toFixed(1)} ms/chunk  Meshning: ${(W.stats.meshMs / Math.max(1, W.stats.meshes)).toFixed(1)} ms/chunk`;
   }
   _dayEvents() {
@@ -761,7 +1065,7 @@ export class Game {
       document.getElementById('dayTx').textContent = 'Dag ' + day;
       if (!first && !night && (wasNight || slept)) this.tally('x', 'night');
       if (!first && !this.creative && this.player.alive) {
-        if (night) { this.log('Natten faller – akta dig för skuggvarelserna!', 'bad'); this.audio.play('countdown', { vol: 0.4, pitch: 0.6 }); }
+        if (night) { this.log('Natten faller – akta dig för zombier, skelett och spindlar!', 'bad'); this.audio.play('countdown', { vol: 0.4, pitch: 0.6 }); }
         else if (!slept && wasNight) { this.log(`Du överlevde natten! Dag ${day} (+100 poäng).`, 'good'); this.audio.play('levelup', { vol: 0.5 }); }
       }
     }
@@ -824,6 +1128,8 @@ export class Game {
   }
 
   dispose() {
+    this._endFish(); if (this._bobGeo) { this._bobGeo.dispose(); this._bobMat.dispose(); }
+    if (this._infoEl) this._infoEl.remove();
     this.ui.close();
     this.ui.dispose();
     this.hand.dispose();

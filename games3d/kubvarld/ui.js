@@ -1,5 +1,5 @@
 /** HUD och inventarieskärmar (DOM). */
-import { itemName, maxStack, toolOf, itemDef, BLOCKS, ITEMS, creativeList, fuelOf, M_CROSS, I, B, TOOL0 } from './blocks.js';
+import { itemName, maxStack, toolOf, itemDef, BLOCKS, ITEMS, creativeList, fuelOf, M_CROSS, I, B, TOOL0, armorOf, ARMOR_SLOT_NAMES } from './blocks.js';
 import { findRecipe, RECIPES, ingredients, wantName, TAGS, smeltResult, SMELT_TIME } from './inventory.js';
 import { isTouchDevice } from '../../engine/kit.js';
 import { CHAPTERS } from './journal.js';
@@ -8,11 +8,14 @@ const BOOK_SVG = '<svg viewBox="0 0 24 24"><path d="M4 4.5C4 3.7 4.7 3 5.5 3H11v
 const $ = id => document.getElementById(id);
 const el = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; };
 
+const NATURE = [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65, 101, 103, 108, 119, 120, 122, 169, 173];
+const isNature = id => id < 256 && BLOCKS[id] && (BLOCKS[id].model === M_CROSS || (id >= 15 && id <= 20) || NATURE.includes(id));
+const isGear = id => id >= 256 && ITEMS[id] && (ITEMS[id].tool || ITEMS[id].armor || [I.bucket, I.bucket_water, I.bucket_lava, I.compass, I.clock, I.arrow].includes(id));
 const CREATIVE_TABS = [
-  ['Byggblock', id => id < 256 && BLOCKS[id] && BLOCKS[id].model !== M_CROSS && !(id >= 15 && id <= 20) && ![1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65].includes(id)],
-  ['Natur', id => id < 256 && BLOCKS[id] && (BLOCKS[id].model === M_CROSS || (id >= 15 && id <= 20) || [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65].includes(id))],
-  ['Föremål', id => id >= 256 && id < TOOL0],
-  ['Verktyg', id => id >= TOOL0],
+  ['Byggblock', id => id < 256 && BLOCKS[id] && !isNature(id)],
+  ['Natur', isNature],
+  ['Föremål', id => id >= 256 && !isGear(id)],
+  ['Verktyg', isGear],
   ['Alla', () => true]
 ];
 
@@ -95,13 +98,14 @@ export class UI {
     if (this._cr !== creative) { this._cr = creative; $('stats').style.display = creative ? 'none' : ''; }
     if (creative) return;
     const hp = Math.max(0, Math.ceil(p.health));
-    const hk = hp + ':' + (p.hurtT > 0 ? 1 : 0);
+    const hk = hp + ':' + (p.hurtT > 0 ? 1 : 0) + ':' + (this.g.armorPoints ? this.g.armorPoints() : 0);
     if (hk !== this._hk) {
       this._hk = hk;
       this._bar(this.mHp, hp / 20);
       this.mHp.el.classList.toggle('low', hp <= 6 && p.alive);
       this.mHp.el.classList.toggle('hurt', p.hurtT > 0);
-      $('hpVal').textContent = hp + '/20';
+      const ap = this.g.armorPoints ? this.g.armorPoints() : 0;
+      $('hpVal').textContent = hp + '/20' + (ap ? ' · 🛡' + ap : '');
     }
     const fd = Math.max(0, Math.ceil(p.food));
     if (String(fd) !== this._fk) { this._fk = String(fd); this._bar(this.mFood, fd / 20); this.mFood.el.classList.toggle('low', fd <= 6); $('foodVal').textContent = fd + '/20'; }
@@ -222,6 +226,13 @@ export class UI {
       for (let i = 0; i < size * size; i++) this._ref(grid, { kind: 'craft', i, get: () => inv.craft[i], set: v => { inv.craft[i] = v; } });
       el('div', 'kv-arrow', cr).textContent = '➜';
       this.outRef = this._ref(cr, { kind: 'out', get: () => this._craftOut(), set: () => { } }, 'big');
+      // rustning
+      const ar = el('div', 'kv-armor', top);
+      ar.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-right:6px';
+      for (let i = 0; i < 4; i++) {
+        const r = this._ref(ar, { kind: 'armor', i, get: () => inv.armor[i], set: v => { inv.armor[i] = v; }, accept: id => { const a = armorOf(id); return !!a && a.slot === i; } });
+        r.el.title = ARMOR_SLOT_NAMES[i]; r.el.style.opacity = inv.armor[i] ? '' : '0.75';
+      }
       const bb = el('button', 'btn small kv-bookbtn', top); bb.textContent = this.showBook ? 'Dölj receptbok' : (isTouchDevice() ? 'Receptbok' : 'Receptbok (R)');
       bb.onclick = () => { this.showBook = !this.showBook; this.build(); this.refresh(); };
     } else if (mode === 'furnace') {
@@ -315,6 +326,7 @@ export class UI {
     const tool = toolOf(st.id);
     if (tool) t += ` · ${tool.dur - (st.d || 0)}/${tool.dur}`;
     const fd = itemDef(st.id); if (fd && fd.food) t += ` · mat +${fd.food}`;
+    const ad = armorOf(st.id); if (ad) t += ` · skydd +${ad.pts}`;
     this.tip.textContent = t; this.tip.style.display = 'block';
     this._moveCursor();
   }
@@ -397,6 +409,8 @@ export class UI {
       g.audio.play('click', { vol: 0.4 });
       inv.changed(); this.refresh(); return;
     }
+    if (ref.accept && cur && !ref.accept(cur.id)) { g.audio.play('error', { vol: 0.4 }); return; }
+    if (ref.accept && cur && cur.n > 1) return;
     if (btn === 0) {
       if (!cur) { if (st) { inv.cursor = st; ref.set(null); } }
       else if (!st) { ref.set(cur); inv.cursor = null; }
@@ -436,7 +450,7 @@ export class UI {
     main.classList.add('kv-jr');
     const J = this.g.journal, cur = J.current();
     title.textContent = 'Äventyrsdagbok';
-    el('div', 'kv-hint', main.firstChild).textContent = `${J.count} av ${CHAPTERS.reduce((a, c) => a + c.goals.length, 0)} mål klara. Följ dagboken från första vedträt till kristallverktygen – utmaningarna kan tas i vilken ordning som helst.`;
+    el('div', 'kv-hint', main.firstChild).textContent = `${J.count} av ${CHAPTERS.reduce((a, c) => a + c.goals.length, 0)} mål klara. Följ dagboken från första vedträt till diamantverktygen – utmaningarna kan tas i vilken ordning som helst.`;
     const list = el('div', 'kv-jlist', main);
     const touch = isTouchDevice();
     let locked = false;
@@ -468,7 +482,9 @@ export class UI {
     this.bookList = [];
     const seen = new Set();
     let cat = null;
-    for (const r of RECIPES) {
+    const order = []; for (const r of RECIPES) if (!order.includes(r.cat)) order.push(r.cat);
+    const sorted = RECIPES.slice().sort((x, y) => order.indexOf(x.cat) - order.indexOf(y.cat));
+    for (const r of sorted) {
       const k = r.out + ':' + JSON.stringify(r.shape || r.shapeless);
       if (seen.has(k)) continue; seen.add(k);
       if (r.cat !== cat) { cat = r.cat; el('div', 'kv-bookcat', list).textContent = cat; }

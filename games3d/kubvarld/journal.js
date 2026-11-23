@@ -1,5 +1,5 @@
 /**
- * Äventyrsdagboken: kapitel med mål som guidar spelaren från första vedträt till kristallverktyg.
+ * Äventyrsdagboken: kapitel med mål som guidar spelaren från första vedträt till diamantverktyg.
  * Framsteg räknas med "tallies" i världens flaggor (plockat, tillverkat, placerat, ätit, besegrat, nätter).
  */
 import { B, I, TOOL0 } from './blocks.js';
@@ -19,34 +19,47 @@ export const CHAPTERS = [
       { id: 'stone', t: 'Bryt sten', d: 'Grå granit finns i backar och under jorden. Hacka loss 10 kullersten.', n: 10, v: g => g.tl('p', [B.cobble]) },
       { id: 'tools', t: 'Stenverktyg', d: 'Gör en stenhacka och ett stensvärd vid arbetsbänken. De håller dubbelt så länge.', n: 2, v: g => (g.tl('c', [TOOL0 + 4]) > 0 ? 1 : 0) + (g.tl('c', [TOOL0 + 7]) > 0 ? 1 : 0) },
       { id: 'torch', t: 'Tänd facklor', d: 'Kol sitter som svarta klumpar i berget – eller bränn ved i en ugn. Kol över en pinne blir fyra facklor.', n: 4, v: g => g.tl('c', [B.torch]) },
-      { id: 'night', t: 'Klara första natten', d: 'Bygg ett skydd med tak och ställ facklor runt det. Skuggvarelser föds i mörker och tål inte solen.', n: 1, v: g => g.tl('x', ['night']) }
+      { id: 'night', t: 'Klara första natten', d: 'Bygg ett skydd med tak och ställ facklor runt det. Zombier, skelett och spindlar föds i mörker – zombier och skelett brinner i solen.', n: 1, v: g => g.tl('x', ['night']) }
     ]
   },
   {
-    name: 'Ett hem i vildmarken', reward: [[I.coal, 12, 'kol'], [I.moose_cooked, 2, 'älgstekar']], goals: [
+    name: 'Ett hem i vildmarken', reward: [[I.coal, 12, 'kol'], [I.pork_cooked, 2, 'stekt fläsk']], goals: [
       { id: 'furnace', t: 'Mura en ugn', d: 'Åtta kullersten i en ring på arbetsbänken. Ugnen smälter malm och steker mat.', n: 1, v: g => g.tl('pl', [B.furnace]) },
-      { id: 'cook', t: 'Laga mat', d: 'Jaga tovfår eller älg, eller plocka kantareller. Stek i ugnen och ät – lagad mat mättar mycket mer.', n: 1, v: g => g.tl('e', [I.meat_cooked, I.moose_cooked, I.chanterelle_fried]) },
+      { id: 'cook', t: 'Laga mat', d: 'Jaga kor, grisar, får eller hönor, eller plocka kantareller. Stek i ugnen och ät – lagad mat mättar mycket mer.', n: 1, v: g => g.tl('e', [I.meat_cooked, I.pork_cooked, I.chicken_cooked, I.egg_fried, I.chanterelle_fried]) },
       { id: 'chest', t: 'Ett eget förråd', d: 'Åtta plankor i en ring blir en kista att spara skatter i.', n: 1, v: g => g.tl('pl', [B.chest]) },
-      { id: 'bed', t: 'Bädda en säng', d: 'Tre ull (eller skuggskinn) över tre plankor. Fyra ängsull från myren blir vit ull. I sängen kan du sova bort natten.', n: 1, v: g => g.tl('pl', [I.bed]) }
+      { id: 'bed', t: 'Bädda en säng', d: 'Tre ull (eller läder) över tre plankor. Får ger ull – och fyra ängsull eller fyra tråd blir vit ull. I sängen kan du sova bort natten.', n: 1, v: g => g.tl('pl', [I.bed]) }
     ]
   },
   {
-    name: 'Ned i djupet', reward: [[B.crystal_block, 4, 'kristallblock'], [B.lantern, 2, 'lyktor']], goals: [
+    name: 'Ned i djupet', reward: [[B.lantern, 3, 'lyktor'], [I.arrow, 16, 'pilar']], goals: [
       { id: 'iron', t: 'Smält järn', d: 'Järnmalm har rostbruna klumpar och bryts med stenhacka. Smält den till tackor i ugnen.', n: 3, v: g => Math.max(g.have(I.iron_ingot), g.tl('s', [I.iron_ingot])) },
-      { id: 'ironpick', t: 'Smid en järnhacka', d: 'Tre järntackor över två pinnar. Bara järn biter på guld och kristall.', n: 1, v: g => g.tl('c', [TOOL0 + 8, TOOL0 + 12]) },
+      { id: 'ironpick', t: 'Smid en järnhacka', d: 'Tre järntackor över två pinnar. Bara järn biter på guld och diamant.', n: 1, v: g => g.tl('c', [TOOL0 + 8, TOOL0 + 12]) },
       { id: 'gold', t: 'Guld i djupet', d: 'Guld ligger långt ned, under nivå 30. Ta med facklor – grottorna är mörka.', n: 1, v: g => g.tl('p', [B.gold_ore]) },
-      { id: 'crystal', t: 'Kristallglans', d: 'Glimmande kristallmalm finns allra djupast, nära berggrunden. Samla 3 kristaller.', n: 3, v: g => g.tl('p', [I.crystal]) },
-      { id: 'ctool', t: 'Kristallverktyg', d: 'Det finaste som går att tillverka – nästan oförstörbart.', n: 1, v: g => g.tl('c', [TOOL0 + 12, TOOL0 + 13, TOOL0 + 14, TOOL0 + 15]) }
+      { id: 'diamond', t: 'Diamantfynd', d: 'Diamantmalm glittrar svagt allra djupast, under nivå 11 nära berggrunden. Den är sällsynt – samla 3 diamanter.', n: 3, v: g => g.tl('p', [I.diamond]) },
+      { id: 'dtool', t: 'Diamantverktyg', d: 'Det finaste som går att tillverka – skarpast och mest hållbart.', n: 1, v: g => g.tl('c', [TOOL0 + 12, TOOL0 + 13, TOOL0 + 14, TOOL0 + 15]) }
     ]
   },
   {
     name: 'Vildmarkens utmaningar', side: true, goals: [
       { id: 'berries', t: 'Bärplockare', d: 'Plocka 12 lingon eller hjortron. Lingonris växer i barrskog, hjortron på myren.', n: 12, v: g => g.tl('p', [I.lingon, I.cloudberry]) },
-      { id: 'wolf', t: 'Skuggjägare', d: 'Besegra en skuggvarg. De jagar i flock om natten.', n: 1, v: g => g.tl('k', ['wolf']) },
-      { id: 'ghost', t: 'Släck en lyktgast', d: 'Lyktgastar svävar och kastar irrbloss. Deras glimtstoft blir lyktor.', n: 1, v: g => g.tl('k', ['ghost']) },
-      { id: 'lantern', t: 'Lyktbärare', d: 'Tillverka en lykta av järn och glimtstoft (eller en fackla).', n: 1, v: g => g.tl('c', [B.lantern]) },
-      { id: 'giant', t: 'Fäll en mossbjässe', d: 'Mossbjässar slår hårt men är långsamma. Använd ett bra svärd.', n: 1, v: g => g.tl('k', ['giant']) },
+      { id: 'zombie', t: 'Zombiejägare', d: 'Besegra en zombie. De vandrar i mörkret, går rakt mot dig och brinner i solen.', n: 1, v: g => g.tl('k', ['zombie']) },
+      { id: 'skeleton', t: 'Benknäckare', d: 'Besegra ett skelett. Håll dig i skydd – de håller avstånd och skjuter pilar.', n: 1, v: g => g.tl('k', ['skeleton']) },
+      { id: 'spider', t: 'Spindelskräck', d: 'Besegra en spindel. De klättrar på väggar och är lugna i dagsljus – tills någon slår dem.', n: 1, v: g => g.tl('k', ['spider']) },
+      { id: 'bow', t: 'Bågskytt', d: 'Gör en båge av pinnar och tråd. Håll in höger musknapp för att spänna och släpp för att skjuta. Pilar görs av sten, pinne och fjäder.', dt: 'Gör en båge av pinnar och tråd. Håll in Använd för att spänna och släpp för att skjuta.', n: 1, v: g => g.tl('sh', ['bow']) },
+      { id: 'bonemeal', t: 'Gröna fingrar', d: 'Mal ben till benmjöl och strö det på en planta – den växer till ett träd direkt.', n: 1, v: g => g.tl('bm', [1]) },
+      { id: 'lantern', t: 'Lyktbärare', d: 'Tillverka en lykta av järn och en fackla.', n: 1, v: g => g.tl('c', [B.lantern]) },
       { id: 'days', t: 'Överlevare', d: 'Överlev fem nätter i samma värld.', n: 5, v: g => g.tl('x', ['night']) }
+    ]
+  },
+  {
+    name: 'Gård och smedja', side: true, goals: [
+      { id: 'till', t: 'Plöj en åker', d: 'Gör en jordhacka (sten och pinnar) och använd den på gräs nära vatten. Vetefrön får du när du slår av högt gräs.', n: 4, v: g => g.tl('hoe', [1]) },
+      { id: 'sow', t: 'Så och skörda', d: 'Så vetefrön, morötter eller potatis i åkerjorden. Skörda moget vete och baka bröd av tre vete.', n: 1, v: g => g.tl('c', [I.bread]) },
+      { id: 'bucket', t: 'Hink och mjölk', d: 'Tre järntackor blir en hink. Ösa upp vatten – eller mjölka en ko.', n: 1, v: g => g.tl('bk', [1]) + g.tl('milk', [1]) },
+      { id: 'armor', t: 'Rustad', d: 'Smid en rustningsdel av läder, järn, guld eller diamant och ta på den. Rustning minskar skadan du tar.', n: 1, v: g => (g.armorPoints && g.armorPoints() > 0 ? 1 : 0) },
+      { id: 'fish', t: 'Fiskelycka', d: 'Gör ett fiskespö av pinnar och tråd. Kasta mot vatten och dra in när flötet dyker.', n: 1, v: g => g.tl('p', [I.fish]) },
+      { id: 'tnt', t: 'Sprängmästare', d: 'Fyll en låda med sand och kol (TNT) och tänd den med en fackla. Spring!', n: 1, v: g => g.tl('tnt', [1]) },
+      { id: 'anvil', t: 'Smeden', d: 'Bygg ett städ och laga ett slitet verktyg med samma material som det är gjort av.', n: 1, v: g => g.tl('fix', [1]) }
     ]
   }
 ];
@@ -59,7 +72,10 @@ export class Journal {
     this.g = game;
     const f = game.flags;
     if (!f.journal && f.tutDone) f.journal = TUT_IDS.slice(); // äldre världar som klarat introduktionen
-    this.done = new Set(f.journal || []);
+    // äldre världar: kristallmålen heter nu diamant; mål för borttagna varelser glöms
+    const RENAMED = { crystal: 'diamond', ctool: 'dtool' }, known = new Set(GOALS.map(x => x.id));
+    this.done = new Set((f.journal || []).map(id => RENAMED[id] || id).filter(id => known.has(id)));
+    f.journal = [...this.done];
     this._t = 0; this._key = '';
   }
   isDone(id) { return this.done.has(id); }

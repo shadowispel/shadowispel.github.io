@@ -1,7 +1,7 @@
 /** Världen: chunkar, arbetare, terrängmaterial, blockändringar, vatten, strålkastning. */
 import * as THREE from 'three';
 import {
-  CX, CY, CZ, SEA, CHUNK_VOL, BLOCKS, B, T_SOLID, T_OPAQUE, M_CUBE, M_BOX, M_CROSS, M_LIQUID, WATER, isWater, waterLevel
+  CX, CY, CZ, SEA, CHUNK_VOL, BLOCKS, B, T_SOLID, T_OPAQUE, M_CUBE, M_BOX, M_CROSS, M_LIQUID, WATER, isWater, waterLevel, LAVA, isLava
 } from './blocks.js';
 import { createGen } from './worldgen.js';
 
@@ -127,6 +127,7 @@ export class World {
     this.group = new THREE.Group(); scene.add(this.group);
     this.stats = { genMs: 0, meshMs: 0, gens: 0, meshes: 0 };
     this.waterQ = []; this.waterSet = new Set(); this._waterT = 0;
+    this.lavaQ = []; this.lavaSet = new Set(); this._lavaT = 0;
     this.onBlockChange = null; this.onFall = null;
     this.edits = 0;
     if (!World.pool) World.pool = new Pool(Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1)));
@@ -203,6 +204,8 @@ export class World {
     this.queueWater(x, y, z);
     this.queueWater(x + 1, y, z); this.queueWater(x - 1, y, z); this.queueWater(x, y + 1, z); this.queueWater(x, y - 1, z);
     this.queueWater(x, y, z + 1); this.queueWater(x, y, z - 1);
+    // lava
+    this.queueLava(x, y, z); this.queueLava(x + 1, y, z); this.queueLava(x - 1, y, z); this.queueLava(x, y + 1, z); this.queueLava(x, y - 1, z); this.queueLava(x, y, z + 1); this.queueLava(x, y, z - 1);
     // fallande sand/grus ovanför
     this._checkFall(x, y + 1, z);
     if (BLOCKS[id] && BLOCKS[id].gravity) this._checkFall(x, y, z);
@@ -312,6 +315,48 @@ export class World {
     }
   }
 
+  /* ----- lava: flyter långsamt och kort (3 steg), stelnar mot vatten ----- */
+  queueLava(x, y, z) {
+    if (y < 1 || y >= CY) return;
+    const b = this.get(x, y, z);
+    if (!isLava(b)) return;
+    const k = x + ',' + y + ',' + z;
+    if (this.lavaSet.has(k)) return;
+    this.lavaSet.add(k); this.lavaQ.push(x, y, z);
+  }
+  tickLava(dt) {
+    this._lavaT += dt;
+    if (this._lavaT < 0.9) return;
+    this._lavaT = 0;
+    const q = this.lavaQ; this.lavaQ = []; this.lavaSet.clear();
+    for (let i = 0; i < q.length && i < 600; i += 3) this._lavaUpdate(q[i], q[i + 1], q[i + 2]);
+  }
+  _lavaUpdate(x, y, z) {
+    const b = this.get(x, y, z);
+    if (!isLava(b)) return;
+    const L = b - LAVA;
+    // vatten intill: källa → obsidian, flytande → kullersten
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0]]) {
+      if (isWater(this.get(x + dx, y + dy, z + dz))) { this.set(x, y, z, L === 0 ? B.obsidian : B.cobble); if (this.onHiss) this.onHiss(x, y, z); return; }
+    }
+    const repl = id => id === 0 || (id > 0 && BLOCKS[id] && BLOCKS[id].replace && !isWater(id) && !isLava(id));
+    if (L > 0) {
+      // stöd: lava ovanför eller en granne med lägre nivå
+      let ok = isLava(this.get(x, y + 1, z));
+      for (const [dx, dz] of DIR4) { const n = this.get(x + dx, y, z + dz); if (isLava(n) && n - LAVA < L) ok = true; }
+      if (!ok) { this.set(x, y, z, 0); return; }
+    }
+    const below = this.get(x, y - 1, z);
+    if (repl(below)) { this.set(x, y - 1, z, LAVA + 1); return; }
+    if (isLava(below) || L >= 3) return;
+    for (const [dx, dz] of DIR4) {
+      const n = this.get(x + dx, y, z + dz);
+      if (n < 0) continue;
+      if (repl(n)) this.set(x + dx, y, z + dz, LAVA + L + 1);
+      else if (isLava(n) && n - LAVA > L + 1) this.set(x + dx, y, z + dz, LAVA + L + 1);
+    }
+  }
+
   /* ----- strålkastning ----- */
   raycast(ox, oy, oz, dx, dy, dz, maxD, out) {
     let x = Math.floor(ox), y = Math.floor(oy), z = Math.floor(oz);
@@ -382,6 +427,7 @@ export class World {
       if (inMesh && c.data && c.dirty && !c.busy && this._neighborsReady(c)) { this._mesh(c); budget--; }
     }
     this.tickWater(dt);
+    this.tickLava(dt);
   }
   _newChunk(cx, cz) {
     const c = { cx, cz, key: ckey(cx, cz), data: null, biomes: null, light: null, maxY: 0, ver: 0, dirty: true, urgent: false, busy: false, mesh: null, tmesh: null, meshed: false };

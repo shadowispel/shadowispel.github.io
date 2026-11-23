@@ -216,7 +216,7 @@ let nwMode = 'survival', nwDiff = 1;
 function segs(id, cb) { $(id).querySelectorAll('button').forEach(b => b.onclick = () => { $(id).querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset.v); audio.play('click'); }); }
 segs('nwMode', v => { nwMode = v; $('nwNote').textContent = v === 'creative' ? 'Kreativt: oändligt med block, flyg med dubbeltryck på mellanslag, bryt direkt. Inga faror och inga poäng.' : 'Överlevnad: samla resurser, tillverka verktyg och klara nätterna. Poäng till rekordlistan: överlevda dagar × 100 + brutna/placerade block ÷ 10.'; $('nwDiff').parentElement && ($('nwDiff').style.opacity = v === 'creative' ? 0.4 : 1); });
 segs('nwDiff', v => { nwDiff = +v; });
-const NAMES = ['Fjällvidden', 'Björkdalen', 'Granåsen', 'Myrlandet', 'Lingonbacken', 'Älgstigen', 'Kristallgrottan', 'Sjöudden', 'Norrskenet', 'Tallheden'];
+const NAMES = ['Fjällvidden', 'Björkdalen', 'Granåsen', 'Myrlandet', 'Lingonbacken', 'Kohagen', 'Diamantgrottan', 'Sjöudden', 'Norrskenet', 'Tallheden'];
 function openNew() {
   $('nwName').value = NAMES[(Math.random() * NAMES.length) | 0] + (worlds.length ? ' ' + (worlds.length + 1) : '');
   $('nwSeed').value = '';

@@ -1,7 +1,7 @@
 /** Entiteter: föremål på marken, partiklar, fallande block, projektiler och varelser (AI + spawn). */
 import * as THREE from 'three';
-import { BLOCKS, B, I, CY, isWater, T_SOLID, itemName } from './blocks.js';
-import { buildModel, extrudedGeo, blockGeo, isCubeItem } from './models.js';
+import { BLOCKS, B, I, CY, isWater, isLava, T_SOLID, itemName } from './blocks.js';
+import { buildModel, extrudedGeo, blockGeo, isCubeItem, boxGeo } from './models.js';
 import { moveBody, overlaps } from './physics.js';
 import { World } from './world.js';
 import { tileColorSample } from './textures.js';
@@ -10,6 +10,8 @@ import { BI } from './worldgen.js';
 
 const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpC = new THREE.Color();
 const TORCH = new THREE.Color(1.0, 0.66, 0.36);
+const FIRE = [new THREE.Color('#ffb040'), new THREE.Color('#ff7a20'), new THREE.Color('#ffd870')];
+const ARROW_G = 14;
 
 /** Ljusfärg (linjär) vid en punkt – samma kurva som terrängshadern */
 export function lightColor(world, sky, x, y, z, out, minL = 0.03) {
@@ -20,14 +22,21 @@ export function lightColor(world, sky, x, y, z, out, minL = 0.03) {
   return out;
 }
 
+/**
+ * Varelser. art = obestämd artikel ("en"/"ett") för texter. blood = partikelfärg vid träff.
+ * Fredliga djur vandrar och flyr när de slås. Fientliga föds i mörker.
+ */
 export const MOBS = {
-  sheep: { name: 'Tovfår', hp: 8, speed: 1.1, hostile: false, drops: [[B.wool_white, 1, 2], [I.meat, 1, 2]], xp: 1 },
-  hare: { name: 'Fjällhare', hp: 4, speed: 1.4, run: 6.5, flee: 7, hostile: false, drops: [[I.meat, 1, 1]] },
-  moose: { name: 'Älg', hp: 24, speed: 1.3, run: 4.2, hostile: false, retaliate: true, dmg: 5, reach: 1.9, kb: 10, drops: [[I.moose, 2, 3]] },
-  wolf: { name: 'Skuggvarg', hp: 12, speed: 3.9, hostile: true, dmg: 3, reach: 1.5, kb: 6, drops: [[I.shadowfur, 0, 2]], sunburn: true, detect: 18 },
-  giant: { name: 'Mossbjässe', hp: 36, speed: 1.7, hostile: true, dmg: 7, reach: 2.3, kb: 13, drops: [[I.moss, 1, 3], [I.iron_ingot, 0, 1, 0.3]], detect: 16, heavy: true },
-  ghost: { name: 'Lyktgast', hp: 10, speed: 3, hostile: true, flying: true, ranged: true, dmg: 3, drops: [[I.glowdust, 1, 2]], sunburn: true, detect: 22 }
+  cow: { name: 'Ko', art: 'en', hp: 10, speed: 1.0, run: 3.4, hostile: false, drops: [[I.meat, 1, 3], [I.leather, 0, 2]], blood: '#c84040', graze: true },
+  pig: { name: 'Gris', art: 'en', hp: 10, speed: 1.1, run: 3.6, hostile: false, drops: [[I.pork, 1, 3]], blood: '#c84040', graze: true },
+  sheep: { name: 'Får', art: 'ett', hp: 8, speed: 1.1, run: 3.4, hostile: false, drops: [[B.wool_white, 1, 2], [I.meat, 1, 2]], blood: '#c84040', graze: true },
+  chicken: { name: 'Höna', art: 'en', hp: 4, speed: 1.2, run: 3.8, hostile: false, drops: [[I.feather, 0, 2], [I.chicken, 1, 1]], blood: '#e8e0d0', flutter: true, eggs: true },
+  zombie: { name: 'Zombie', art: 'en', hp: 20, speed: 2.1, hostile: true, dmg: 3, reach: 1.5, kb: 6, drops: [[I.rotten_flesh, 0, 2], [I.iron_ingot, 0, 1, 0.04], [I.carrot, 1, 1, 0.04], [I.potato, 1, 1, 0.04]], sunburn: true, detect: 24, blood: '#56703e' },
+  skeleton: { name: 'Skelett', art: 'ett', hp: 16, speed: 2.3, hostile: true, ranged: true, dmg: 3, drops: [[I.bone, 0, 2], [I.arrow, 0, 2]], sunburn: true, detect: 20, blood: '#e6dec6' },
+  spider: { name: 'Spindel', art: 'en', hp: 14, speed: 3.6, hostile: true, dmg: 2.5, reach: 1.6, kb: 5, drops: [[I.string, 0, 2]], climb: true, leap: true, dayPeaceful: true, detect: 16, blood: '#3a4a22' }
 };
+/** Äldre varelsetyper (från tidigare versioner) → nya. Varelser sparas inte, men nycklar kan förekomma i t.ex. statistik. */
+export const OLD_MOBS = { hare: 'chicken', moose: 'cow', wolf: 'zombie', giant: 'zombie', ghost: 'skeleton' };
 
 export class Entities {
   constructor(game) {
@@ -47,14 +56,14 @@ export class Entities {
     this.pFree = 0;
     this._m4 = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3();
     this.spawnT = 0; this.howlT = 20;
-    this.shotGeo = new THREE.BoxGeometry(0.28, 0.28, 0.28);
-    this.shotMat = new THREE.MeshBasicMaterial({ color: 0xc8ff9a });
+
   }
 
   dispose() {
     this.scene.remove(this.group);
     this.pMesh.geometry.dispose(); this.pMesh.material.dispose(); this.pMesh.dispose();
-    this.shotGeo.dispose(); this.shotMat.dispose(); this.itemMat.dispose();
+    this.itemMat.dispose();
+    if (this.arrowGeos) { this.arrowGeos.forEach(x => x.dispose()); this.arrowMat.dispose(); }
     for (const d of this.drops) if (!d.cube) d.mesh.material.dispose();
     for (const m of this.mobs) disposeModel(m.model);
     this.drops.length = 0; this.mobs.length = 0; this.falling.length = 0; this.shots.length = 0;
@@ -160,6 +169,7 @@ export class Entities {
         if (r.ground) { e.vel.x *= Math.pow(0.02, dt); e.vel.z *= Math.pow(0.02, dt); }
       }
       if (e.age > 300 || e.pos.y < -10) { this._removeDrop(i); continue; }
+      if (isLava(w.get(Math.floor(e.pos.x), Math.floor(e.pos.y), Math.floor(e.pos.z)))) { this.puff(e.pos.x, e.pos.y + 0.2, e.pos.z, '#ff9a30', 4, 0.2, true); this._removeDrop(i); continue; }
       e.spin += dt * 1.8;
       e.mesh.position.set(e.pos.x, e.pos.y + 0.2 + Math.sin(e.age * 2.5) * 0.06, e.pos.z);
       e.mesh.rotation.y = e.spin;
@@ -202,14 +212,16 @@ export class Entities {
 
   /* ---------- varelser ---------- */
   spawnMob(type, x, y, z) {
+    type = OLD_MOBS[type] || type;
     const def = MOBS[type];
-    const modelType = { sheep: 'sheep', hare: 'hare', moose: 'moose', wolf: 'wolf', giant: 'giant', ghost: 'ghost' }[type];
-    const model = buildModel(modelType);
+    if (!def) return null;
+    const model = buildModel(type);
     const m = {
       type, def, model, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: Math.random() * Math.PI * 2, tyaw: 0,
       hp: def.hp * (def.hostile ? this.g.diffHp() : 1), ground: false, walk: 0, wander: 0, dir: new THREE.Vector2(), moving: false,
       hurtT: 0, dead: false, deathT: 0, atkCd: 1, angryT: 0, fleeT: 0, path: null, pathT: 0, pi: 0, shotCd: 2 + Math.random() * 2,
-      hw: model.width / 2, h: model.height, light: new THREE.Color(1, 1, 1), soundT: 4 + Math.random() * 10, burn: 0, stuckT: 0, lastPos: new THREE.Vector3(x, y, z), fade: 0
+      hw: model.width / 2, h: model.height, light: new THREE.Color(1, 1, 1), soundT: 4 + Math.random() * 10, burn: 0, stuckT: 0, lastPos: new THREE.Vector3(x, y, z), fade: 0,
+      seed: Math.random() * 10, graze: false, aimT: 0, strafe: Math.random() < 0.5 ? 1 : -1, eggT: 90 + Math.random() * 150, calm: false
     };
     m.tyaw = m.yaw;
     model.root.position.copy(m.pos);
@@ -227,21 +239,21 @@ export class Entities {
         if (n > 0) this.drop(id, n, m.pos.x, m.pos.y + 0.5, m.pos.z);
       }
       this.g.stats.kills++; this.g.onKill(m.type);
-      if (m.def.hostile) this.g.log('Du besegrade en ' + m.def.name.toLowerCase() + '.');
+      if (m.def.hostile) this.g.log('Du besegrade ' + m.def.art + ' ' + m.def.name.toLowerCase() + '.');
     }
   }
   _vol(m) { const d = m.pos.distanceTo(this.g.player.pos); const p = this.g.player; const ang = Math.atan2(m.pos.x - p.pos.x, m.pos.z - p.pos.z); return { vol: Math.max(0, 1 - d / 28), pan: Math.max(-1, Math.min(1, Math.sin(ang - p.yaw - Math.PI) * 0.8)) }; }
 
-  /** Spelaren slår en varelse */
+  /** Spelaren (eller spelarens pil) träffar en varelse */
   hitMob(m, dmg, dir) {
     if (m.dead || m.hurtT > 0.35) return false;
     m.hp -= dmg; m.hurtT = 0.5;
-    const kb = m.def.heavy ? 2.5 : 6;
-    m.vel.x += dir.x * kb; m.vel.z += dir.z * kb; if (!m.def.flying) m.vel.y = Math.max(m.vel.y, m.def.heavy ? 2 : 5);
+    const kb = 6;
+    m.vel.x += dir.x * kb; m.vel.z += dir.z * kb; m.vel.y = Math.max(m.vel.y, 5);
     mobSound(this.g.audio, m.type, 'hurt', this._vol(m));
-    this.puff(m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.def.hostile ? '#5a3a7a' : '#c84040', 6, 0.4);
-    if (m.def.retaliate) m.angryT = 20;
-    if (!m.def.hostile && !m.def.retaliate) m.fleeT = 5;
+    this.puff(m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.def.blood || '#c84040', 6, 0.4);
+    if (m.def.dayPeaceful) m.angryT = 30;
+    if (!m.def.hostile) m.fleeT = 5;
     if (m.hp <= 0) this._killMob(m, true);
     return true;
   }
@@ -255,10 +267,38 @@ export class Entities {
     }
     return best ? { mob: best, dist: bt } : null;
   }
+  /** Vägsökning mot spelaren: sätter riktning (tx,tz) och om varelsen vill hoppa */
+  _chase(m, dt, pl, w, out) {
+    m.pathT -= dt;
+    if (m.pathT <= 0) {
+      m.pathT = 0.8 + Math.random() * 0.5;
+      m.path = findPath(w, m.pos, pl.pos, Math.ceil(m.h), 350);
+      m.pi = 0;
+    }
+    let gx = pl.pos.x, gz = pl.pos.z;
+    out.jump = false;
+    if (m.path && m.pi < m.path.length) {
+      const n = m.path[m.pi];
+      gx = n[0] + 0.5; gz = n[2] + 0.5;
+      if (Math.hypot(gx - m.pos.x, gz - m.pos.z) < 0.45) m.pi++;
+      if (n[1] > Math.floor(m.pos.y + 0.1)) out.jump = true;
+    }
+    let tx = gx - m.pos.x, tz = gz - m.pos.z;
+    const l = Math.hypot(tx, tz); if (l > 0.01) { tx /= l; tz /= l; }
+    out.tx = tx; out.tz = tz;
+  }
+  _los(m, pl, eyeY) {
+    const from = tmpV2.set(m.pos.x, m.pos.y + eyeY, m.pos.z);
+    const to = tmpV.set(pl.pos.x, pl.pos.y + 1.5, pl.pos.z).sub(from);
+    const dist = to.length(); if (dist < 0.01) return true;
+    to.multiplyScalar(1 / dist);
+    return !this.g.world.raycast(from.x, from.y, from.z, to.x, to.y, to.z, dist, {});
+  }
 
   _updateMobs(dt) {
     const g = this.g, w = g.world, pl = g.player;
     const day = g.sky.daylight;
+    const ch = this._ch || (this._ch = { tx: 0, tz: 0, jump: false });
     for (let i = this.mobs.length - 1; i >= 0; i--) {
       const m = this.mobs[i];
       const md = m.def;
@@ -269,90 +309,90 @@ export class Entities {
         m.deathT += dt;
         m.model.root.rotation.z = Math.min(Math.PI / 2, m.deathT * 4);
         m.model.mat.color.setRGB(1, 0.35, 0.35);
-        if (m.deathT > 0.9) { this.puff(m.pos.x, m.pos.y + m.h * 0.4, m.pos.z, md.hostile ? '#3a2a4a' : '#dddddd', 14, m.hw * 2); this._removeMob(i); }
+        if (m.deathT > 0.9) { this.puff(m.pos.x, m.pos.y + m.h * 0.4, m.pos.z, md.hostile ? '#4a4a4a' : '#dddddd', 14, m.hw * 2); this._removeMob(i); }
         continue;
       }
       m.hurtT = Math.max(0, m.hurtT - dt);
       m.atkCd = Math.max(0, m.atkCd - dt);
       m.angryT = Math.max(0, m.angryT - dt);
       m.fleeT = Math.max(0, m.fleeT - dt);
-      // solen bränner nattvarelser
+      m.aimT = Math.max(0, m.aimT - dt);
+      // zombier och skelett brinner i solljus
       if (md.sunburn && day > 0.55) {
         const L = w.light(Math.floor(m.pos.x), Math.floor(m.pos.y + m.h * 0.7), Math.floor(m.pos.z));
-        if ((L >> 4) >= 12) {
+        if ((L >> 4) >= 12 && !isWater(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.5), Math.floor(m.pos.z)))) {
           m.burn += dt;
-          if (Math.random() < dt * 20) this.puff(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z, '#2a2238', 1, m.hw * 2);
-          if (m.burn > 0.6) { m.hp -= 6 * dt; if (m.hp <= 0) { this._killMob(m, false); continue; } }
-        }
-      }
+          if (Math.random() < dt * 24) this.particle(m.pos.x + (Math.random() - 0.5) * m.hw * 2, m.pos.y + Math.random() * m.h, m.pos.z + (Math.random() - 0.5) * m.hw * 2, 0, 1.6, 0, FIRE[Math.random() * 3 | 0], 0.09 + Math.random() * 0.08, 0.5, -0.25, true);
+          if (Math.random() < dt * 6) this.puff(m.pos.x, m.pos.y + m.h, m.pos.z, '#3a3634', 1, m.hw);
+          if (m.burn > 0.5) { m.hp -= 5 * dt; if (m.hp <= 0) { this._killMob(m, false); continue; } }
+        } else m.burn = 0;
+      } else m.burn = 0;
+      // lava bränner alla varelser; klippta får växer ny ull
+      if (isLava(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.2), Math.floor(m.pos.z)))) { m.hp -= 8 * dt; m.burn = Math.max(m.burn, 0.1); if (Math.random() < dt * 10) this.particle(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z, 0, 1.5, 0, FIRE[0], 0.12, 0.5, -0.2, true); if (m.hp <= 0) { this._killMob(m, false); continue; } }
+      if (m.sheared && (m.regrow -= dt) <= 0) { m.sheared = false; const P = m.model.parts; if (P.wool) for (const x of P.wool) x.visible = true; if (P.skin) P.skin.visible = false; }
+      // spindlar är lugna i dagsljus om ingen slagit dem
+      m.calm = false;
+      if (md.dayPeaceful && m.angryT <= 0) { const L = w.light(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.6), Math.floor(m.pos.z)); if ((L >> 4) * day >= 9) m.calm = true; }
       // --- AI ---
-      let tx = 0, tz = 0, speed = md.speed, wantJump = false, fly = 0;
-      const canTarget = pl.alive && !pl.creative && dpl < (md.detect || 16) * (pl.sneaking ? 0.6 : 1);
-      if (md.hostile && canTarget) {
-        if (md.flying) {
-          // håll avstånd, sväva ovanför
-          const dx = m.pos.x - pl.pos.x, dz = m.pos.z - pl.pos.z, hd = Math.hypot(dx, dz) || 1;
-          const want = 7;
-          const gx = pl.pos.x + dx / hd * want, gz = pl.pos.z + dz / hd * want, gy = pl.pos.y + 3.2 + Math.sin(g.time * 1.3 + i) * 0.6;
-          tx = gx - m.pos.x; tz = gz - m.pos.z; fly = gy - m.pos.y;
-          const l = Math.hypot(tx, tz); if (l > 0.01) { tx /= l; tz /= l; } speed = md.speed * Math.min(1, l / 2);
-          m.tyaw = Math.atan2(-dx, -dz);
-          m.shotCd -= dt;
-          if (m.shotCd <= 0 && dpl < 20) {
-            m.shotCd = 2.6 + Math.random() * 1.5;
-            const eye = tmpV.set(pl.pos.x, pl.pos.y + 1.4, pl.pos.z);
-            const from = tmpV2.set(m.pos.x, m.pos.y + 1.1, m.pos.z);
-            const dir = eye.clone().sub(from);
-            const dist = dir.length(); dir.normalize();
-            const hit = w.raycast(from.x, from.y, from.z, dir.x, dir.y, dir.z, dist, {});
-            if (!hit) this._shoot(from, dir);
-          }
-        } else {
-          // väg mot spelaren
-          m.pathT -= dt;
-          const needPath = m.pathT <= 0;
-          if (needPath) {
-            m.pathT = 0.8 + Math.random() * 0.5;
-            m.path = findPath(w, m.pos, pl.pos, Math.ceil(m.h), 350);
-            m.pi = 0;
-          }
-          let gx = pl.pos.x, gz = pl.pos.z;
-          if (m.path && m.pi < m.path.length) {
-            const n = m.path[m.pi];
-            gx = n[0] + 0.5; gz = n[2] + 0.5;
-            if (Math.hypot(gx - m.pos.x, gz - m.pos.z) < 0.45) m.pi++;
-            if (n[1] > Math.floor(m.pos.y + 0.1)) wantJump = true;
-          }
-          tx = gx - m.pos.x; tz = gz - m.pos.z;
-          const l = Math.hypot(tx, tz); if (l > 0.01) { tx /= l; tz /= l; }
-          m.tyaw = Math.atan2(tx, tz);
-          // utfall för vargen
-          if (m.type === 'wolf' && m.ground && dpl > 2.5 && dpl < 5 && m.atkCd <= 0 && Math.random() < dt * 2) { m.vel.y = 7; m.vel.x = tx * 9; m.vel.z = tz * 9; }
-          // anfall
-          const reach = (md.reach || 1.4) + 0.3;
-          const hdist = Math.hypot(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z);
-          if (hdist < reach && Math.abs(pl.pos.y - m.pos.y) < Math.max(1.6, m.h * 0.8) && m.atkCd <= 0) {
-            m.atkCd = m.type === 'giant' ? 1.6 : 1.0;
-            m.swing = 0.4;
-            g.damagePlayer(md.dmg * g.diffDmg(), tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), md.kb || 6, md.name);
-            mobSound(g.audio, m.type, 'attack', this._vol(m));
-          }
-          if (hdist < reach * 0.7) { tx = 0; tz = 0; }
-          if (hdist < m.hw + 0.35 && hdist > 0.001) { const k2 = (m.hw + 0.35 - hdist) / hdist; m.pos.x -= (pl.pos.x - m.pos.x) * k2 * 0.5; m.pos.z -= (pl.pos.z - m.pos.z) * k2 * 0.5; }
+      let tx = 0, tz = 0, speed = md.speed, wantJump = false;
+      const canTarget = md.hostile && !m.calm && pl.alive && !pl.creative && dpl < (md.detect || 16) * (pl.sneaking ? 0.6 : 1);
+      const hdist = Math.hypot(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z);
+      if (canTarget && md.ranged) {
+        // skelett: håll avstånd, sidsteg och skjut pilar när de ser spelaren
+        const see = (m._seeT = (m._seeT || 0) - dt) > 0 ? m._see : (m._seeT = 0.3, m._see = this._los(m, pl, 1.5));
+        const ax = (pl.pos.x - m.pos.x) / (hdist || 1), az = (pl.pos.z - m.pos.z) / (hdist || 1);
+        if (hdist > 11 || !see) { this._chase(m, dt, pl, w, ch); tx = ch.tx; tz = ch.tz; wantJump = ch.jump; m.tyaw = Math.atan2(tx, tz); }
+        else {
+          if (Math.random() < dt * 0.4) m.strafe = -m.strafe;
+          if (hdist < 5) { tx = -ax; tz = -az; }
+          else { tx = -az * m.strafe * 0.6; tz = ax * m.strafe * 0.6; }
+          speed = md.speed * 0.7;
+          m.tyaw = Math.atan2(ax, az);
+          // undvik stup när den backar
+          const fx = Math.floor(m.pos.x + tx * 0.8), fz = Math.floor(m.pos.z + tz * 0.8), fy = Math.floor(m.pos.y);
+          if (!T_SOLID[Math.max(0, w.get(fx, fy - 1, fz))] && !T_SOLID[Math.max(0, w.get(fx, fy - 2, fz))]) { tx = 0; tz = 0; }
+          if (see && hdist < 16) m.aimT = 0.4;
         }
-      } else if (md.retaliate && m.angryT > 0 && pl.alive && !pl.creative) {
-        tx = pl.pos.x - m.pos.x; tz = pl.pos.z - m.pos.z; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l; speed = md.run;
+        m.shotCd -= dt;
+        if (m.shotCd <= 0 && see && hdist < 16) {
+          m.shotCd = 2.0 + Math.random() * 1.4 - (g.difficulty === 2 ? 0.5 : 0);
+          m.swing = 0.4;
+          const from = new THREE.Vector3(m.pos.x + Math.sin(m.yaw) * 0.4, m.pos.y + 1.45, m.pos.z + Math.cos(m.yaw) * 0.4);
+          const aim = new THREE.Vector3(pl.pos.x, pl.pos.y + 1.1, pl.pos.z).sub(from);
+          const v = 17, tt = Math.hypot(aim.x, aim.z) / v;
+          aim.y += 0.5 * ARROW_G * tt * tt;
+          aim.normalize();
+          const spread = g.difficulty === 2 ? 0.025 : 0.05;
+          aim.x += (Math.random() - 0.5) * spread; aim.y += (Math.random() - 0.5) * spread; aim.z += (Math.random() - 0.5) * spread;
+          this.shootArrow(from, aim.normalize().multiplyScalar(v), 'mob', md.dmg * g.diffDmg());
+        }
+      } else if (canTarget) {
+        // zombie och spindel: väg mot spelaren och slå
+        this._chase(m, dt, pl, w, ch); tx = ch.tx; tz = ch.tz; wantJump = ch.jump;
         m.tyaw = Math.atan2(tx, tz);
-        if (l < md.reach + 0.4 && m.atkCd <= 0) { m.atkCd = 1.3; m.swing = 0.4; g.damagePlayer(md.dmg * g.diffDmg(), tmpV.set(tx, 0, tz), md.kb, md.name); }
-      } else if ((md.flee && dpl < md.flee && !pl.sneaking) || m.fleeT > 0) {
+        // spindelns språng
+        if (md.leap && m.ground && hdist > 2.2 && hdist < 5.5 && m.atkCd <= 0 && Math.random() < dt * 2.2) { m.vel.y = 6.8; m.vel.x = tx * 8.5; m.vel.z = tz * 8.5; mobSound(g.audio, m.type, 'attack', this._vol(m)); }
+        const reach = (md.reach || 1.4) + 0.3;
+        if (hdist < reach && Math.abs(pl.pos.y - m.pos.y) < Math.max(1.6, m.h * 0.8) && m.atkCd <= 0) {
+          m.atkCd = m.type === 'spider' ? 0.8 : 1.0;
+          m.swing = 0.4;
+          g.damagePlayer(md.dmg * g.diffDmg(), tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), md.kb || 6, m.type);
+          mobSound(g.audio, m.type, 'attack', this._vol(m));
+        }
+        if (hdist < reach * 0.7) { tx = 0; tz = 0; }
+        if (hdist < m.hw + 0.35 && hdist > 0.001) { const k2 = (m.hw + 0.35 - hdist) / hdist; m.pos.x -= (pl.pos.x - m.pos.x) * k2 * 0.5; m.pos.z -= (pl.pos.z - m.pos.z) * k2 * 0.5; }
+      } else if (m.fleeT > 0) {
         tx = m.pos.x - pl.pos.x; tz = m.pos.z - pl.pos.z; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l; speed = md.run || md.speed * 2.2;
-        m.tyaw = Math.atan2(tx, tz);
+        // fly i sicksack
+        const zz = Math.sin(g.time * 3 + m.seed) * 0.5; const ox = tx; tx += -tz * zz; tz += ox * zz;
+        m.tyaw = Math.atan2(tx, tz); m.graze = false;
       } else {
-        // vandra
+        // vandra (och beta)
         m.wander -= dt;
         if (m.wander <= 0) {
           m.wander = 2 + Math.random() * 5;
-          if (Math.random() < 0.55) { const a = Math.random() * Math.PI * 2; m.dir.set(Math.sin(a), Math.cos(a)); m.moving = true; } else m.moving = false;
+          m.graze = false;
+          if (Math.random() < 0.55) { const a = Math.random() * Math.PI * 2; m.dir.set(Math.sin(a), Math.cos(a)); m.moving = true; } else { m.moving = false; m.graze = !!md.graze && Math.random() < 0.6; }
         }
         if (m.moving) {
           tx = m.dir.x; tz = m.dir.y; m.tyaw = Math.atan2(tx, tz);
@@ -361,27 +401,33 @@ export class Entities {
           let drop = 0; while (drop < 4 && !T_SOLID[Math.max(0, w.get(ax, ay - 1 - drop, az))]) drop++;
           if (drop >= 3 || isWater(w.get(ax, ay, az)) || isWater(w.get(ax, ay - 1, az))) { m.wander = 0.1; tx = tz = 0; m.moving = false; }
         }
-        if (md.flying) fly = Math.sin(g.time + i) * 0.5;
-        m.soundT -= dt;
-        if (m.soundT <= 0) { m.soundT = 6 + Math.random() * 14; mobSound(g.audio, m.type, 'idle', this._vol(m)); }
+        if (!md.hostile || m.calm) {
+          m.soundT -= dt;
+          if (m.soundT <= 0) { m.soundT = 6 + Math.random() * 14; mobSound(g.audio, m.type, 'idle', this._vol(m)); }
+        }
       }
-      if (md.hostile && canTarget) {
+      if (canTarget) {
         m.soundT -= dt;
         if (m.soundT <= 0) { m.soundT = 4 + Math.random() * 6; mobSound(g.audio, m.type, 'idle', this._vol(m)); }
       }
+      // hönor värper ibland
+      if (md.eggs) { m.eggT -= dt; if (m.eggT <= 0) { m.eggT = 120 + Math.random() * 180; this.drop(I.egg, 1, m.pos.x, m.pos.y + 0.3, m.pos.z, 0, tmpV.set(0, 1, 0)); mobSound(g.audio, m.type, 'idle', this._vol(m)); } }
       // --- fysik ---
       const inW = isWater(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.3), Math.floor(m.pos.z)));
-      const acc = m.ground || md.flying ? 10 : 2;
+      const acc = m.ground ? 10 : 2;
       const k = 1 - Math.exp(-acc * dt);
       m.vel.x += (tx * speed - m.vel.x) * k;
       m.vel.z += (tz * speed - m.vel.z) * k;
-      if (md.flying) { m.vel.y += (fly * 2 - m.vel.y) * (1 - Math.exp(-3 * dt)); }
-      else if (inW) { m.vel.y = Math.min(m.vel.y + 22 * dt, 2.2); }
-      else m.vel.y = Math.max(m.vel.y - 28 * dt, -40);
+      if (inW) { m.vel.y = Math.min(m.vel.y + 22 * dt, 2.2); }
+      else m.vel.y = Math.max(m.vel.y - 28 * dt, md.flutter ? -2.2 : -40);
       const r = moveBody(w, m.pos, m.vel, dt, { hw: Math.min(m.hw, 0.45), h: Math.min(m.h, 2.8), stepUp: 0.55, grounded: m.ground });
       m.ground = r.ground;
-      if ((r.hitX || r.hitZ) && (m.ground || inW) && (tx || tz)) wantJump = true;
-      if (wantJump && m.ground && !md.flying) m.vel.y = md.heavy ? 9 : 8.5;
+      m.climbing = false;
+      if ((r.hitX || r.hitZ) && (tx || tz)) {
+        if (md.climb && canTarget) { m.vel.y = 3.4; m.climbing = true; }
+        else if (m.ground || inW) wantJump = true;
+      }
+      if (wantJump && m.ground) m.vel.y = 8.5;
       // fastnat?
       m.stuckT += dt;
       if (m.stuckT > 1) { if (m.pos.distanceTo(m.lastPos) < 0.3 && (tx || tz)) { m.wander = 0; m.pathT = 0; m.dir.set(-m.dir.x, -m.dir.y); } m.stuckT = 0; m.lastPos.copy(m.pos); }
@@ -389,56 +435,107 @@ export class Entities {
       let dy = m.tyaw - m.yaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
       m.yaw += dy * (1 - Math.exp(-8 * dt));
       const hs = Math.hypot(m.vel.x, m.vel.z);
-      m.walk += hs * dt * (m.type === 'hare' ? 3 : 2.2);
+      m.walk += hs * dt * (m.type === 'spider' ? 3.2 : m.type === 'chicken' ? 3.5 : 2.2);
       this._animate(m, hs, dt);
       lightColor(w, g.sky.skyLight, m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.light, 0.04);
       if (m.hurtT > 0.25) m.model.mat.color.setRGB(1, 0.3, 0.3);
+      else if (m.burn > 0) m.model.mat.color.copy(m.light).lerp(tmpC.setRGB(1, 0.55, 0.25), 0.35);
       else m.model.mat.color.copy(m.light);
     }
   }
   _animate(m, hs, dt) {
-    const P = m.model.parts, root = m.model.root;
+    const P = m.model.parts, root = m.model.root, t = performance.now() * 0.001 + m.seed;
     root.position.copy(m.pos); root.rotation.y = m.yaw;
     const sw = Math.sin(m.walk) * Math.min(1, hs * 0.6) * 0.8;
     if (P.legs) { P.legs[0].rotation.x = sw; P.legs[3].rotation.x = sw; P.legs[1].rotation.x = -sw; P.legs[2].rotation.x = -sw; }
     if (P.legL) { P.legL.rotation.x = sw; P.legR.rotation.x = -sw; }
     if (m.swing > 0) m.swing -= dt;
     const atk = m.swing > 0 ? Math.sin((0.4 - m.swing) / 0.4 * Math.PI) : 0;
-    if (P.armL) { P.armL.rotation.x = -sw * 0.8 - atk * 1.8; P.armR.rotation.x = sw * 0.8 - atk * 1.8; }
-    if (P.head && m.type !== 'giant') P.head.rotation.x = m.type === 'sheep' && !m.moving && hs < 0.2 ? 0.5 + Math.sin(m.walk * 0.3 + performance.now() * 0.002) * 0.1 : -atk * 0.6;
-    if (P.tail) P.tail.rotation.y = Math.sin(performance.now() * 0.006) * 0.4;
-    if (P.earL) { P.earL.rotation.x = -0.2 + Math.sin(performance.now() * 0.004) * 0.1; P.earR.rotation.x = -0.2 + Math.cos(performance.now() * 0.005) * 0.1; }
-    if (m.model.ghost) {
-      const t = performance.now() * 0.001;
-      P.t1.rotation.z = Math.sin(t * 2) * 0.2; P.t2.rotation.z = Math.sin(t * 2 + 1) * 0.3; P.t3.rotation.z = Math.sin(t * 2 + 2) * 0.4;
-      P.core.scale.setScalar(1 + Math.sin(t * 5) * 0.1);
+    const type = m.type;
+    if (type === 'zombie') {
+      // ena armen sträckt framåt, den andra slänger – vinglande huvud
+      P.armL.rotation.x = -1.3 + sw * 0.15 - atk * 0.5;
+      P.armR.rotation.x = -0.35 - sw * 0.6 - atk * 1.3;
+      P.armR.rotation.z = 0.12;
+      P.head.rotation.z = Math.sin(t * 1.3) * 0.14; P.head.rotation.x = 0.1 - atk * 0.3;
+    } else if (type === 'skeleton') {
+      const aim = m.aimT > 0 ? 1 : 0;
+      P.armL.rotation.x = aim ? -1.5 : sw * 0.6;
+      P.armR.rotation.x = aim ? -1.35 + atk * 0.5 : -sw * 0.6;
+      P.armR.rotation.y = aim ? -0.5 : 0;
+      P.jaw.rotation.x = Math.max(0, Math.sin(t * (m.aimT > 0 ? 4 : 9))) * 0.18;
+      P.head.rotation.x = 0;
+    } else if (type === 'spider') {
+      const mv = Math.min(1, hs * 0.5);
+      for (const L of P.slegs) {
+        const ph = m.walk * 2 + L.i * Math.PI * 0.5 + (L.s > 0 ? 0 : Math.PI);
+        L.g.rotation.y = L.yaw + Math.sin(ph) * 0.3 * mv;
+        L.g.rotation.z = L.s * (0.55 + Math.max(0, Math.cos(ph)) * 0.25 * mv + (m.climbing ? 0.3 : 0));
+      }
+      P.abd.rotation.x = Math.sin(t * 1.7) * 0.04 - atk * 0.2;
+    } else if (type === 'chicken') {
+      const flap = !m.ground || m.fleeT > 0 ? Math.abs(Math.sin(t * 22)) * 0.9 : 0;
+      P.wingL.rotation.z = -flap; P.wingR.rotation.z = flap;
+      P.head.rotation.x = m.graze ? 0.7 : Math.sin(m.walk * 2) * 0.15 * Math.min(1, hs);
+      if (!m.moving && hs < 0.2 && Math.sin(t * 0.7) > 0.6) P.head.rotation.x = 0.6 + Math.abs(Math.sin(t * 10)) * 0.3; // pickar
+    } else if (P.head) {
+      // fyrfota djur: betar när de står still
+      P.head.rotation.x = m.graze && hs < 0.2 ? 0.55 + Math.sin(t * 2.2) * 0.08 : Math.sin(t * 0.9) * 0.05;
     }
-    if (m.type === 'hare' && hs > 0.5) root.position.y += Math.abs(Math.sin(m.walk)) * 0.15;
+    if (P.tail) { if (type === 'cow') P.tail.rotation.z = Math.sin(t * 2.5) * 0.25; else P.tail.rotation.y = Math.sin(t * 6) * 0.3; }
   }
   _removeMob(i) { const m = this.mobs[i]; this.group.remove(m.model.root); disposeModel(m.model); this.mobs.splice(i, 1); }
 
-  _shoot(from, dir) {
-    const mesh = new THREE.Mesh(this.shotGeo, this.shotMat);
+  /* ---------- pilar ---------- */
+  _arrowTemplate() {
+    if (this._arrowT) return this._arrowT;
+    const mat = this.arrowMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const grp = new THREE.Group();
+    const geos = this.arrowGeos = [boxGeo(0.04, 0.04, 0.62, '#8a5f33'), boxGeo(0.07, 0.07, 0.1, '#8a8c94'), boxGeo(0.12, 0.02, 0.14, '#ece8de'), boxGeo(0.02, 0.12, 0.14, '#ece8de')];
+    const [a, b, c, d] = geos.map(gg => new THREE.Mesh(gg, mat));
+    b.position.z = 0.33; c.position.z = -0.26; d.position.z = -0.26;
+    grp.add(a, b, c, d);
+    return (this._arrowT = grp);
+  }
+  /** Skjut en pil. owner: 'mob' (skadar spelaren) eller 'player' (skadar varelser) */
+  shootArrow(from, vel, owner, dmg) {
+    const mesh = this._arrowTemplate().clone();
     mesh.position.copy(from);
     this.group.add(mesh);
-    this.shots.push({ pos: from.clone(), vel: dir.clone().multiplyScalar(10), life: 5, mesh });
-    this.g.audio.play('zap', { vol: 0.5 * Math.max(0.2, 1 - from.distanceTo(this.g.player.pos) / 25) });
+    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 6, mesh, owner, dmg });
+    const d = from.distanceTo(this.g.player.pos);
+    try { this.g.audio.noise({ dur: 0.12, vol: 0.12 * Math.max(0.15, 1 - d / 25), freq: 1800, type: 'bandpass', to: 600 }); this.g.audio.tone({ freq: 240, to: 150, dur: 0.12, vol: 0.05 * Math.max(0.15, 1 - d / 25), type: 'triangle' }); } catch (e) { }
   }
   _updateShots(dt) {
     const pl = this.g.player, w = this.g.world;
+    if (this.arrowMat) lightColor(w, this.g.sky.skyLight, pl.pos.x, pl.pos.y + 1, pl.pos.z, this.arrowMat.color, 0.08);
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const s = this.shots[i];
-      s.life -= dt; s.pos.addScaledVector(s.vel, dt);
-      s.mesh.position.copy(s.pos); s.mesh.rotation.x += dt * 6; s.mesh.rotation.y += dt * 4;
-      if (Math.random() < 0.6) this.particle(s.pos.x, s.pos.y, s.pos.z, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, new THREE.Color('#b8ff8a'), 0.07, 0.4, -0.1, true);
+      s.life -= dt;
+      s.vel.y -= ARROW_G * dt;
+      s.pos.addScaledVector(s.vel, dt);
+      s.mesh.position.copy(s.pos); s.mesh.lookAt(tmpV.copy(s.pos).add(s.vel));
       let hit = false;
-      if (pl.alive && Math.abs(s.pos.x - pl.pos.x) < 0.5 && Math.abs(s.pos.z - pl.pos.z) < 0.5 && s.pos.y > pl.pos.y && s.pos.y < pl.pos.y + 1.85) {
-        this.g.damagePlayer(MOBS.ghost.dmg * this.g.diffDmg(), tmpV.copy(s.vel).setY(0).normalize(), 5, 'Lyktgast');
-        hit = true;
+      if (s.owner === 'mob') {
+        if (pl.alive && Math.abs(s.pos.x - pl.pos.x) < 0.45 && Math.abs(s.pos.z - pl.pos.z) < 0.45 && s.pos.y > pl.pos.y && s.pos.y < pl.pos.y + 1.85) {
+          this.g.damagePlayer(s.dmg, tmpV.copy(s.vel).setY(0).normalize(), 3, 'arrow');
+          hit = true;
+        }
+      } else {
+        for (const m of this.mobs) {
+          if (m.dead) continue;
+          if (Math.abs(s.pos.x - m.pos.x) < m.hw + 0.1 && Math.abs(s.pos.z - m.pos.z) < m.hw + 0.1 && s.pos.y > m.pos.y - 0.1 && s.pos.y < m.pos.y + m.h + 0.1) {
+            this.hitMob(m, s.dmg, tmpV.copy(s.vel).setY(0).normalize());
+            hit = true; break;
+          }
+        }
       }
       const b = w.get(Math.floor(s.pos.x), Math.floor(s.pos.y), Math.floor(s.pos.z));
-      if (hit || (b > 0 && T_SOLID[b]) || s.life <= 0) {
-        this.puff(s.pos.x, s.pos.y, s.pos.z, '#c8ff9a', 10, 0.3, true);
+      const wall = b > 0 && T_SOLID[b];
+      if (hit || wall || s.life <= 0 || s.pos.y < -5) {
+        if (wall) { this.puff(s.pos.x, s.pos.y, s.pos.z, '#8a7a66', 4, 0.2); matSound(this.g.audio, 'wood', 'hit', { vol: Math.max(0, 1 - s.pos.distanceTo(pl.pos) / 20) }); }
+        // spelarens pilar kan oftast plockas upp igen
+        if (wall && s.owner === 'player' && Math.random() < 0.75) this.drop(I.arrow, 1, s.pos.x - s.vel.x * dt * 1.5, s.pos.y - s.vel.y * dt * 1.5, s.pos.z - s.vel.z * dt * 1.5, 0, tmpV.set(0, 0, 0));
         this.group.remove(s.mesh); this.shots.splice(i, 1);
       }
     }
@@ -453,7 +550,7 @@ export class Entities {
     let pass = 0, host = 0;
     for (const m of this.mobs) { if (m.def.hostile) host++; else pass++; }
     // fredliga djur
-    if (pass < 9) {
+    if (pass < 10) {
       const a = Math.random() * Math.PI * 2, d = 22 + Math.random() * 30;
       const x = Math.floor(pl.pos.x + Math.cos(a) * d), z = Math.floor(pl.pos.z + Math.sin(a) * d);
       const c = w.getChunk(x >> 4, z >> 4);
@@ -462,10 +559,12 @@ export class Entities {
         const top = w.get(x, y, z);
         if (y > 0 && (top === B.grass || top === B.snowgrass || top === B.peat || top === B.snow) && (w.light(x, y + 1, z) >> 4) >= 10) {
           const bio = c.biomes[((z & 15) << 4) | (x & 15)];
-          let type = 'sheep', herd = 2 + (Math.random() * 3 | 0);
-          if (bio === BI.fjall) { type = Math.random() < 0.6 ? 'hare' : 'moose'; herd = type === 'hare' ? 1 + (Math.random() * 2 | 0) : 1; }
-          else if (bio === BI.gran || bio === BI.myr || bio === BI.tall) { const r = Math.random(); type = r < 0.4 ? 'moose' : r < 0.75 ? 'hare' : 'sheep'; herd = type === 'moose' ? 1 + (Math.random() < 0.3 ? 1 : 0) : type === 'hare' ? 1 + (Math.random() * 2 | 0) : 2; }
-          else if (bio === BI.bjork) { type = Math.random() < 0.6 ? 'sheep' : Math.random() < 0.5 ? 'hare' : 'moose'; herd = type === 'sheep' ? 2 + (Math.random() * 2 | 0) : 1; }
+          const r = Math.random();
+          let type;
+          if (bio === BI.fjall) type = r < 0.6 ? 'sheep' : r < 0.85 ? 'cow' : 'chicken';
+          else if (bio === BI.gran || bio === BI.myr || bio === BI.tall) type = r < 0.35 ? 'pig' : r < 0.65 ? 'chicken' : r < 0.85 ? 'cow' : 'sheep';
+          else type = r < 0.3 ? 'cow' : r < 0.6 ? 'sheep' : r < 0.8 ? 'pig' : 'chicken';
+          const herd = type === 'chicken' ? 1 + (Math.random() * 3 | 0) : type === 'pig' ? 2 + (Math.random() * 2 | 0) : 2 + (Math.random() * 3 | 0);
           for (let k = 0; k < herd; k++) {
             const hx = x + (Math.random() * 4 | 0) - 2, hz = z + (Math.random() * 4 | 0) - 2;
             const hy = w.topY(hx, hz);
@@ -474,9 +573,9 @@ export class Entities {
         }
       }
     }
-    // fientliga
+    // fientliga (bara i mörker: natt, grottor)
     // första natten är snällare (färre fiender) så att nybörjare hinner lära sig
-    const cap = g.difficulty === 0 ? 0 : Math.round((g.difficulty === 2 ? 12 : 6) * (g.day <= 1 ? 0.5 : 1));
+    const cap = g.difficulty === 0 ? 0 : Math.round((g.difficulty === 2 ? 12 : 7) * (g.day <= 1 ? 0.5 : 1));
     if (host < cap && !pl.creative) {
       for (let tr = 0; tr < 4; tr++) {
         const a = Math.random() * Math.PI * 2, d = 16 + Math.random() * 22;
@@ -496,23 +595,45 @@ export class Entities {
         const eff = Math.max((L >> 4) * g.sky.daylight, L & 15);
         if (eff >= 6) continue;
         if (Math.abs(y - pl.pos.y) > 24) continue;
-        let type;
         const r = Math.random();
-        const bio = c.biomes[((z & 15) << 4) | (x & 15)];
-        if (y < top - 4) type = r < 0.45 ? 'giant' : r < 0.85 ? 'wolf' : 'ghost';
-        else type = r < 0.5 ? 'wolf' : r < 0.75 ? 'ghost' : (bio === BI.gran || bio === BI.bjork || bio === BI.myr ? 'giant' : 'wolf');
-        if (type === 'giant' && (w.get(x, y + 2, z) !== 0)) type = 'wolf';
-        const n = type === 'wolf' && Math.random() < 0.5 ? 2 : 1;
-        for (let k = 0; k < n; k++) this.spawnMob(type, x + 0.5 + k * 0.6, y + (type === 'ghost' ? 1 : 0), z + 0.5);
+        let type = r < 0.42 ? 'zombie' : r < 0.75 ? 'skeleton' : 'spider';
+        if (type !== 'spider' && w.get(x, y + 1, z) !== 0) type = 'spider';
+        const n = type === 'zombie' && Math.random() < 0.35 ? 2 : 1;
+        for (let k = 0; k < n; k++) this.spawnMob(type, x + 0.5 + k * 0.6, y, z + 0.5);
         break;
       }
     }
-    // ylande om natten
+    // avlägsna stön i natten
     this.howlT -= 1.2;
-    if (this.howlT <= 0 && g.sky.daylight < 0.2) { this.howlT = 25 + Math.random() * 40; mobSound(g.audio, 'wolf', 'howl', { vol: 0.5, pan: Math.random() * 1.6 - 0.8 }); }
+    if (this.howlT <= 0 && g.sky.daylight < 0.2) { this.howlT = 30 + Math.random() * 40; mobSound(g.audio, 'zombie', 'idle', { vol: 0.35, pan: Math.random() * 1.6 - 0.8 }); }
+  }
+
+  /* ---------- tänd TNT ---------- */
+  primeTnt(x, y, z, fuse) {
+    const mesh = new THREE.Mesh(blockGeo(B.tnt), this.g.mats.entity);
+    const e = { pos: new THREE.Vector3(x + 0.5, y, z + 0.5), vel: new THREE.Vector3((Math.random() - 0.5) * 1.5, 3, (Math.random() - 0.5) * 1.5), fuse, mesh };
+    const self = this;
+    mesh.onBeforeRender = function (r, s, c, g, mat) { const L = self.g.world.light(Math.floor(e.pos.x), Math.floor(e.pos.y + 0.5), Math.floor(e.pos.z)); const fl = Math.sin(e.fuse * 14) > 0.3 ? 1 : 0; mat.uniforms.uEntLight.value.set(Math.max((L >> 4) / 15, fl), Math.max((L & 15) / 15, fl)); mat.uniformsNeedUpdate = true; };
+    this.group.add(mesh);
+    (this.tnts || (this.tnts = [])).push(e);
+    try { this.g.audio.noise({ dur: 0.6, vol: 0.12, freq: 3000, type: 'highpass' }); } catch (er) { }
+  }
+  _updateTnt(dt) {
+    if (!this.tnts || !this.tnts.length) return;
+    for (let i = this.tnts.length - 1; i >= 0; i--) {
+      const e = this.tnts[i];
+      e.fuse -= dt;
+      e.vel.y = Math.max(e.vel.y - 25 * dt, -30); e.vel.x *= Math.pow(0.1, dt); e.vel.z *= Math.pow(0.1, dt);
+      moveBody(this.g.world, e.pos, e.vel, dt, { hw: 0.49, h: 0.98 });
+      const sc = 1 + Math.max(0, 0.6 - e.fuse) * 0.25;
+      e.mesh.position.set(e.pos.x, e.pos.y + 0.5, e.pos.z); e.mesh.scale.setScalar(sc);
+      if (Math.random() < dt * 12) this.particle(e.pos.x, e.pos.y + 1.05, e.pos.z, 0, 1, 0, FIRE[2], 0.06, 0.4, -0.1, true);
+      if (e.fuse <= 0) { this.group.remove(e.mesh); this.tnts.splice(i, 1); this.g.explode(tmpV.set(e.pos.x, e.pos.y + 0.5, e.pos.z).clone()); }
+    }
   }
 
   update(dt) {
+    this._updateTnt(dt);
     this._updateParticles(dt);
     this._updateDrops(dt);
     this._updateFalling(dt);
@@ -520,9 +641,11 @@ export class Entities {
     this._updateShots(dt);
     this._spawnTick(dt);
   }
-  /** Skuggvarelser i närheten (för sömn) */
-  hostileNear(p, r) { return this.mobs.some(m => !m.dead && m.def.hostile && m.pos.distanceTo(p) < r); }
+  /** Fientliga varelser i närheten (för sömn) */
+  hostileNear(p, r) { return this.mobs.some(m => !m.dead && m.def.hostile && !m.calm && m.pos.distanceTo(p) < r); }
   clearHostiles() { for (let i = this.mobs.length - 1; i >= 0; i--) if (this.mobs[i].def.hostile) this._removeMob(i); }
+  /** Antal levande varelser per typ (för F3) */
+  census() { const c = {}; for (const m of this.mobs) if (!m.dead) c[m.def.name] = (c[m.def.name] || 0) + 1; return Object.entries(c).map(([k, v]) => k + ' ' + v).join(', '); }
 }
 
 /** Frigör en lådmodells geometrier och material (delade glöd-/ögonmaterial lämnas kvar) */

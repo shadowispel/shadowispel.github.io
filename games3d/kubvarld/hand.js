@@ -26,7 +26,7 @@ function knitTexture(kind) {
   const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-import { BLOCKS, M_CROSS } from './blocks.js';
+import { BLOCKS, ITEMS, M_CROSS } from './blocks.js';
 
 export class Hand {
   constructor(game) {
@@ -54,7 +54,7 @@ export class Hand {
     this.item = new THREE.Group();
     this.root.add(arm, this.item);
     this.layout = null; // { xr, yt } snabbfältets högerkant/överkant i NDC
-    this.curId = -1; this.equip = 0; this.swing = 0; this.eat = 0; this.light = new THREE.Color(1, 1, 1);
+    this.curId = -1; this.equip = 0; this.swing = 0; this.eat = 0; this.pull = 0; this.light = new THREE.Color(1, 1, 1);
     this._mesh = null;
   }
   dispose() { this.arm.children.forEach(c => c.geometry.dispose()); this.armMats.forEach(m => m.dispose()); this.texs.forEach(t => t.dispose()); this.itemMatL.dispose(); }
@@ -78,7 +78,7 @@ export class Hand {
       m.onBeforeRender = function (r, s, c, g, mat) { mat.uniforms.uEntLight.value.set(self.sky, self.blk); mat.uniformsNeedUpdate = true; };
     } else {
       m = new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMatL);
-      const tool = id >= 280;
+      const tool = !!(ITEMS[id] && ITEMS[id].tool);
       const plant = id < 256 && BLOCKS[id] && BLOCKS[id].model === M_CROSS;
       m.scale.setScalar(tool ? 0.58 : 0.34);
       m.rotation.set(tool ? -0.2 : 0, tool ? -1.35 : -0.3, tool ? 0.35 : 0);
@@ -124,6 +124,7 @@ export class Hand {
     this.root.scale.setScalar(sc);
     this.root.position.set(ax + Math.sin(bob) * 0.025 * ba - s * 0.22, ay - Math.abs(Math.cos(bob)) * 0.035 * ba - this.equip * 0.5 + s * 0.1, -0.95 - s * 0.15);
     this.root.rotation.set(-s * 0.7 + s2 * 0.1, -s * 0.5, s * 0.2);
+    if (this.pull > 0) { this.root.position.x -= 0.25 * this.pull; this.root.position.z += 0.18 * this.pull; this.root.rotation.z += 0.5 * this.pull; this.root.position.y += Math.sin(performance.now() * 0.05) * 0.004 * this.pull; }
     if (this.eat > 0) { this.root.position.set(ax * 0.45, -0.36 + Math.abs(Math.sin(this.eat * 14)) * 0.04, -0.6); this.root.rotation.set(0.3, 0.7, 0.1); }
     this.arm.rotation.order = 'YXZ';
     this.arm.position.set(0.04, -0.24, 0.32);
