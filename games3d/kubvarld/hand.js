@@ -91,7 +91,7 @@ export class Hand {
     } else {
       m = new THREE.Mesh(extrudedGeo(this.g.atlas, id), this.itemMatL);
       const tool = !!(ITEMS[id] && ITEMS[id].tool);
-      const plant = id < 256 && BLOCKS[id] && BLOCKS[id].model === M_CROSS;
+      const plant = id > 0 && (id < 256 || id >= 400) && BLOCKS[id] && BLOCKS[id].model === M_CROSS;
       m.scale.setScalar(tool ? 0.58 : 0.34);
       m.rotation.set(tool ? -0.2 : 0, tool ? -1.35 : -0.3, tool ? 0.35 : 0);
       m.position.set(tool ? 0.02 : 0.04, tool ? 0.2 : plant ? 0.12 : 0.1, tool ? -0.08 : -0.02);
@@ -109,7 +109,8 @@ export class Hand {
     this.sky = (L >> 4) / 15; this.blk = (L & 15) / 15;
     const sl = this.g.sky.skyLight;
     const sf = this.sky ? Math.pow(0.8, 15 - (L >> 4)) : 0, bf = this.blk ? Math.pow(0.8, 15 - (L & 15)) : 0;
-    this.light.setRGB(Math.max(sl.r * sf, bf, 0.05), Math.max(sl.g * sf, bf * 0.78, 0.05), Math.max(sl.b * sf, bf * 0.52, 0.05));
+    const am = this.g.mats.uniforms.uAmbient.value;
+    this.light.setRGB(Math.max(sl.r * sf, bf, 0.05, am.r * 1.3), Math.max(sl.g * sf, bf * 0.78, 0.05, am.g * 1.3), Math.max(sl.b * sf, bf * 0.52, 0.05, am.b * 1.3));
     for (const m of this.armMats) m.color.copy(this.light).multiplyScalar(0.72);
     this.itemMatL.color.copy(this.light).multiplyScalar(0.62);
     // pose

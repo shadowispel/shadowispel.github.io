@@ -316,3 +316,20 @@
   .kv-skpanel { padding: 14px 10px; }
   .kv-skpreview { width: 150px !important; height: 172px !important; }
 }
+
+/* ---------- utökning 3: handel, eldport, väktare ---------- */
+.kv-trades { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; margin: 4px 0 10px; padding-right: 4px; }
+.kv-trade { display: grid; grid-template-columns: auto 24px auto 1fr auto; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); opacity: .62; }
+.kv-trade.can { opacity: 1; border-color: rgba(58, 212, 122, .45); background: rgba(58, 212, 122, .08); }
+.kv-tside { display: flex; gap: 4px; }
+.kv-titem { position: relative; width: 36px; height: 36px; display: inline-block; }
+.kv-titem img { width: 36px; height: 36px; image-rendering: pixelated; }
+.kv-titem b { position: absolute; right: -2px; bottom: -3px; font-size: 13px; color: #fff; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
+.kv-tarrow { color: #9fb2d8; font-size: 18px; text-align: center; }
+.kv-tname { font-size: 13px; color: #d8e2f4; }
+.kv-trade .btn[disabled] { opacity: .45; cursor: default; }
+.kv-portal { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255,140,40,.15) 0%, rgba(200,40,10,.55) 55%, rgba(80,0,0,.9) 100%); mix-blend-mode: screen; transition: opacity .15s; z-index: 3; }
+.kv-boss { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); width: min(420px, 70vw); text-align: center; color: #ffd8b0; font: 700 14px Rubik, system-ui, sans-serif; text-shadow: 0 1px 3px #000; pointer-events: none; z-index: 4; }
+.kv-boss .bar { height: 10px; margin-top: 4px; border-radius: 6px; background: rgba(20,6,4,.75); border: 1px solid rgba(255,140,60,.5); overflow: hidden; }
+.kv-boss .bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff5a1a, #ffb040); transform-origin: left; }
+.kv-burn { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center bottom, rgba(255,120,30,0) 40%, rgba(255,90,20,.35) 100%); transition: opacity .2s; z-index: 2; }

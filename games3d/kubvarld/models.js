@@ -1,6 +1,6 @@
 /** Lådmodeller (spelare, djur, varelser) och föremålsgeometrier. */
 import * as THREE from 'three';
-import { BLOCKS, T_FACE, M_CUBE, M_BOX, itemTile } from './blocks.js';
+import { BLOCKS, T_FACE, M_CUBE, M_BOX, itemTile, isBlock } from './blocks.js';
 import { mulberry } from './noise.js';
 
 const tmpC = new THREE.Color();
@@ -36,6 +36,17 @@ export const AMBER_MAT = new THREE.MeshBasicMaterial({ color: 0xffa424 });
 export const BLACK_MAT = new THREE.MeshBasicMaterial({ color: 0x111111 });
 const ZOMBIE_EYE = new THREE.MeshBasicMaterial({ color: 0xe8e070 });
 const SKEL_EYE = new THREE.MeshBasicMaterial({ color: 0x9fd8ff });
+export const EMBER_MAT = new THREE.MeshBasicMaterial({ color: 0xff7a24 });
+export const GLOW_MAT = new THREE.MeshBasicMaterial({ color: 0xffd060 });
+const LAVA_MAT = new THREE.MeshBasicMaterial({ color: 0xff5a1a });
+/** Bybornas yrken: tröja, förkläde/detalj och huvudbonad */
+export const PROFS = {
+  bonde: { name: 'Bonde', def: 'bonden', shirt: '#6a8a3a', apron: '#c8b47a', hat: 'straw' },
+  smed: { name: 'Smed', def: 'smeden', shirt: '#5a4a3e', apron: '#2e2a28', hat: 'none' },
+  bibliotekarie: { name: 'Bibliotekarie', def: 'bibliotekarien', shirt: '#3a4e8a', apron: '#d8d0c0', hat: 'glasses' },
+  fiskare: { name: 'Fiskare', def: 'fiskaren', shirt: '#3a6a7a', apron: '#e8c030', hat: 'sou' },
+  kartograf: { name: 'Kartograf', def: 'kartografen', shirt: '#7a2e3a', apron: '#c8a060', hat: 'cap' }
+};
 
 /**
  * Bygger en modell. Returnerar { root, mat, parts:{...}, height, width }
@@ -264,6 +275,94 @@ export function buildModel(type) {
     }
     return { root, mat, parts: P, height: 0.95, width: 1.2 };
   }
+  if (type.startsWith('villager')) { // bybo: rund mössa/hatt, rosiga kinder, skägg eller flätor och yrkesförkläde
+    const pr = PROFS[type.split(':')[1]] || PROFS.bonde;
+    const Sk = '#e4b896';
+    P.legL = add(body, mat, 0.22, 0.6, 0.22, '#4a3a2e', [-0.12, 0.6, 0], { pivot: [0, 0.3, 0] });
+    P.legR = add(body, mat, 0.22, 0.6, 0.22, '#4a3a2e', [0.12, 0.6, 0], { pivot: [0, 0.3, 0] });
+    add(P.legL, mat, 0.23, 0.1, 0.25, '#2a2018', [0, -0.55, 0.01]); add(P.legR, mat, 0.23, 0.1, 0.25, '#2a2018', [0, -0.55, 0.01]);
+    P.torso = add(body, mat, 0.52, 0.66, 0.3, pr.shirt, [0, 0.93, 0]);
+    add(P.torso, mat, 0.4, 0.5, 0.02, pr.apron, [0, -0.06, 0.16]);
+    add(P.torso, mat, 0.54, 0.07, 0.32, '#3a2a1e', [0, -0.18, 0]);
+    P.armL = add(body, mat, 0.18, 0.6, 0.18, pr.shirt, [-0.35, 1.2, 0], { pivot: [0, 0.26, 0] });
+    P.armR = add(body, mat, 0.18, 0.6, 0.18, pr.shirt, [0.35, 1.2, 0], { pivot: [0, 0.26, 0] });
+    add(P.armL, mat, 0.19, 0.14, 0.19, Sk, [0, -0.52, 0]); add(P.armR, mat, 0.19, 0.14, 0.19, Sk, [0, -0.52, 0]);
+    P.head = add(body, mat, 0.5, 0.46, 0.46, Sk, [0, 1.26, 0], { pivot: [0, -0.23, 0] });
+    add(P.head, null, 0.07, 0.07, 0.02, '#222', [-0.11, 0.24, 0.235], { mat: BLACK_MAT });
+    add(P.head, null, 0.07, 0.07, 0.02, '#222', [0.11, 0.24, 0.235], { mat: BLACK_MAT });
+    add(P.head, mat, 0.08, 0.06, 0.02, '#e8907e', [-0.18, 0.14, 0.236]); add(P.head, mat, 0.08, 0.06, 0.02, '#e8907e', [0.18, 0.14, 0.236]);
+    add(P.head, mat, 0.1, 0.08, 0.05, '#d8a080', [0, 0.17, 0.25]);
+    const beard = type.length % 2 ? '#c8c0b0' : '#8a5a3a';
+    if (pr.hat !== 'glasses') { add(P.head, mat, 0.4, 0.16, 0.06, beard, [0, 0.02, 0.24]); add(P.head, mat, 0.18, 0.12, 0.06, beard, [0, -0.08, 0.24]); }
+    else { add(P.head, mat, 0.1, 0.32, 0.1, '#b8803a', [-0.27, 0.1, -0.05]); add(P.head, mat, 0.1, 0.32, 0.1, '#b8803a', [0.27, 0.1, -0.05]); add(P.head, mat, 0.12, 0.12, 0.02, '#c8a050', [-0.11, 0.24, 0.245]); add(P.head, mat, 0.12, 0.12, 0.02, '#c8a050', [0.11, 0.24, 0.245]); add(P.head, mat, 0.5, 0.12, 0.48, '#b8803a', [0, 0.44, -0.01]); }
+    if (pr.hat === 'straw') { add(P.head, mat, 0.72, 0.05, 0.72, '#e0c060', [0, 0.47, 0]); add(P.head, mat, 0.46, 0.16, 0.46, '#d4b050', [0, 0.56, 0]); add(P.head, mat, 0.47, 0.04, 0.47, '#a83a2a', [0, 0.5, 0]); }
+    else if (pr.hat === 'sou') { add(P.head, mat, 0.6, 0.18, 0.62, '#e8c030', [0, 0.5, -0.04]); add(P.head, mat, 0.64, 0.04, 0.3, '#e8c030', [0, 0.42, -0.28]); }
+    else if (pr.hat === 'cap') { add(P.head, mat, 0.52, 0.16, 0.5, pr.shirt, [0, 0.48, 0]); add(P.head, mat, 0.12, 0.12, 0.12, '#e8d8b0', [0, 0.62, 0]); add(P.head, mat, 0.52, 0.04, 0.12, '#3a2a1e', [0, 0.4, 0.24]); }
+    else if (pr.hat === 'none') { add(P.head, mat, 0.5, 0.1, 0.48, '#3a2a20', [0, 0.46, -0.01]); add(P.torso, mat, 0.3, 0.1, 0.05, '#6c6f78', [0.12, 0.1, 0.18]); }
+    return { root, mat, parts: P, height: 1.6, width: 0.55 };
+  }
+  if (type === 'glodgast') { // glödgast: svävande askmask med glödande kärna och fladdrande eldslöjor
+    P.body = add(body, mat, 0.9, 0.8, 0.9, '#3a2622', [0, 1.2, 0]);
+    add(P.body, null, 0.5, 0.42, 0.04, '#fff', [0, 0.04, 0.46], { mat: EMBER_MAT });
+    add(P.body, null, 0.2, 0.14, 0.04, '#fff', [-0.16, 0.12, 0.485], { mat: GLOW_MAT });
+    add(P.body, null, 0.2, 0.14, 0.04, '#fff', [0.16, 0.12, 0.485], { mat: GLOW_MAT });
+    add(P.body, null, 0.3, 0.06, 0.04, '#111', [0, -0.08, 0.485], { mat: BLACK_MAT });
+    add(P.body, mat, 0.96, 0.14, 0.96, '#5a3a30', [0, 0.38, 0]);
+    for (const [x, z] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) add(P.body, mat, 0.16, 0.2, 0.16, '#6a4436', [x, 0.52, z]);
+    P.veils = [];
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; const v = add(body, null, 0.12, 0.7, 0.12, '#fff', [Math.cos(a) * 0.32, 0.8, Math.sin(a) * 0.32], { pivot: [0, 0.35, 0], mat: i % 2 ? EMBER_MAT : LAVA_MAT }); P.veils.push(v); }
+    return { root, mat, parts: P, height: 1.7, width: 1.0 };
+  }
+  if (type === 'askvandrare') { // askvandrare: grå, sprucken gestalt med glödande ådror, går i flock
+    const A = '#5a5552', A2 = '#46423f';
+    P.legL = add(body, mat, 0.24, 0.8, 0.24, A2, [-0.14, 0.8, 0], { pivot: [0, 0.4, 0] });
+    P.legR = add(body, mat, 0.24, 0.8, 0.24, A2, [0.14, 0.8, 0], { pivot: [0, 0.4, 0] });
+    P.torso = add(body, mat, 0.56, 0.74, 0.3, A, [0, 1.2, 0]);
+    add(P.torso, null, 0.04, 0.5, 0.02, '#fff', [0.08, 0.0, 0.16], { mat: EMBER_MAT });
+    add(P.torso, null, 0.22, 0.04, 0.02, '#fff', [-0.04, 0.14, 0.16], { mat: EMBER_MAT });
+    add(P.torso, mat, 0.6, 0.16, 0.34, '#3a3634', [0, 0.32, 0]);
+    P.armL = add(body, mat, 0.2, 0.8, 0.2, A, [-0.39, 1.5, 0], { pivot: [0, 0.35, 0] });
+    P.armR = add(body, mat, 0.2, 0.8, 0.2, A, [0.39, 1.5, 0], { pivot: [0, 0.35, 0] });
+    add(P.armR, null, 0.03, 0.4, 0.02, '#fff', [0, -0.1, 0.11], { mat: EMBER_MAT });
+    P.head = add(body, mat, 0.42, 0.44, 0.42, '#6a6460', [0, 1.57, 0], { pivot: [0, -0.22, 0] });
+    add(P.head, null, 0.12, 0.06, 0.02, '#fff', [-0.1, 0.24, 0.215], { mat: GLOW_MAT });
+    add(P.head, null, 0.12, 0.06, 0.02, '#fff', [0.1, 0.24, 0.215], { mat: GLOW_MAT });
+    add(P.head, mat, 0.46, 0.14, 0.46, '#3a3634', [0, 0.42, 0]);
+    add(P.head, mat, 0.1, 0.2, 0.1, '#3a3634', [-0.14, 0.56, 0]); add(P.head, mat, 0.1, 0.14, 0.1, '#3a3634', [0.12, 0.52, 0.06]);
+    return { root, mat, parts: P, height: 1.95, width: 0.6 };
+  }
+  if (type === 'salamander') { // eldsalamander: låg, lång ödla i glödrött med svarta fläckar
+    P.body = add(body, mat, 0.5, 0.3, 1.1, '#d8401a', [0, 0.36, 0]);
+    for (const [x, z] of [[-0.12, 0.3], [0.14, -0.1], [-0.1, -0.35], [0.12, 0.42]]) add(P.body, mat, 0.16, 0.02, 0.16, '#1a1010', [x, 0.16, z]);
+    add(P.body, null, 0.08, 0.04, 0.9, '#fff', [0, 0.17, 0], { mat: GLOW_MAT });
+    P.head = add(body, mat, 0.42, 0.26, 0.4, '#c8361a', [0, 0.38, 0.7], { pivot: [0, 0, -0.18] });
+    add(P.head, null, 0.08, 0.08, 0.02, '#fff', [-0.12, 0.06, 0.205], { mat: GLOW_MAT });
+    add(P.head, null, 0.08, 0.08, 0.02, '#fff', [0.12, 0.06, 0.205], { mat: GLOW_MAT });
+    P.tail = add(body, mat, 0.22, 0.18, 0.8, '#b8301a', [0, 0.34, -0.9], { pivot: [0, 0, 0.4] });
+    add(P.tail, mat, 0.14, 0.12, 0.4, '#ff8a3a', [0, 0, -0.55]);
+    P.legs = [];
+    for (const [x, z] of [[-0.32, 0.35], [0.32, 0.35], [-0.32, -0.3], [0.32, -0.3]]) P.legs.push(add(body, mat, 0.14, 0.26, 0.14, '#a82a14', [x, 0.26, z], { pivot: [0, 0.13, 0] }));
+    return { root, mat, parts: P, height: 0.6, width: 0.8 };
+  }
+  if (type === 'eldjatte') { // eldjätten: borgens väktare – basaltkropp med lavaådror, krona av glödsten
+    const Ba = '#5a4c4c', Ba2 = '#44383a';
+    P.legL = add(body, mat, 0.6, 1.3, 0.6, Ba2, [-0.4, 1.3, 0], { pivot: [0, 0.65, 0] });
+    P.legR = add(body, mat, 0.6, 1.3, 0.6, Ba2, [0.4, 1.3, 0], { pivot: [0, 0.65, 0] });
+    add(P.legL, null, 0.06, 0.8, 0.02, '#fff', [0.1, 0, 0.31], { mat: LAVA_MAT }); add(P.legR, null, 0.06, 0.8, 0.02, '#fff', [-0.1, 0, 0.31], { mat: LAVA_MAT });
+    P.torso = add(body, mat, 1.4, 1.3, 0.8, Ba, [0, 2.2, 0]);
+    add(P.torso, null, 0.5, 0.5, 0.04, '#fff', [0, 0.1, 0.41], { mat: EMBER_MAT });
+    add(P.torso, null, 0.08, 1.0, 0.04, '#fff', [-0.4, 0, 0.41], { mat: LAVA_MAT }); add(P.torso, null, 0.08, 0.8, 0.04, '#fff', [0.45, 0.1, 0.41], { mat: LAVA_MAT });
+    add(P.torso, mat, 1.6, 0.36, 0.9, '#3a3436', [0, 0.6, 0]);
+    P.armL = add(body, mat, 0.5, 1.5, 0.5, Ba, [-1.0, 2.7, 0], { pivot: [0, 0.6, 0] });
+    P.armR = add(body, mat, 0.5, 1.5, 0.5, Ba, [1.0, 2.7, 0], { pivot: [0, 0.6, 0] });
+    add(P.armL, mat, 0.62, 0.5, 0.62, '#3a3436', [0, -1.25, 0]); add(P.armR, mat, 0.62, 0.5, 0.62, '#3a3436', [0, -1.25, 0]);
+    add(P.armR, null, 0.06, 0.9, 0.02, '#fff', [0, -0.3, 0.26], { mat: LAVA_MAT });
+    P.head = add(body, mat, 0.8, 0.7, 0.7, Ba, [0, 2.85, 0.05], { pivot: [0, -0.35, 0] });
+    add(P.head, null, 0.2, 0.1, 0.02, '#fff', [-0.18, 0.36, 0.36], { mat: GLOW_MAT }); add(P.head, null, 0.2, 0.1, 0.02, '#fff', [0.18, 0.36, 0.36], { mat: GLOW_MAT });
+    add(P.head, null, 0.4, 0.06, 0.02, '#fff', [0, 0.14, 0.36], { mat: EMBER_MAT });
+    for (const x of [-0.3, 0, 0.3]) add(P.head, null, 0.14, x === 0 ? 0.36 : 0.24, 0.14, '#fff', [x, 0.78, 0], { mat: GLOW_MAT });
+    return { root, mat, parts: P, height: 3.6, width: 1.5 };
+  }
   return { root, mat, parts: P, height: 1, width: 1 };
 }
 function legs4(P, body, mat, w, h, color, sx, fz, y) {
@@ -341,4 +440,4 @@ export function blockGeo(id) {
   blockGeoCache.set(id, g);
   return g;
 }
-export function isCubeItem(id) { const d = id < 256 ? BLOCKS[id] : null; return !!(d && (d.model === M_CUBE || (d.model === M_BOX && d.boxes && d.boxes.length <= 2 && !d.door && !d.bed && d.light === 0))); }
+export function isCubeItem(id) { const d = isBlock(id) ? BLOCKS[id] : null; return !!(d && (d.model === M_CUBE || (d.model === M_BOX && d.boxes && d.boxes.length <= 2 && !d.door && !d.bed && d.light === 0))); }

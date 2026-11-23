@@ -51,6 +51,8 @@ export class Player {
     this.headInWater = isWater(w.get(fx, Math.floor(this.pos.y + this.camY + 0.08), fz));
     const climbAt = id => id > 0 && BLOCKS[id] && BLOCKS[id].climb;
     this.onLadder = climbAt(feet) || climbAt(waist);
+    const webAt = id => id > 0 && BLOCKS[id] && BLOCKS[id].web;
+    this.webbed = webAt(feet) || webAt(waist);
     if (!this.flying && !this.inWater) {
       const wantSneak = !!ctl.sneak;
       if (!wantSneak && this.sneaking) { if (!overlaps(w, this.pos.x, this.pos.y, this.pos.z, HW, H)) this.sneaking = false; }
@@ -63,6 +65,7 @@ export class Player {
     let speed = this.flying ? (this.sprinting ? 21 : 10.9) : this.sneaking ? 1.35 : this.sprinting ? 5.6 : 4.3;
     if (this.inWater && !this.flying) speed *= 0.55;
     if (this.blocking && !this.flying) speed = Math.min(speed, 1.6);
+    if (this.webbed && !this.flying) speed *= 0.2;
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let mx = ctl.mx, mz = ctl.mz; const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
     const wx = (-sy * mz + cy * mx) * speed, wz = (-cy * mz - sy * mx) * speed;
@@ -90,6 +93,7 @@ export class Player {
       this.vel.y = Math.max(this.vel.y - 28 * dt, -48);
       if (ctl.jump && this.ground) { this.vel.y = 8.6; this.g.onJump(); if (this.sprinting) { this.vel.x += -sy * 1.2; this.vel.z += -cy * 1.2; } }
     }
+    if (this.webbed && !this.flying) { this.vel.y = Math.max(-1.1, Math.min(this.vel.y, 1.2)); this.fallY = null; }
     const wasGround = this.ground;
     const oldY = this.pos.y;
     const wantClimb = this.inWater && !this.flying && (ctl.jump || ml > 0.3);

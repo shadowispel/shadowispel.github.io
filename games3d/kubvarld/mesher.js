@@ -4,12 +4,12 @@
  */
 import {
   CX, CY, CZ, T_OPAQUE, T_ATT, T_EMIT, T_MODEL, T_CULLSELF, T_PASS, T_FLAGS, T_FACE, T_BOXES, T_TINTTOP,
-  M_CUBE, M_CROSS, M_BOX, M_LIQUID, F_LEAF, F_TINT, F_LIQUID, F_WAVE, WATER, B, T_CONN, fenceLinks, fenceBoxes
+  M_CUBE, M_CROSS, M_BOX, M_LIQUID, F_LEAF, F_TINT, F_LIQUID, F_WAVE, F_PORTAL, WATER, B, T_CONN, T_LAVA, fenceLinks, fenceBoxes
 } from './blocks.js';
 import { hash3 } from './noise.js';
 
 const W = 48, HP = CY + 2, WW = W * W, VOL = WW * HP;
-const vol = new Uint8Array(VOL), sky = new Uint8Array(VOL), blk = new Uint8Array(VOL);
+const vol = new Uint16Array(VOL), sky = new Uint8Array(VOL), blk = new Uint8Array(VOL);
 const QSIZE = 1 << 20, QMASK = QSIZE - 1;
 const queue = new Int32Array(QSIZE);
 const colTop = new Int16Array(W * W);
@@ -241,7 +241,8 @@ function emitCross(i, x, y, z, b, wx, wz, biomes) {
 
 /* ---------- lådmodeller (fackla, dörr, säng, platta, lykta) ---------- */
 function emitBoxes(i, x, y, z, b) {
-  const out = outs[0];
+  const portal = T_FLAGS[b] & F_PORTAL, lava = T_LAVA[b];
+  const out = outs[portal ? 1 : 0];
   const def = T_BOXES[b]; if (!def) return;
   const sk0 = sky[i], bl0 = blk[i];
   let boxes = def.boxes;
@@ -260,8 +261,11 @@ function emitBoxes(i, x, y, z, b) {
       if (boundary) {
         const n = i + NOFF[d];
         if (T_OPAQUE[vol[n]]) continue;
+        // inre ytor i lavasjöar och portaler ritas inte
+        if (lava && T_LAVA[vol[n]]) continue;
+        if (portal && vol[n] === b) continue;
         sk = Math.max(sk, sky[n]); bl = Math.max(bl, blk[n]);
-      }
+      } else if (lava && d === 2 && T_LAVA[vol[i + WW]]) continue;
       if (T_EMIT[b]) { bl = Math.max(bl, T_EMIT[b]); }
       const layer = T_FACE[b * 6 + d];
       // hörn i (u,v) – samma konvention som greedy
@@ -282,7 +286,7 @@ function emitBoxes(i, x, y, z, b) {
           tu = p[0]; tv = p[2];
           for (let r = 0; r < def.topRot; r++) { const t = tu; tu = 16 - tv; tv = t; }
         }
-        out.vert(v, x * 16 + p[0], y * 16 + p[1], z * 16 + p[2], tu, tv, layer, d, 0, 0, sk, bl, 3);
+        out.vert(v, x * 16 + p[0], y * 16 + p[1], z * 16 + p[2], tu, tv, layer, d | portal, 0, 0, sk, bl, 3);
       }
       out.next();
     }
@@ -348,7 +352,7 @@ function emitLiquid(i, x, y, z, b) {
 }
 
 /**
- * chunks: 9 Uint8Array (ordning (dz+1)*3+(dx+1)), maxYs: 9 tal, biomes: mittchunkens biomkarta (256), fancy: bool
+ * chunks: 9 Uint16Array (ordning (dz+1)*3+(dx+1)), maxYs: 9 tal, biomes: mittchunkens biomkarta (256), fancy: bool
  * cx,cz: mittchunkens koordinater (för jitter).
  */
 export function meshChunk(chunks, maxYs, biomes, fancy, cx, cz) {

@@ -27,6 +27,9 @@ export const TILES = [
   'spark_ore', 'wire_0', 'wire_1', 'wire_2', 'wire_3', 'spark_torch', 'spark_torch_off', 'spark_torch_top', 'spark_torch_top_off',
   'repeater_top', 'repeater_top_on', 'repeater_side', 'lamp', 'lamp_on', 'piston_side', 'piston_front', 'piston_back', 'piston_sticky_front',
   'dispenser_front', 'observer_front', 'observer_back', 'observer_side', 'observer_top', 'daylight_top', 'note_block', 'button',
+  // utökning 3: strukturer och Muspelheim (blockrutor måste ligga före föremålen – lagerindex < 256)
+  'cobweb', 'rail', 'portal', 'smithing_top', 'smithing_side', 'smithing_front', 'askesten', 'basalt_side', 'basalt_top', 'basalt_bricks',
+  'glodsten', 'svavelsand', 'urmalm', 'eldsvamp', 'glodrot', 'spout_side', 'spout_top', 'hay_top', 'hay_side',
   // föremål
   'i_stick', 'i_coal', 'i_iron', 'i_gold', 'i_diamond', 'i_bone_meal', 'i_lingon', 'i_cloudberry', 'i_chanterelle', 'i_meat', 'i_meat_cooked',
   'i_pork', 'i_pork_cooked', 'i_chanterelle_fried', 'i_door', 'i_bed', 'i_string', 'i_leather',
@@ -43,7 +46,9 @@ export const TILES = [
   'i_pick_0', 'i_axe_0', 'i_shovel_0', 'i_sword_0', 'i_pick_1', 'i_axe_1', 'i_shovel_1', 'i_sword_1',
   'i_pick_2', 'i_axe_2', 'i_shovel_2', 'i_sword_2', 'i_pick_3', 'i_axe_3', 'i_shovel_3', 'i_sword_3',
   'i_pick_4', 'i_axe_4', 'i_shovel_4', 'i_sword_4', 'i_hoe_0', 'i_hoe_1', 'i_hoe_2', 'i_hoe_3', 'i_hoe_4',
-  'i_shield', 'i_pumpkin_seeds', 'i_melon_seeds', 'i_spark_dust'
+  'i_shield', 'i_pumpkin_seeds', 'i_melon_seeds', 'i_spark_dust',
+  'i_glodkarna', 'i_glodfragment', 'i_urskarva', 'i_surtstal', 'i_map_village', 'i_map_explore', 'i_map_fort', 'i_glodapple',
+  'i_pick_5', 'i_axe_5', 'i_shovel_5', 'i_sword_5', 'i_helmet_4', 'i_chest_4', 'i_legs_4', 'i_boots_4'
 ];
 export const TILE = Object.fromEntries(TILES.map((n, i) => [n, i]));
 
@@ -51,7 +56,7 @@ export const TILE = Object.fromEntries(TILES.map((n, i) => [n, i]));
 // modeller
 export const M_NONE = 0, M_CUBE = 1, M_CROSS = 2, M_BOX = 3, M_LIQUID = 4;
 // flaggor i vertexdata
-export const F_WAVE = 8, F_LEAF = 16, F_LIQUID = 32, F_TINT = 64;
+export const F_WAVE = 8, F_LEAF = 16, F_LIQUID = 32, F_TINT = 64, F_PORTAL = 128;
 
 export const BLOCKS = [];
 export const B = {};
@@ -290,24 +295,46 @@ D(246, 'note_block', 'Notblock', { tex: T6('note_block'), hardness: 0.8, tool: '
 export const OBS0 = 247;
 for (let f = 0; f < 6; f++) D(OBS0 + f, 'observer_' + f, 'Observatör', { tex: FACE6('observer_front', 'observer_back', 'observer_side')[f].map((t, d) => (d === 2 || d === 3) && f < 2 || (d === 0 || d === 1) && f >= 4 ? 'observer_top' : t), hardness: 3, tool: 'pick', tier: 0, drop: OBS0, creative: f === 0, obs: f });
 export const isObs = id => id >= OBS0 && id < OBS0 + 6;
-export const NUM_BLOCKS = 253;
+/* ---------- utökning 3 (id 400–511): strukturer och Muspelheim ----------
+ * Block-id 256–399 är föremål, därför börjar de nya blocken på 400. Chunkdata är 16-bitars sedan utökning 3. */
+export const BLOCK_MAX = 512;
+D(400, 'cobweb', 'Spindelväv', { tex: T6('cobweb'), model: M_CROSS, solid: false, opaque: false, hardness: 4, tool: 'sword', sound: 'wool', drop: 272, flags: 0, web: true, selBox: [1, 0, 1, 15, 16, 15] });
+D(401, 'rail', 'Räls', { tex: T6('rail'), model: M_BOX, boxes: [[0, 0, 0, 16, 1, 16]], solid: false, opaque: false, hardness: 0.7, tool: 'pick', sound: 'metal', support: true });
+D(402, 'portal_x', 'Eldport', { tex: T6('portal'), model: M_BOX, boxes: [[0, 0, 6, 16, 16, 10]], solid: false, opaque: false, light: 11, hardness: -1, drop: 0, creative: false, flags: F_PORTAL, nosel: true, portal: 0, sound: 'glass' });
+D(403, 'portal_z', 'Eldport', { tex: T6('portal'), model: M_BOX, boxes: [[6, 0, 0, 10, 16, 16]], solid: false, opaque: false, light: 11, hardness: -1, drop: 0, creative: false, flags: F_PORTAL, nosel: true, portal: 1, sound: 'glass' });
+D(404, 'smithing', 'Smidesbänk', { tex: ['smithing_side', 'smithing_side', 'smithing_top', 'oak_planks', 'smithing_front', 'smithing_front'], hardness: 2.5, tool: 'pick', tier: 0, sound: 'metal', interact: 'smith' });
+D(405, 'askesten', 'Askesten', { tex: T6('askesten'), hardness: 1, tool: 'pick', tier: 0 });
+D(406, 'basalt', 'Svartbasalt', { tex: TS('basalt_top', 'basalt_side'), hardness: 2, tool: 'pick', tier: 0 });
+D(407, 'basalt_bricks', 'Basalttegel', { tex: T6('basalt_bricks'), hardness: 2.5, tool: 'pick', tier: 0, blast: true });
+D(408, 'glodsten', 'Glödsten', { tex: T6('glodsten'), hardness: 0.4, light: 15, sound: 'glass' });
+D(409, 'svavelsand', 'Svavelsand', { tex: T6('svavelsand'), hardness: 0.5, tool: 'shovel', sound: 'sand' });
+D(410, 'urmalm', 'Urmalm', { tex: T6('urmalm'), hardness: 30, tool: 'pick', tier: 3, blast: true, desc: 'Uråldrig malm från Muspelheims djup. Kräver diamanthacka och tålamod – smält den till urskärvor.' });
+PLANT(411, 'eldsvamp', 'Eldsvamp', 'eldsvamp', { light: 9, flags: 0, selBox: [3, 0, 3, 13, 11, 13] });
+PLANT(412, 'glodrot', 'Glödrot', 'glodrot', { light: 5 });
+D(413, 'spout', 'Eldsprutare', { tex: TS('spout_top', 'spout_side', 'basalt_top'), hardness: 3, tool: 'pick', tier: 0, powerable: true, spout: true, desc: 'Sprutar eld när den får ström från gnistkretsar.' });
+D(414, 'hay', 'Höbal', { tex: TS('hay_top', 'hay_side'), hardness: 0.5, sound: 'grass', fuel: 20 });
+export const isPortal = id => id === 402 || id === 403;
+/** Är id ett block (och inte ett föremål)? */
+export const isBlock = id => id > 0 && (id < 256 || (id >= 400 && id < BLOCK_MAX));
+export const NUM_BLOCKS = BLOCK_MAX;
 /** Riktningar för kretsar: 0 +x, 1 −x, 2 +y, 3 −y, 4 +z, 5 −z (motsatt = d ^ 1) */
 export const DIR6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
 
 // Fyll tomma id:n med luft-liknande så att tabeller blir kompletta
-for (let i = 0; i < 256; i++) if (!BLOCKS[i]) BLOCKS[i] = null;
+for (let i = 0; i < BLOCK_MAX; i++) if (!BLOCKS[i]) BLOCKS[i] = null;
 
 /* ---------- Tabeller för arbetaren ---------- */
-export const T_OPAQUE = new Uint8Array(256), T_ATT = new Uint8Array(256), T_EMIT = new Uint8Array(256), T_MODEL = new Uint8Array(256),
-  T_CULLSELF = new Uint8Array(256), T_PASS = new Uint8Array(256), T_FLAGS = new Uint8Array(256), T_SOLID = new Uint8Array(256),
-  T_FACE = new Uint8Array(256 * 6), T_TINTTOP = new Uint8Array(256), T_CONN = new Uint8Array(256);
+const BM = BLOCK_MAX;
+export const T_OPAQUE = new Uint8Array(BM), T_ATT = new Uint8Array(BM), T_EMIT = new Uint8Array(BM), T_MODEL = new Uint8Array(BM),
+  T_CULLSELF = new Uint8Array(BM), T_PASS = new Uint8Array(BM), T_FLAGS = new Uint8Array(BM), T_SOLID = new Uint8Array(BM),
+  T_FACE = new Uint8Array(BM * 6), T_TINTTOP = new Uint8Array(BM), T_CONN = new Uint8Array(BM), T_LAVA = new Uint8Array(BM);
 export const T_BOXES = [];
-for (let i = 0; i < 256; i++) {
+for (let i = 0; i < BM; i++) {
   const d = BLOCKS[i];
   if (!d) continue;
   T_OPAQUE[i] = d.opaque && d.model === M_CUBE ? 1 : 0;
   T_ATT[i] = d.att; T_EMIT[i] = d.light; T_MODEL[i] = d.model; T_CULLSELF[i] = d.cullSelf ? 1 : 0; T_PASS[i] = d.pass; T_FLAGS[i] = d.flags;
-  T_SOLID[i] = d.solid ? 1 : 0; T_TINTTOP[i] = d.tintTop ? 1 : 0; T_CONN[i] = d.conn || 0;
+  T_SOLID[i] = d.solid ? 1 : 0; T_TINTTOP[i] = d.tintTop ? 1 : 0; T_CONN[i] = d.conn || 0; T_LAVA[i] = d.lava !== undefined ? 1 : 0;
   if (d.tex) for (let f = 0; f < 6; f++) T_FACE[i * 6 + f] = TILE[d.tex[f]] || 0;
   if (d.boxes) T_BOXES[i] = { boxes: d.boxes, vOff: d.vOff || 0, topRot: d.topRot || 0 };
 }
@@ -393,12 +420,24 @@ It(321, 'shield', 'Sköld', 'i_shield', { stack: 1, shield: true, desc: 'Håll h
 It(322, 'pumpkin_seeds', 'Pumpafrön', 'i_pumpkin_seeds', { place: 179 });
 It(323, 'melon_seeds', 'Melonfrön', 'i_melon_seeds', { place: 183 });
 It(324, 'spark_dust', 'Gnistdamm', 'i_spark_dust', { place: 205, desc: 'Läggs ut som ledning. Leder ström upp till 15 steg.' });
+// utökning 3: Muspelheim, kartor och surtstål (id 358–373)
+It(358, 'glodkarna', 'Glödkärna', 'i_glodkarna', { stack: 16, desc: 'Använd den på en båge av obsidian (eldport) för att tända den.' });
+It(359, 'glodfragment', 'Glödkärnfragment', 'i_glodfragment', { desc: 'Fyra fragment kan fogas samman till en Glödkärna.' });
+It(360, 'urskarva', 'Urskärva', 'i_urskarva', { fireproof: true, desc: 'Smält ur urmalm. Fyra skärvor och fyra guldtackor blir en surtståltacka.' });
+It(361, 'surtstal', 'Surtståltacka', 'i_surtstal', { fireproof: true, desc: 'Uppgraderar diamantverktyg och diamantrustning vid smidesbänken.' });
+It(362, 'map_village', 'Bykarta', 'i_map_village', { stack: 1, desc: 'Håll kartan för att se vägen till närmaste by.' });
+It(363, 'map_explore', 'Upptäckarkarta', 'i_map_explore', { stack: 1, desc: 'Håll kartan för att se vägen till närmaste ruin, vrak eller annan plats du inte har besökt.' });
+It(364, 'map_fort', 'Eldkarta', 'i_map_fort', { stack: 1, desc: 'Visar vägen till närmaste Surts borg – men bara i Muspelheim.' });
+It(365, 'glodapple', 'Glödäpple', 'i_glodapple', { food: 6, sat: 1.2, desc: 'Läker och ger eldskydd i en minut.' });
+export const SURT_TOOL0 = 366, SURT_ARMOR0 = 370;
+[['pick', 'hacka', 6], ['axe', 'yxa', 9], ['shovel', 'spade', 5], ['sword', 'svärd', 10]].forEach(([type, sv, dmg], k) => It(SURT_TOOL0 + k, type + '_surt', 'Surtstål' + sv, 'i_' + type + '_5', { stack: 1, fireproof: true, tool: { type, tier: 3, speed: 14, dur: 2600, dmg, rep: 360 } }));
 // rustning: 4 material × 4 delar (id 330–345)
 export const ARMOR0 = 330;
-export const ARMOR_MATS = [['Läder', 0x9a6232, 80], ['Järn', 0xc8ccd2, 240], ['Guld', 0xf2c63a, 110], ['Diamant', 0x8fe0f0, 520]];
+export const ARMOR_MATS = [['Läder', 0x9a6232, 80], ['Järn', 0xc8ccd2, 240], ['Guld', 0xf2c63a, 110], ['Diamant', 0x8fe0f0, 520], ['Surtstål', 0x5a302a, 900]];
 const ARMOR_PTS = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
 const ARMOR_PARTS = [['helmet', 'hjälm'], ['chest', 'bröstplåt'], ['legs', 'benskydd'], ['boots', 'kängor']];
 for (let m = 0; m < 4; m++) for (let p = 0; p < 4; p++) It(ARMOR0 + m * 4 + p, ARMOR_PARTS[p][0] + '_' + m, ARMOR_MATS[m][0] + ARMOR_PARTS[p][1], 'i_' + ARMOR_PARTS[p][0] + '_' + m, { stack: 1, armor: { slot: p, mat: m, pts: ARMOR_PTS[m][p], dur: Math.round(ARMOR_MATS[m][2] * [0.8, 1.15, 1.1, 0.95][p]) } });
+for (let p = 0; p < 4; p++) It(SURT_ARMOR0 + p, ARMOR_PARTS[p][0] + '_surt', 'Surtstål' + ARMOR_PARTS[p][1], 'i_' + ARMOR_PARTS[p][0] + '_4', { stack: 1, fireproof: true, armor: { slot: p, mat: 4, pts: [4, 9, 7, 4][p], dur: Math.round(900 * [0.8, 1.15, 1.1, 0.95][p]) } });
 export const ARMOR_SLOT_NAMES = ['Hjälm', 'Bröstplåt', 'Benskydd', 'Kängor'];
 export const TIER_NAMES = ['Trä', 'Sten', 'Järn', 'Diamant', 'Guld'];
 const TOOL_TYPES = [['pick', 'hacka'], ['axe', 'yxa'], ['shovel', 'spade'], ['sword', 'svärd']];
@@ -422,28 +461,28 @@ export const HOES = [354, 299, 355, 356, 357];
 export const isHoe = id => { const t = toolOf(id); return !!t && t.type === 'hoe'; };
 
 /* ---------- Gemensamma hjälpare ---------- */
-export function isBlockId(id) { return id > 0 && id < 256; }
-export function itemDef(id) { return id < 256 ? BLOCKS[id] : ITEMS[id]; }
+export function isBlockId(id) { return isBlock(id); }
+export function itemDef(id) { return isBlock(id) ? BLOCKS[id] : ITEMS[id]; }
 export function itemName(id) { const d = itemDef(id); return d ? d.name : '?'; }
-export function maxStack(id) { if (id < 256) return 64; const d = ITEMS[id]; return d ? d.stack : 64; }
+export function maxStack(id) { if (isBlock(id)) return 64; const d = ITEMS[id]; return d ? d.stack : 64; }
 export function toolOf(id) { return id >= 256 && ITEMS[id] ? ITEMS[id].tool || ITEMS[id].armor || null : null; }
 export function armorOf(id) { return id >= 256 && ITEMS[id] ? ITEMS[id].armor || null : null; }
 export function foodOf(id) { const d = itemDef(id); return d ? d.food || 0 : 0; }
 export function fuelOf(id) { const d = itemDef(id); return d ? d.fuel || 0 : 0; }
 /** Vilket block placerar föremålet? (0 = inget) */
 export function placeOf(id) {
-  if (id > 0 && id < 256) return BLOCKS[id] ? id : 0;
+  if (isBlock(id)) return BLOCKS[id] ? id : 0;
   const d = ITEMS[id]; return d ? d.place || 0 : 0;
 }
 export function itemTile(id) {
-  if (id >= 256) { const d = ITEMS[id]; return d ? TILE[d.tile] : 0; }
+  if (!isBlock(id)) { const d = ITEMS[id]; return d ? TILE[d.tile] : 0; }
   const d = BLOCKS[id]; if (!d || !d.tex) return 0;
   return TILE[d.tex[4]] || TILE[d.tex[2]] || 0;
 }
 /** Alla föremål som visas i kreativ-menyn, i ordning. */
 export function creativeList() {
   const out = [];
-  for (let i = 1; i < 256; i++) { const d = BLOCKS[i]; if (d && d.creative) out.push(i); }
+  for (let i = 1; i < BLOCK_MAX; i++) { const d = BLOCKS[i]; if (d && d.creative) out.push(i); }
   for (const k in ITEMS) out.push(+k);
   return out;
 }
@@ -451,5 +490,6 @@ export function creativeList() {
 export const SMELT = {
   [B.cobble]: B.stone, [B.sand]: B.glass, [B.iron_ore]: 258, [B.gold_ore]: 259, [B.clay]: B.bricks,
   [B.spruce_log]: 257, [B.birch_log]: 257, [B.pine_log]: 257, [265]: 266, [267]: 268, [264]: 271, [B.peat]: 257, [274]: 275, [277]: 298,
-  [B.stone]: B.smooth_stone, [304]: 305, [319]: 320, [B.terracotta]: B.bricks, [B.oak_log]: 257, [B.spark_ore]: 324
+  [B.stone]: B.smooth_stone, [304]: 305, [319]: 320, [B.terracotta]: B.bricks, [B.oak_log]: 257, [B.spark_ore]: 324,
+  [B.urmalm]: 360, [B.svavelsand]: B.glass, [B.askesten]: B.basalt
 };

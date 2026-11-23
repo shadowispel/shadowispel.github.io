@@ -24,14 +24,14 @@ function relevant(b) {
 }
 
 export class Circuits {
-  constructor(game) {
+  constructor(game, saved) {
     this.g = game; this.w = game.world;
     this.level = new Map();      // ledning → styrka
     this.pressed = new Map();    // knapp/tryckplatta → kvarvarande steg
     this.state = new Map();      // mekanism → senast sedd strömstatus (för kantstyrda: dörrar, TNT, utmatare…)
     this.pulse = new Map();      // observatör → kvarvarande pulssteg
     this.sched = new Map();      // plats → { at, fn } (förstärkare, gnistfacklor)
-    this.data = new Map(game.meta.circ || []); // sparat: förstärkarfördröjning, notblockets ton
+    this.data = new Map(saved !== undefined ? saved || [] : game.meta.circ || []); // sparat: förstärkarfördröjning, notblockets ton
     this.plates = new Set(); this.sensors = new Set();
     this.dirty = new Map();      // nyckel → [x,y,z]
     this.ticks = 0; this.acc = 0; this._quiet = false;
@@ -68,6 +68,8 @@ export class Circuits {
   }
   /** En chunk har laddats: väck kretsblock i dess sparade ändringar */
   onChunkReady(c, mods) {
+    // genererade kretsblock (t.ex. fällor i strukturer)
+    if (c.extra && c.extra.circ) for (const [x, y, z] of c.extra.circ) { const b = this.w.get(x, y, z); if (b > 0 && BLOCKS[b].plate) this.plates.add(key(x, y, z)); this.mark(x, y, z); }
     if (!mods) return;
     for (const [i, id] of mods) {
       if (!relevant(id)) continue;
@@ -310,6 +312,7 @@ export class Circuits {
     }
     if (d.disp !== undefined) { if (this._edge(k, this.powered(x, y, z)) > 0) this._dispense(x, y, z, d.disp); return; }
     if (b === B.note_block) { if (this._edge(k, this.powered(x, y, z)) > 0) this.playNote(x, y, z); return; }
+    if (d.spout) { if (this._edge(k, this.powered(x, y, z)) > 0 && g.fireSpout) g.fireSpout(x, y, z); return; }
   }
 
   /* ---------- kolvar ---------- */

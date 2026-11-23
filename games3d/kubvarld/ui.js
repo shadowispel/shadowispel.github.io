@@ -1,5 +1,6 @@
 /** HUD och inventarieskärmar (DOM). */
-import { itemName, maxStack, toolOf, itemDef, BLOCKS, ITEMS, creativeList, fuelOf, M_CROSS, I, B, TOOL0, armorOf, ARMOR_SLOT_NAMES } from './blocks.js';
+import { itemName, maxStack, toolOf, itemDef, BLOCKS, ITEMS, creativeList, fuelOf, M_CROSS, I, B, TOOL0, armorOf, ARMOR_SLOT_NAMES, isBlock, ARMOR0, SURT_TOOL0, SURT_ARMOR0 } from './blocks.js';
+import { PROFS } from './models.js';
 import { findRecipe, RECIPES, ingredients, wantName, TAGS, smeltResult, SMELT_TIME } from './inventory.js';
 import { isTouchDevice } from '../../engine/kit.js';
 import { renderAchievements } from './achievements.js';
@@ -7,18 +8,29 @@ import { renderAchievements } from './achievements.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, parent) => { const e = document.createElement(tag); if (cls) e.className = cls; if (parent) parent.appendChild(e); return e; };
 
-const NATURE = [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65, 101, 103, 108, 119, 120, 122, 169, 173, 175, 176, 204];
-const isCirc = id => id < 256 ? !!(BLOCKS[id] && (BLOCKS[id].wire || BLOCKS[id].circ || BLOCKS[id].rep || BLOCKS[id].plate || BLOCKS[id].piston || BLOCKS[id].disp !== undefined || BLOCKS[id].obs !== undefined || BLOCKS[id].interact === 'button' || BLOCKS[id].interact === 'lever' || BLOCKS[id].interact === 'note' || id === 221)) : id === 324;
-const isNature = id => id < 256 && BLOCKS[id] && (BLOCKS[id].model === M_CROSS || (id >= 15 && id <= 20) || NATURE.includes(id));
-const isGear = id => id >= 256 && ITEMS[id] && (ITEMS[id].tool || ITEMS[id].armor || [I.bucket, I.bucket_water, I.bucket_lava, I.compass, I.clock, I.arrow].includes(id));
+const NATURE = [1, 2, 5, 6, 8, 9, 10, 11, 12, 13, 24, 25, 26, 27, 65, 101, 103, 108, 119, 120, 122, 169, 173, 175, 176, 204, 400, 405, 406, 408, 409, 410, 411, 412];
+const isCirc = id => isBlock(id) ? !!(BLOCKS[id] && (BLOCKS[id].wire || BLOCKS[id].circ || BLOCKS[id].rep || BLOCKS[id].plate || BLOCKS[id].piston || BLOCKS[id].disp !== undefined || BLOCKS[id].obs !== undefined || BLOCKS[id].interact === 'button' || BLOCKS[id].interact === 'lever' || BLOCKS[id].interact === 'note' || id === 221)) : id === 324;
+const isNature = id => isBlock(id) && BLOCKS[id] && (BLOCKS[id].model === M_CROSS || (id >= 15 && id <= 20) || NATURE.includes(id));
+const isGear = id => !isBlock(id) && ITEMS[id] && (ITEMS[id].tool || ITEMS[id].armor || [I.bucket, I.bucket_water, I.bucket_lava, I.compass, I.clock, I.arrow].includes(id));
 const CREATIVE_TABS = [
-  ['Byggblock', id => id < 256 && BLOCKS[id] && !isNature(id) && !isCirc(id)],
+  ['Byggblock', id => isBlock(id) && BLOCKS[id] && !isNature(id) && !isCirc(id)],
   ['Natur', isNature],
-  ['Föremål', id => id >= 256 && !isGear(id)],
+  ['Föremål', id => !isBlock(id) && !isGear(id)],
   ['Verktyg', isGear],
   ['Kretsar', isCirc],
   ['Alla', () => true]
 ];
+
+/** Smidesbänk: diamantföremål + surtståltacka → motsvarande surtstålföremål (slitage behålls proportionellt) */
+export function smithResult(a, b) {
+  if (!a || !b || b.id !== I.surtstal) return null;
+  let out = 0;
+  if (a.id >= TOOL0 + 12 && a.id <= TOOL0 + 15) out = SURT_TOOL0 + (a.id - TOOL0 - 12);
+  else if (a.id >= ARMOR0 + 12 && a.id <= ARMOR0 + 15) out = SURT_ARMOR0 + (a.id - ARMOR0 - 12);
+  if (!out) return null;
+  const t0 = toolOf(a.id), t1 = toolOf(out);
+  return { id: out, n: 1, d: t0 && t1 && a.d ? Math.round(a.d / t0.dur * t1.dur) : 0 };
+}
 
 export class UI {
   constructor(game) {
@@ -168,8 +180,10 @@ export class UI {
     const inv = this.g.inv;
     // lägg tillbaka hantverksrutnät och muspekare
     for (let i = 0; i < 9; i++) if (inv.craft[i]) { const s = inv.craft[i]; inv.craft[i] = null; this._giveBack(s); }
+    if (inv.smith) for (let i = 0; i < 2; i++) if (inv.smith[i]) { const s = inv.smith[i]; inv.smith[i] = null; this._giveBack(s); }
     if (inv.cursor) { const s = inv.cursor; inv.cursor = null; this._giveBack(s); }
-    this.mode = null; this.ctx = null;
+    if (this.ctx && this.ctx.mob) this.ctx.mob.trading = false;
+    this.mode = null; this.ctx = null; this.tradeRows = null;
     this.invEl.classList.add('hidden');
     this.tip.style.display = 'none';
     if (this.gpCursor) { this.gpCursor.remove(); this.gpCursor = null; }
@@ -235,6 +249,34 @@ export class UI {
       this.prog = el('div', 'kv-prog', fu); el('i', '', this.prog);
       this._ref(fu, { kind: 'fout', get: () => f.out, set: v => { f.out = v; } }, 'big');
       const hint = el('div', 'kv-hint', top); hint.textContent = 'Lägg malm, sand eller mat överst och bränsle (kol, ved, torv) underst.';
+    } else if (mode === 'trade') {
+      const pr = PROFS[this.ctx.prof] || PROFS.bonde;
+      title.textContent = 'Handla med ' + pr.def;
+      this.emeraldLine = el('div', 'kv-hint', top);
+      const list = el('div', 'kv-trades', main);
+      this.tradeRows = [];
+      for (const o of this.ctx.offers) {
+        const row = el('div', 'kv-trade', list);
+        const give = el('div', 'kv-tside', row);
+        for (const [id, n] of o.give) { const it = el('span', 'kv-titem', give); const im = el('img', '', it); im.src = this.icons[id] || ''; im.alt = ''; el('b', '', it).textContent = n > 1 ? n : ''; it.title = itemName(id); }
+        el('div', 'kv-tarrow', row).textContent = '➜';
+        const get = el('div', 'kv-tside', row);
+        { const [id, n] = o.get; const it = el('span', 'kv-titem', get); const im = el('img', '', it); im.src = this.icons[id] || ''; im.alt = ''; el('b', '', it).textContent = n > 1 ? n : ''; }
+        const nm = el('div', 'kv-tname', row); nm.textContent = itemName(o.get[0]) + (o.get[1] > 1 ? ' ×' + o.get[1] : '');
+        const btn = el('button', 'btn small', row); btn.textContent = 'Byt';
+        btn.onclick = () => { if (this.g.trade(o)) this.refresh(); };
+        this.tradeRows.push({ row, btn, o });
+      }
+    } else if (mode === 'smith') {
+      title.textContent = 'Smidesbänk';
+      if (!inv.smith) inv.smith = [null, null];
+      const fu = el('div', 'kv-furn', top);
+      this._ref(fu, { kind: 'smith', i: 0, get: () => inv.smith[0], set: v => { inv.smith[0] = v; } });
+      el('div', 'kv-arrow', fu).textContent = '+';
+      this._ref(fu, { kind: 'smith', i: 1, get: () => inv.smith[1], set: v => { inv.smith[1] = v; } });
+      el('div', 'kv-arrow', fu).textContent = '➜';
+      this.outRef = this._ref(fu, { kind: 'sout', get: () => smithResult(inv.smith[0], inv.smith[1]), set: () => { } }, 'big');
+      el('div', 'kv-hint', top).textContent = 'Lägg ett diamantverktyg eller en diamantrustningsdel och en surtståltacka här för att smida om det till surtstål.';
     } else if (mode === 'chest') {
       title.textContent = this.ctx.title || 'Kista';
       const c = this.ctx.c;
@@ -358,6 +400,12 @@ export class UI {
       else inv.cursor = { id: st.id, n: btn ? 1 : st.n, d: 0 };
       g.audio.play('click', { vol: 0.5 }); inv.changed(); this.refresh(); return;
     }
+    if (ref.kind === 'sout') {
+      if (!st || cur) return;
+      inv.cursor = { ...st }; inv.smith[0] = null;
+      inv.smith[1].n--; if (inv.smith[1].n <= 0) inv.smith[1] = null;
+      g.onSmith(st.id); inv.changed(); this.refresh(); return;
+    }
     if (ref.kind === 'out' || ref.kind === 'fout') {
       if (!st) return;
       if (ref.kind === 'out') {
@@ -431,6 +479,11 @@ export class UI {
       this.prog.firstChild.style.width = Math.round(f.prog / SMELT_TIME * 100) + '%';
     }
     if (this.bookList) this._refreshBook();
+    if (this.tradeRows) {
+      const inv = this.g.inv;
+      this.emeraldLine.textContent = 'Du har ' + inv.count(I.emerald) + ' smaragder. Bybor betalar med smaragder och tar smaragder som betalning.';
+      for (const t of this.tradeRows) { const ok = t.o.give.every(([id, n]) => inv.count(id) >= n); t.row.classList.toggle('can', ok); t.btn.disabled = !ok; }
+    }
     this._moveCursor(); this._showTip();
     this.updateHotbar();
   }
@@ -458,7 +511,7 @@ export class UI {
       el('b', '', tx).textContent = itemName(r.out) + (r.n > 1 ? ' ×' + r.n : '');
       const ing = ingredients(r);
       el('span', '', tx).textContent = ing.map(x => `${x.n}× ${wantName(x.want)}`).join(', ');
-      const big = r.shape && (r.shape.length > 2 || r.shape.some(s => s.length > 2));
+      const big = (r.shape && (r.shape.length > 2 || r.shape.some(s => s.length > 2))) || (r.shapeless && r.shapeless.length > 4);
       if (big) el('em', '', tx).textContent = 'Arbetsbänk';
       row.onclick = () => this._fillRecipe(r, big);
       this.bookList.push({ row, r, ing, big });

@@ -1,7 +1,7 @@
 /** Entiteter: föremål på marken, partiklar, fallande block, projektiler och varelser (AI + spawn). */
 import * as THREE from 'three';
-import { BLOCKS, B, I, CY, isWater, isLava, T_SOLID, itemName } from './blocks.js';
-import { buildModel, extrudedGeo, blockGeo, isCubeItem, boxGeo } from './models.js';
+import { BLOCKS, B, I, ITEMS, CY, isWater, isLava, isDoor, DOOR0, T_SOLID, itemName } from './blocks.js';
+import { buildModel, extrudedGeo, blockGeo, isCubeItem, boxGeo, EMBER_MAT } from './models.js';
 import { moveBody, overlaps } from './physics.js';
 import { World } from './world.js';
 import { tileColorSample } from './textures.js';
@@ -13,12 +13,14 @@ const TORCH = new THREE.Color(1.0, 0.66, 0.36);
 const FIRE = [new THREE.Color('#ffb040'), new THREE.Color('#ff7a20'), new THREE.Color('#ffd870')];
 const ARROW_G = 14;
 
+/** Dimensionens grundljus (Muspelheim lyser rödaktigt överallt) – sätts av spelet varje bildruta */
+export const AMBIENT = new THREE.Color(0, 0, 0);
 /** Ljusfärg (linjär) vid en punkt – samma kurva som terrängshadern */
 export function lightColor(world, sky, x, y, z, out, minL = 0.03) {
   const L = world.light(Math.floor(x), Math.floor(y), Math.floor(z));
   const s = L >> 4, b = L & 15;
   const sf = s ? Math.pow(0.8, 15 - s) : 0, bf = b ? Math.pow(0.8, 15 - b) * 1.05 : 0;
-  out.setRGB(Math.max(sky.r * sf, TORCH.r * bf, minL), Math.max(sky.g * sf, TORCH.g * bf, minL), Math.max(sky.b * sf, TORCH.b * bf, minL));
+  out.setRGB(Math.max(sky.r * sf, TORCH.r * bf, minL, AMBIENT.r * 1.3), Math.max(sky.g * sf, TORCH.g * bf, minL, AMBIENT.g * 1.3), Math.max(sky.b * sf, TORCH.b * bf, minL, AMBIENT.b * 1.3));
   return out;
 }
 
@@ -33,7 +35,14 @@ export const MOBS = {
   chicken: { name: 'Höna', art: 'en', hp: 4, speed: 1.2, run: 3.8, hostile: false, drops: [[I.feather, 0, 2], [I.chicken, 1, 1]], blood: '#e8e0d0', flutter: true, eggs: true },
   zombie: { name: 'Zombie', art: 'en', hp: 20, speed: 2.1, hostile: true, dmg: 3, reach: 1.5, kb: 6, drops: [[I.rotten_flesh, 0, 2], [I.iron_ingot, 0, 1, 0.04], [I.carrot, 1, 1, 0.04], [I.potato, 1, 1, 0.04]], sunburn: true, detect: 24, blood: '#56703e' },
   skeleton: { name: 'Skelett', art: 'ett', hp: 16, speed: 2.3, hostile: true, ranged: true, dmg: 3, drops: [[I.bone, 0, 2], [I.arrow, 0, 2]], sunburn: true, detect: 20, blood: '#e6dec6' },
-  spider: { name: 'Spindel', art: 'en', hp: 14, speed: 3.6, hostile: true, dmg: 2.5, reach: 1.6, kb: 5, drops: [[I.string, 0, 2]], climb: true, leap: true, dayPeaceful: true, detect: 16, blood: '#3a4a22' }
+  spider: { name: 'Spindel', art: 'en', hp: 14, speed: 3.6, hostile: true, dmg: 2.5, reach: 1.6, kb: 5, drops: [[I.string, 0, 2]], climb: true, leap: true, dayPeaceful: true, detect: 16, blood: '#3a4a22' },
+  // byarnas fredliga invånare
+  villager: { name: 'Bybo', art: 'en', hp: 20, speed: 1.3, run: 3.4, hostile: false, drops: [], villager: true, blood: '#c84040' },
+  // Muspelheim
+  glodgast: { name: 'Glödgast', art: 'en', hp: 14, speed: 2.6, hostile: true, flying: true, dmg: 4, drops: [[I.spark_dust, 0, 2], [B.glodsten, 0, 1, 0.35]], fireproof: true, detect: 30, blood: '#ff8a3a' },
+  askvandrare: { name: 'Askvandrare', art: 'en', hp: 20, speed: 2.3, hostile: true, neutral: true, dmg: 4, reach: 1.6, kb: 6, drops: [[I.gold_ingot, 0, 1, 0.5], [I.bone, 0, 2], [I.glodfragment, 1, 1, 0.05]], fireproof: true, detect: 24, blood: '#8a7e78' },
+  salamander: { name: 'Eldsalamander', art: 'en', hp: 10, speed: 4.4, hostile: true, dmg: 3, reach: 1.3, kb: 4, drops: [[I.leather, 0, 2], [I.spark_dust, 0, 1]], fireproof: true, lavaSwim: true, detect: 20, blood: '#ff6a2a' },
+  eldjatte: { name: 'Eldjätte', art: 'en', hp: 160, speed: 1.7, hostile: true, boss: true, dmg: 7, reach: 2.6, kb: 11, drops: [[I.urskarva, 2, 3], [I.glodkarna, 1, 1], [I.glodapple, 1, 2], [I.gold_ingot, 4, 8]], fireproof: true, detect: 26, blood: '#ff5a1a' }
 };
 /** Äldre varelsetyper (från tidigare versioner) → nya. Varelser sparas inte, men nycklar kan förekomma i t.ex. statistik. */
 export const OLD_MOBS = { hare: 'chicken', moose: 'cow', wolf: 'zombie', giant: 'zombie', ghost: 'skeleton' };
@@ -169,7 +178,11 @@ export class Entities {
         if (r.ground) { e.vel.x *= Math.pow(0.02, dt); e.vel.z *= Math.pow(0.02, dt); }
       }
       if (e.age > 300 || e.pos.y < -10) { this._removeDrop(i); continue; }
-      if (isLava(w.get(Math.floor(e.pos.x), Math.floor(e.pos.y), Math.floor(e.pos.z)))) { this.puff(e.pos.x, e.pos.y + 0.2, e.pos.z, '#ff9a30', 4, 0.2, true); this._removeDrop(i); continue; }
+      if (isLava(w.get(Math.floor(e.pos.x), Math.floor(e.pos.y), Math.floor(e.pos.z)))) {
+        // surtstål och urskärvor flyter i lavan
+        if (ITEMS[e.id] && ITEMS[e.id].fireproof) { e.vel.y = Math.min(e.vel.y + 40 * dt, 1.6); e.vel.x *= 0.9; e.vel.z *= 0.9; if (Math.random() < dt * 4) this.puff(e.pos.x, e.pos.y + 0.3, e.pos.z, '#ffb040', 1, 0.2, true); }
+        else { this.puff(e.pos.x, e.pos.y + 0.2, e.pos.z, '#ff9a30', 4, 0.2, true); this._removeDrop(i); continue; }
+      }
       e.spin += dt * 1.8;
       e.mesh.position.set(e.pos.x, e.pos.y + 0.2 + Math.sin(e.age * 2.5) * 0.06, e.pos.z);
       e.mesh.rotation.y = e.spin;
@@ -211,11 +224,11 @@ export class Entities {
   }
 
   /* ---------- varelser ---------- */
-  spawnMob(type, x, y, z) {
+  spawnMob(type, x, y, z, opts = null) {
     type = OLD_MOBS[type] || type;
     const def = MOBS[type];
     if (!def) return null;
-    const model = buildModel(type);
+    const model = buildModel(type === 'villager' ? 'villager:' + ((opts && opts.prof) || 'bonde') : type);
     const m = {
       type, def, model, pos: new THREE.Vector3(x, y, z), vel: new THREE.Vector3(), yaw: Math.random() * Math.PI * 2, tyaw: 0,
       hp: def.hp * (def.hostile ? this.g.diffHp() : 1), ground: false, walk: 0, wander: 0, dir: new THREE.Vector2(), moving: false,
@@ -224,6 +237,8 @@ export class Entities {
       seed: Math.random() * 10, graze: false, aimT: 0, strafe: Math.random() < 0.5 ? 1 : -1, eggT: 90 + Math.random() * 150, calm: false
     };
     m.tyaw = m.yaw;
+    if (opts) { m.prof = opts.prof; m.home = opts.home ? new THREE.Vector3(opts.home[0], opts.home[1], opts.home[2]) : null; m.vc = opts.c || null; m.marker = opts.marker || null; m.key = opts.key || null; }
+    if (def.flying) { m.hoverY = y + 3; m.fly = new THREE.Vector3(); }
     model.root.position.copy(m.pos);
     this.group.add(model.root);
     this.mobs.push(m);
@@ -241,6 +256,7 @@ export class Entities {
       this.g.stats.kills++; this.g.onKill(m.type);
       if (m.def.hostile) this.g.log('Du besegrade ' + m.def.art + ' ' + m.def.name.toLowerCase() + '.');
     }
+    if (this.g.onMobKilled) this.g.onMobKilled(m, byPlayer);
   }
   _vol(m) { const d = m.pos.distanceTo(this.g.player.pos); const p = this.g.player; const ang = Math.atan2(m.pos.x - p.pos.x, m.pos.z - p.pos.z); return { vol: Math.max(0, 1 - d / 28), pan: Math.max(-1, Math.min(1, Math.sin(ang - p.yaw - Math.PI) * 0.8)) }; }
 
@@ -253,6 +269,8 @@ export class Entities {
     mobSound(this.g.audio, m.type, 'hurt', this._vol(m));
     this.puff(m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.def.blood || '#c84040', 6, 0.4);
     if (m.def.dayPeaceful) m.angryT = 30;
+    // askvandrare: hela flocken blir arg
+    if (m.def.neutral) for (const o of this.mobs) if (o.type === m.type && !o.dead && o.pos.distanceTo(m.pos) < 20) o.angryT = 45;
     if (!m.def.hostile) m.fleeT = 5;
     if (m.hp <= 0) this._killMob(m, true);
     return true;
@@ -328,16 +346,19 @@ export class Entities {
         } else m.burn = 0;
       } else m.burn = 0;
       // lava bränner alla varelser; klippta får växer ny ull
-      if (isLava(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.2), Math.floor(m.pos.z)))) { m.hp -= 8 * dt; m.burn = Math.max(m.burn, 0.1); if (Math.random() < dt * 10) this.particle(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z, 0, 1.5, 0, FIRE[0], 0.12, 0.5, -0.2, true); if (m.hp <= 0) { this._killMob(m, false); continue; } }
+      if (!md.fireproof && isLava(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.2), Math.floor(m.pos.z)))) { m.hp -= 8 * dt; m.burn = Math.max(m.burn, 0.1); if (Math.random() < dt * 10) this.particle(m.pos.x, m.pos.y + m.h * 0.5, m.pos.z, 0, 1.5, 0, FIRE[0], 0.12, 0.5, -0.2, true); if (m.hp <= 0) { this._killMob(m, false); continue; } }
       if (m.sheared && (m.regrow -= dt) <= 0) { m.sheared = false; const P = m.model.parts; if (P.wool) for (const x of P.wool) x.visible = true; if (P.skin) P.skin.visible = false; }
       // spindlar är lugna i dagsljus om ingen slagit dem
       m.calm = false;
       if (md.dayPeaceful && m.angryT <= 0) { const L = w.light(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.6), Math.floor(m.pos.z)); if ((L >> 4) * day >= 9) m.calm = true; }
       // --- AI ---
       let tx = 0, tz = 0, speed = md.speed, wantJump = false;
-      const canTarget = md.hostile && !m.calm && pl.alive && !pl.creative && dpl < (md.detect || 16) * (pl.sneaking ? 0.6 : 1);
+      const canTarget = md.hostile && !m.calm && pl.alive && !pl.creative && dpl < (md.detect || 16) * (pl.sneaking ? 0.6 : 1) && (!md.neutral || m.angryT > 0);
       const hdist = Math.hypot(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z);
-      if (canTarget && md.ranged) {
+      if (md.flying) { this._flyer(m, dt, pl, w, canTarget, dpl); continue; }
+      if (md.boss && canTarget) this._bossMoves(m, dt, pl, w, hdist);
+      if (md.villager && m.fleeT <= 0 && this._villager(m, dt, pl, w, ch)) { tx = ch.tx; tz = ch.tz; wantJump = ch.jump; speed = ch.speed || md.speed; }
+      else if (canTarget && md.ranged) {
         // skelett: håll avstånd, sidsteg och skjut pilar när de ser spelaren
         const see = (m._seeT = (m._seeT || 0) - dt) > 0 ? m._see : (m._seeT = 0.3, m._see = this._los(m, pl, 1.5));
         const ax = (pl.pos.x - m.pos.x) / (hdist || 1), az = (pl.pos.z - m.pos.z) / (hdist || 1);
@@ -374,7 +395,7 @@ export class Entities {
         if (md.leap && m.ground && hdist > 2.2 && hdist < 5.5 && m.atkCd <= 0 && Math.random() < dt * 2.2) { m.vel.y = 6.8; m.vel.x = tx * 8.5; m.vel.z = tz * 8.5; mobSound(g.audio, m.type, 'attack', this._vol(m)); }
         const reach = (md.reach || 1.4) + 0.3;
         if (hdist < reach && Math.abs(pl.pos.y - m.pos.y) < Math.max(1.6, m.h * 0.8) && m.atkCd <= 0) {
-          m.atkCd = m.type === 'spider' ? 0.8 : 1.0;
+          m.atkCd = m.type === 'spider' ? 0.8 : md.boss ? 1.6 : 1.0;
           m.swing = 0.4;
           g.damagePlayer(md.dmg * g.diffDmg(), tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), md.kb || 6, m.type);
           mobSound(g.audio, m.type, 'attack', this._vol(m));
@@ -413,7 +434,9 @@ export class Entities {
       // hönor värper ibland
       if (md.eggs) { m.eggT -= dt; if (m.eggT <= 0) { m.eggT = 120 + Math.random() * 180; this.drop(I.egg, 1, m.pos.x, m.pos.y + 0.3, m.pos.z, 0, tmpV.set(0, 1, 0)); mobSound(g.audio, m.type, 'idle', this._vol(m)); } }
       // --- fysik ---
-      const inW = isWater(w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.3), Math.floor(m.pos.z)));
+      const fb = w.get(Math.floor(m.pos.x), Math.floor(m.pos.y + 0.3), Math.floor(m.pos.z));
+      const inW = isWater(fb) || (md.lavaSwim && isLava(fb));
+      if (md.lavaSwim && isLava(fb)) speed *= 1.3;
       const acc = m.ground ? 10 : 2;
       const k = 1 - Math.exp(-acc * dt);
       m.vel.x += (tx * speed - m.vel.x) * k;
@@ -437,7 +460,7 @@ export class Entities {
       let dy = m.tyaw - m.yaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
       m.yaw += dy * (1 - Math.exp(-8 * dt));
       const hs = Math.hypot(m.vel.x, m.vel.z);
-      m.walk += hs * dt * (m.type === 'spider' ? 3.2 : m.type === 'chicken' ? 3.5 : 2.2);
+      m.walk += hs * dt * (m.type === 'spider' ? 3.2 : m.type === 'chicken' ? 3.5 : m.type === 'salamander' ? 4 : m.type === 'eldjatte' ? 1.2 : 2.2);
       this._animate(m, hs, dt);
       lightColor(w, g.sky.skyLight, m.pos.x, m.pos.y + m.h * 0.6, m.pos.z, m.light, 0.04);
       if (m.hurtT > 0.25) m.model.mat.color.setRGB(1, 0.3, 0.3);
@@ -480,13 +503,155 @@ export class Entities {
       P.wingL.rotation.z = -flap; P.wingR.rotation.z = flap;
       P.head.rotation.x = m.graze ? 0.7 : Math.sin(m.walk * 2) * 0.15 * Math.min(1, hs);
       if (!m.moving && hs < 0.2 && Math.sin(t * 0.7) > 0.6) P.head.rotation.x = 0.6 + Math.abs(Math.sin(t * 10)) * 0.3; // pickar
+    } else if (type === 'villager') {
+      P.armL.rotation.x = sw * 0.5; P.armR.rotation.x = -sw * 0.5;
+      P.head.rotation.x = Math.sin(t * 0.8) * 0.06; P.head.rotation.y = m.look || 0;
+      if (m.trading) { P.armL.rotation.x = -0.9; P.armR.rotation.x = -0.9; }
+    } else if (type === 'askvandrare' || type === 'eldjatte') {
+      const ang = m.angryT > 0 || type === 'eldjatte';
+      P.armL.rotation.x = (ang ? -0.4 : 0) + sw * 0.6 - atk * 1.2; P.armR.rotation.x = (ang ? -0.4 : 0) - sw * 0.6 - atk * 1.4;
+      if (m.slamT > 0) { P.armL.rotation.x = -2.6 * Math.min(1, m.slamT * 2); P.armR.rotation.x = P.armL.rotation.x; }
+      P.head.rotation.z = Math.sin(t * 0.9) * 0.05;
+    } else if (type === 'salamander') {
+      const mv = Math.min(1, hs * 0.4);
+      P.legs[0].rotation.x = Math.sin(m.walk * 2) * 0.8 * mv; P.legs[3].rotation.x = P.legs[0].rotation.x; P.legs[1].rotation.x = -P.legs[0].rotation.x; P.legs[2].rotation.x = -P.legs[0].rotation.x;
+      P.tail.rotation.y = Math.sin(m.walk * 2 + 1) * 0.5 * mv + Math.sin(t * 2) * 0.1; P.body.rotation.y = Math.sin(m.walk * 2) * 0.12 * mv;
+      P.head.rotation.y = Math.sin(t * 1.3) * 0.15;
+    } else if (type === 'glodgast') {
+      P.veils.forEach((v, i) => { v.rotation.x = Math.sin(t * 5 + i) * 0.35; v.rotation.z = Math.cos(t * 4 + i * 1.7) * 0.35; });
+      P.body.position.y = 1.2 + Math.sin(t * 2.2) * 0.08;
     } else if (P.head) {
       // fyrfota djur: betar när de står still
       P.head.rotation.x = m.graze && hs < 0.2 ? 0.55 + Math.sin(t * 2.2) * 0.08 : Math.sin(t * 0.9) * 0.05;
     }
     if (P.tail) { if (type === 'cow') P.tail.rotation.z = Math.sin(t * 2.5) * 0.25; else P.tail.rotation.y = Math.sin(t * 6) * 0.3; }
   }
-  _removeMob(i) { const m = this.mobs[i]; this.group.remove(m.model.root); disposeModel(m.model); this.mobs.splice(i, 1); }
+  _removeMob(i) { const m = this.mobs[i]; this.group.remove(m.model.root); disposeModel(m.model); this.mobs.splice(i, 1); if (m.marker && this.g.onMobRemoved) this.g.onMobRemoved(m); }
+  /** Ta bort allt (dimensionsbyte) */
+  clearAll() {
+    for (let i = this.mobs.length - 1; i >= 0; i--) this._removeMob(i);
+    for (let i = this.drops.length - 1; i >= 0; i--) this._removeDrop(i);
+    for (const e of this.falling) this.group.remove(e.mesh); this.falling.length = 0;
+    for (const s of this.shots) this.group.remove(s.mesh); this.shots.length = 0;
+    if (this.tnts) { for (const e of this.tnts) this.group.remove(e.mesh); this.tnts.length = 0; }
+    for (const p of this.parts) p.on = false;
+  }
+
+  /* ---------- bybor ---------- */
+  /** Bybons vilja: hem på natten, vandra nära byn på dagen, titta på spelaren. Returnerar true om den styr rörelsen. */
+  _villager(m, dt, pl, w, out) {
+    const g = this.g;
+    out.speed = 0; out.jump = false; out.tx = 0; out.tz = 0;
+    const dpl = Math.hypot(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z);
+    // titta på spelaren när den är nära
+    const want = dpl < 5 ? Math.atan2(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z) - m.yaw : 0;
+    let lk = ((want + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; lk = Math.max(-0.9, Math.min(0.9, lk));
+    m.look = (m.look || 0) + (lk - (m.look || 0)) * Math.min(1, dt * 5);
+    if (m.trading) { m.tyaw = Math.atan2(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z); return true; }
+    let goal = null;
+    if (g.isNight && m.home) { if (m.pos.distanceTo(m.home) > 0.8) goal = m.home; else return true; }
+    else if (m.vc && Math.hypot(m.pos.x - m.vc[0], m.pos.z - m.vc[1]) > 26) goal = tmpV2.set(m.vc[0] + 0.5, m.pos.y, m.vc[1] + 0.5);
+    if (!goal) return false;
+    const fake = this._fake || (this._fake = { pos: new THREE.Vector3() });
+    fake.pos.copy(goal);
+    this._chase(m, dt, fake, w, out);
+    out.speed = g.isNight ? m.def.speed * 1.5 : m.def.speed;
+    m.tyaw = Math.atan2(out.tx, out.tz);
+    // öppna dörrar i vägen (och stäng dem efter sig)
+    const fx = Math.floor(m.pos.x + out.tx * 0.7), fz = Math.floor(m.pos.z + out.tz * 0.7), fy = Math.floor(m.pos.y + 0.2);
+    const d = w.get(fx, fy, fz);
+    if (isDoor(d) && !BLOCKS[d].door.open) {
+      const dd = BLOCKS[d].door, ly = dd.upper ? fy - 1 : fy;
+      const lo = w.get(fx, ly, fz); if (isDoor(lo)) { const f = BLOCKS[lo].door.f; w.set(fx, ly, fz, DOOR0 + 4 + f, { noUpdate: true }); if (isDoor(w.get(fx, ly + 1, fz))) w.set(fx, ly + 1, fz, DOOR0 + 12 + f, { noUpdate: true }); (this.doors || (this.doors = [])).push({ x: fx, y: ly, z: fz, f, t: 2.5 }); }
+    }
+    return true;
+  }
+  _tickDoors(dt) {
+    if (!this.doors || !this.doors.length) return;
+    const w = this.g.world;
+    for (let i = this.doors.length - 1; i >= 0; i--) {
+      const d = this.doors[i]; d.t -= dt; if (d.t > 0) continue;
+      // stäng bara om ingen står i dörren
+      const busy = this.mobs.some(m => !m.dead && Math.floor(m.pos.x) === d.x && Math.floor(m.pos.z) === d.z) || (Math.floor(this.g.player.pos.x) === d.x && Math.floor(this.g.player.pos.z) === d.z);
+      if (busy) { d.t = 0.6; continue; }
+      if (w.get(d.x, d.y, d.z) === DOOR0 + 4 + d.f) { w.set(d.x, d.y, d.z, DOOR0 + d.f, { noUpdate: true }); if (w.get(d.x, d.y + 1, d.z) === DOOR0 + 12 + d.f) w.set(d.x, d.y + 1, d.z, DOOR0 + 8 + d.f, { noUpdate: true }); }
+      this.doors.splice(i, 1);
+    }
+  }
+
+  /* ---------- Muspelheims varelser ---------- */
+  /** Glödgasten: svävar, håller avstånd och kastar eldklot */
+  _flyer(m, dt, pl, w, canTarget, dpl) {
+    const g = this.g, md = m.def;
+    let gx, gy, gz;
+    if (canTarget) {
+      const ax = m.pos.x - pl.pos.x, az = m.pos.z - pl.pos.z, l = Math.hypot(ax, az) || 1;
+      const want = 9 + Math.sin(g.time * 0.5 + m.seed) * 2;
+      gx = pl.pos.x + ax / l * want + Math.cos(g.time * 0.7 + m.seed) * 2; gz = pl.pos.z + az / l * want + Math.sin(g.time * 0.6 + m.seed) * 2; gy = pl.pos.y + 4.5;
+      m.tyaw = Math.atan2(pl.pos.x - m.pos.x, pl.pos.z - m.pos.z);
+      m.shotCd -= dt;
+      if (m.shotCd <= 0 && dpl < 26) {
+        const see = this._los(m, pl, 1.2);
+        m.shotCd = see ? 2.8 + Math.random() * 1.6 - (g.difficulty === 2 ? 0.7 : 0) : 0.6;
+        if (see) {
+          const from = new THREE.Vector3(m.pos.x, m.pos.y + 1.2, m.pos.z), aim = new THREE.Vector3(pl.pos.x, pl.pos.y + 1.1, pl.pos.z).sub(from).normalize();
+          from.addScaledVector(aim, 0.8);
+          this.shootFire(from, aim.multiplyScalar(11), md.dmg * g.diffDmg());
+          mobSound(g.audio, 'skeleton', 'attack', this._vol(m));
+        }
+      }
+    } else {
+      m.wander -= dt;
+      if (m.wander <= 0) { m.wander = 3 + Math.random() * 4; const a = Math.random() * Math.PI * 2; m.dir.set(Math.sin(a), Math.cos(a)); m.hoverY += (Math.random() - 0.5) * 4; }
+      gx = m.pos.x + m.dir.x * 4; gz = m.pos.z + m.dir.y * 4; gy = m.hoverY;
+      m.tyaw = Math.atan2(m.dir.x, m.dir.y);
+    }
+    const v = m.fly.set(gx - m.pos.x, gy - m.pos.y, gz - m.pos.z);
+    const l = v.length(); if (l > 0.01) v.multiplyScalar(Math.min(1, l) * md.speed / Math.max(1, l));
+    const k = 1 - Math.exp(-2.5 * dt);
+    m.vel.x += (v.x - m.vel.x) * k; m.vel.y += (v.y - m.vel.y) * k; m.vel.z += (v.z - m.vel.z) * k;
+    const r = moveBody(w, m.pos, m.vel, dt, { hw: 0.45, h: 1.6 });
+    if (r.hitX || r.hitZ) { m.wander = 0; m.hoverY += 1; }
+    if (r.hitY) m.hoverY = m.pos.y + (r.ground ? 2 : -2);
+    let dy = m.tyaw - m.yaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
+    m.yaw += dy * (1 - Math.exp(-6 * dt));
+    if (Math.random() < dt * 8) this.particle(m.pos.x + (Math.random() - 0.5) * 0.6, m.pos.y + 0.6, m.pos.z + (Math.random() - 0.5) * 0.6, 0, -0.6, 0, FIRE[Math.random() * 3 | 0], 0.07 + Math.random() * 0.06, 0.6, -0.1, true);
+    if (canTarget) { m.soundT -= dt; if (m.soundT <= 0) { m.soundT = 5 + Math.random() * 6; mobSound(g.audio, 'zombie', 'idle', Object.assign(this._vol(m), { pitch: 1.6 })); } }
+    this._animate(m, 0, dt);
+    m.light.setRGB(1, 0.85, 0.75);
+    if (m.hurtT > 0.25) m.model.mat.color.setRGB(1, 0.3, 0.3); else m.model.mat.color.copy(m.light);
+  }
+  /** Eldjätten: markslag som slungar bort spelaren och eldklot på avstånd */
+  _bossMoves(m, dt, pl, w, hdist) {
+    const g = this.g;
+    m.slamCd = (m.slamCd ?? 4) - dt; m.fireCd = (m.fireCd ?? 3) - dt;
+    if (m.slamT > 0) {
+      m.slamT -= dt;
+      if (m.slamT <= 0) {
+        g.shake = Math.min(1, g.shake + 0.8);
+        g.audio.play('boom', { vol: 0.5 });
+        for (let i = 0; i < 40; i++) { const a = i / 40 * Math.PI * 2; this.particle(m.pos.x + Math.cos(a) * 1.5, m.pos.y + 0.2, m.pos.z + Math.sin(a) * 1.5, Math.cos(a) * 7, 1.5, Math.sin(a) * 7, FIRE[i % 3], 0.18, 0.6, 0.4, true); }
+        const d = m.pos.distanceTo(pl.pos);
+        if (d < 6.5) { g.damagePlayer((1 - d / 7) * 9 * g.diffDmg() + 2, tmpV.set(pl.pos.x - m.pos.x, 0, pl.pos.z - m.pos.z).normalize(), 14, m.type); pl.burnT = Math.max(pl.burnT || 0, 2); }
+      }
+    } else if (m.slamCd <= 0 && hdist < 5.5) { m.slamCd = 6 + Math.random() * 2; m.slamT = 0.7; mobSound(g.audio, 'zombie', 'attack', this._vol(m)); }
+    if (m.fireCd <= 0 && hdist > 7 && hdist < 24) {
+      m.fireCd = 3.2 + Math.random();
+      if (this._los(m, pl, 3)) {
+        const from = new THREE.Vector3(m.pos.x, m.pos.y + 3, m.pos.z), aim = new THREE.Vector3(pl.pos.x, pl.pos.y + 1.1, pl.pos.z).sub(from).normalize();
+        from.addScaledVector(aim, 1.4);
+        for (const sp of [-0.12, 0, 0.12]) { const a = aim.clone(); a.x += -aim.z * sp; a.z += aim.x * sp; this.shootFire(from.clone(), a.normalize().multiplyScalar(12), 5 * g.diffDmg()); }
+      }
+    }
+  }
+  /** Eldklot (ingen gravitation). Träff: skada + brand. */
+  shootFire(from, vel, dmg) {
+    if (!this._fireGeo) this._fireGeo = new THREE.IcosahedronGeometry(0.28, 0);
+    const mesh = new THREE.Mesh(this._fireGeo, EMBER_MAT);
+    mesh.position.copy(from); this.group.add(mesh);
+    this.shots.push({ pos: from.clone(), vel: vel.clone(), life: 5, mesh, owner: 'mob', dmg, fire: true });
+    try { this.g.audio.noise({ dur: 0.35, vol: 0.12 * Math.max(0.15, 1 - from.distanceTo(this.g.player.pos) / 30), freq: 500, type: 'lowpass', to: 200 }); } catch (e) { }
+  }
 
   /* ---------- pilar ---------- */
   _arrowTemplate() {
@@ -514,13 +679,16 @@ export class Entities {
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const s = this.shots[i];
       s.life -= dt;
-      s.vel.y -= ARROW_G * dt;
+      if (!s.fire) s.vel.y -= ARROW_G * dt;
       s.pos.addScaledVector(s.vel, dt);
-      s.mesh.position.copy(s.pos); s.mesh.lookAt(tmpV.copy(s.pos).add(s.vel));
+      s.mesh.position.copy(s.pos);
+      if (s.fire) { s.mesh.rotation.x += dt * 6; s.mesh.rotation.y += dt * 4; if (Math.random() < dt * 30) this.particle(s.pos.x, s.pos.y, s.pos.z, (Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5), FIRE[Math.random() * 3 | 0], 0.12, 0.4, -0.2, true); }
+      else s.mesh.lookAt(tmpV.copy(s.pos).add(s.vel));
       let hit = false;
       if (s.owner === 'mob') {
         if (pl.alive && Math.abs(s.pos.x - pl.pos.x) < 0.45 && Math.abs(s.pos.z - pl.pos.z) < 0.45 && s.pos.y > pl.pos.y && s.pos.y < pl.pos.y + 1.85) {
-          this.g.damagePlayer(s.dmg, tmpV.copy(s.vel).setY(0).normalize(), 3, 'arrow');
+          const res = this.g.damagePlayer(s.dmg, tmpV.copy(s.vel).setY(0).normalize(), 3, s.fire ? 'eld' : 'arrow');
+          if (s.fire && res !== 'blocked' && !(pl.fireRes > 0)) pl.burnT = Math.max(pl.burnT || 0, 3);
           hit = true;
         }
       } else {
@@ -535,9 +703,10 @@ export class Entities {
       const b = w.get(Math.floor(s.pos.x), Math.floor(s.pos.y), Math.floor(s.pos.z));
       const wall = b > 0 && T_SOLID[b];
       if (hit || wall || s.life <= 0 || s.pos.y < -5) {
-        if (wall) { this.puff(s.pos.x, s.pos.y, s.pos.z, '#8a7a66', 4, 0.2); matSound(this.g.audio, 'wood', 'hit', { vol: Math.max(0, 1 - s.pos.distanceTo(pl.pos) / 20) }); }
+        if (s.fire) { for (let k = 0; k < 14; k++) this.particle(s.pos.x, s.pos.y, s.pos.z, (Math.random() - 0.5) * 5, Math.random() * 4, (Math.random() - 0.5) * 5, FIRE[k % 3], 0.12, 0.5, 0.4, true); }
+        else if (wall) { this.puff(s.pos.x, s.pos.y, s.pos.z, '#8a7a66', 4, 0.2); matSound(this.g.audio, 'wood', 'hit', { vol: Math.max(0, 1 - s.pos.distanceTo(pl.pos) / 20) }); }
         // spelarens pilar kan oftast plockas upp igen
-        if (wall && s.owner === 'player' && Math.random() < 0.75) this.drop(I.arrow, 1, s.pos.x - s.vel.x * dt * 1.5, s.pos.y - s.vel.y * dt * 1.5, s.pos.z - s.vel.z * dt * 1.5, 0, tmpV.set(0, 0, 0));
+        if (wall && !s.fire && s.owner === 'player' && Math.random() < 0.75) this.drop(I.arrow, 1, s.pos.x - s.vel.x * dt * 1.5, s.pos.y - s.vel.y * dt * 1.5, s.pos.z - s.vel.z * dt * 1.5, 0, tmpV.set(0, 0, 0));
         this.group.remove(s.mesh); this.shots.splice(i, 1);
       }
     }
@@ -548,6 +717,7 @@ export class Entities {
     this.spawnT -= dt;
     if (this.spawnT > 0) return;
     const g = this.g, w = g.world, pl = g.player;
+    if (g.dim === 'muspel') { this.spawnT = 2; this._spawnMuspel(); return; }
     this.spawnT = g.difficulty === 2 ? 1.6 : 2.4;
     let pass = 0, host = 0;
     for (const m of this.mobs) { if (m.def.hostile) host++; else pass++; }
@@ -610,6 +780,42 @@ export class Entities {
     if (this.howlT <= 0 && g.sky.daylight < 0.2) { this.howlT = 30 + Math.random() * 40; mobSound(g.audio, 'zombie', 'idle', { vol: 0.35, pan: Math.random() * 1.6 - 0.8 }); }
   }
 
+  /** Muspelheim: askvandrare i flock på golven, glödgaster i luften, salamandrar vid lavan */
+  _spawnMuspel() {
+    const g = this.g, w = g.world, pl = g.player;
+    if (g.difficulty === 0 || pl.creative) return;
+    let host = 0; for (const m of this.mobs) if (m.def.hostile && !m.def.boss) host++;
+    const cap = g.difficulty === 2 ? 14 : 9;
+    if (host >= cap) return;
+    for (let tr = 0; tr < 5; tr++) {
+      const a = Math.random() * Math.PI * 2, d = 18 + Math.random() * 26;
+      const x = Math.floor(pl.pos.x + Math.cos(a) * d), z = Math.floor(pl.pos.z + Math.sin(a) * d);
+      const c = w.getChunk(x >> 4, z >> 4); if (!c || !c.data) continue;
+      const r = Math.random();
+      const top = Math.min(118, Math.floor(pl.pos.y) + 20);
+      if (r < 0.28) {
+        // glödgast: öppen luft
+        for (let y = top; y > 34; y--) {
+          if (w.get(x, y, z) === 0 && w.get(x, y + 1, z) === 0 && w.get(x, y - 1, z) === 0 && w.get(x + 1, y, z) === 0 && w.get(x - 1, y, z) === 0 && w.get(x, y - 3, z) === 0) { if (Math.abs(y - pl.pos.y) < 22) { this.spawnMob('glodgast', x + 0.5, y, z + 0.5); return; } break; }
+        }
+        continue;
+      }
+      // golv eller lavayta
+      for (let y = top; y > 30; y--) {
+        const b = w.get(x, y, z), below = w.get(x, y - 1, z);
+        if (b !== 0 || w.get(x, y + 1, z) !== 0) continue;
+        if (Math.abs(y - pl.pos.y) > 20) break;
+        if (isLava(below)) { if (r < 0.55) { this.spawnMob('salamander', x + 0.5, y, z + 0.5); return; } break; }
+        if (below > 0 && T_SOLID[below]) {
+          if (r < 0.48) { this.spawnMob('salamander', x + 0.5, y, z + 0.5); return; }
+          const n = 2 + (Math.random() * 3 | 0);
+          for (let k = 0; k < n; k++) this.spawnMob('askvandrare', x + 0.5 + (k % 2) * 0.8, y, z + 0.5 + (k >> 1) * 0.8);
+          return;
+        }
+      }
+    }
+  }
+
   /* ---------- tänd TNT ---------- */
   primeTnt(x, y, z, fuse) {
     const mesh = new THREE.Mesh(blockGeo(B.tnt), this.g.mats.entity);
@@ -641,11 +847,12 @@ export class Entities {
     this._updateFalling(dt);
     this._updateMobs(dt);
     this._updateShots(dt);
+    this._tickDoors(dt);
     this._spawnTick(dt);
   }
   /** Fientliga varelser i närheten (för sömn) */
-  hostileNear(p, r) { return this.mobs.some(m => !m.dead && m.def.hostile && !m.calm && m.pos.distanceTo(p) < r); }
-  clearHostiles() { for (let i = this.mobs.length - 1; i >= 0; i--) if (this.mobs[i].def.hostile) this._removeMob(i); }
+  hostileNear(p, r) { return this.mobs.some(m => !m.dead && m.def.hostile && !m.calm && !(m.def.neutral && m.angryT <= 0) && m.pos.distanceTo(p) < r); }
+  clearHostiles() { for (let i = this.mobs.length - 1; i >= 0; i--) if (this.mobs[i].def.hostile && !this.mobs[i].def.boss) this._removeMob(i); }
   /** Antal levande varelser per typ (för F3) */
   census() { const c = {}; for (const m of this.mobs) if (!m.dead) c[m.def.name] = (c[m.def.name] || 0) + 1; return Object.entries(c).map(([k, v]) => k + ' ' + v).join(', '); }
 }

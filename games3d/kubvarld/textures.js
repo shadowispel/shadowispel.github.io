@@ -1,5 +1,5 @@
 /** Procedurellt ritade pixeltexturer (16×16) för block och föremål, samt ikoner. */
-import { TILES, TILE, BLOCKS, ITEMS, M_CUBE, M_BOX, itemTile } from './blocks.js';
+import { TILES, TILE, BLOCKS, ITEMS, M_CUBE, M_BOX, itemTile, isBlock, BLOCK_MAX } from './blocks.js';
 import { mulberry, hashStr } from './noise.js';
 
 const S = 16;
@@ -184,7 +184,7 @@ const TOOLS = {
   hoe: ['................', '......hhhhhh....', '......hHHHHh....', '.........sSh....', '........sS......', '.......sS.......', '......sS........', '.....sS.........', '....sS..........', '...sS...........', '..sS............', '.sS.............', '................', '................', '................', '................'],
   sword: ['................', '.............hh.', '............hHh.', '...........hHh..', '..........hHh...', '.........hHh....', '........hHh.....', '.......hHh......', '..g...hHh.......', '...g.hHh........', '....gHh.........', '....sg..........', '...sS.g.........', '..sS............', '.hh.............', '................']
 };
-const TIER_COL = [['#c9995a', '#8a6132'], ['#a3a6ae', '#6c6f78'], ['#eef0f2', '#a9adb2'], ['#e6fbff', '#58b4dc'], ['#fff0a0', '#d8a428']];
+const TIER_COL = [['#c9995a', '#8a6132'], ['#a3a6ae', '#6c6f78'], ['#eef0f2', '#a9adb2'], ['#e6fbff', '#58b4dc'], ['#fff0a0', '#d8a428'], ['#ff8a3a', '#3a2422']];
 
 // Nordisk palett
 const GRASS = P(['#3b6440', '#487246', '#56824b', '#669252', '#78a35b']);
@@ -565,6 +565,84 @@ const draw = {
   },
   i_pumpkin_seeds(p) { p.clear(); for (const [x, y] of [[4, 5], [9, 4], [6, 9], [11, 9], [8, 12], [4, 12]]) { p.rect(x, y, 2, 3, hex('#f0e2a8')); p.set(x, y, hex('#fff6d0')); p.set(x + 1, y + 2, hex('#c8b070')); } },
   i_melon_seeds(p) { p.clear(); for (const [x, y] of [[4, 5], [9, 4], [6, 9], [11, 9], [8, 12], [4, 12]]) { p.rect(x, y, 2, 3, hex('#2a2018')); p.set(x, y, hex('#5a4a38')); } },
+  /* ----- utökning 3: strukturer och Muspelheim ----- */
+  cobweb(p) {
+    p.clear(); const W = hex('#e8e8ee');
+    for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2 + 0.2; for (let r = 1; r < 9; r++) p.setIn(Math.round(8 + Math.cos(a) * r), Math.round(8 + Math.sin(a) * r), W, 200); }
+    for (const R of [2.5, 4.6, 6.8]) for (let a = 0; a < 6.28; a += 0.12) p.setIn(Math.round(8 + Math.cos(a) * R), Math.round(8 + Math.sin(a) * R), shade(W, 0.85), 170);
+  },
+  rail(p) {
+    p.clear();
+    for (const y of [1, 5, 9, 13]) { p.rect(1, y, 14, 2, hex('#7a5530')); p.rect(1, y + 1, 14, 1, hex('#5e3f20')); }
+    for (let y = 0; y < S; y++) { p.set(3, y, hex('#b4b7bd')); p.set(4, y, hex('#7c7f86')); p.set(11, y, hex('#b4b7bd')); p.set(12, y, hex('#7c7f86')); }
+  },
+  portal(p) { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const v = Math.sin(x * 0.8 + y * 0.4) + Math.sin(y * 0.9 - x * 0.3); p.set(x, y, mix(hex('#6a0a04'), hex('#ffa030'), v * 0.25 + 0.5), 210); } },
+  smithing_top(p) { ramp(p, field(p), P(['#2c2e34', '#363940', '#40434b']), 0.06); p.rect(2, 2, 12, 12, hex('#4a4d55')); p.rect(3, 3, 10, 10, hex('#2a2c31')); p.line(4, 11, 10, 5, hex('#9a9da4')); p.rect(9, 4, 3, 2, hex('#7c7f86')); frame(p, hex('#1e2024')); },
+  smithing_side(p) { planks(p, hex('#6e4a2c')); p.rect(0, 0, 16, 4, hex('#3a3d44')); p.rect(0, 1, 16, 1, hex('#5a5d65')); p.rect(0, 12, 16, 2, hex('#3a3d44')); },
+  smithing_front(p) { draw.smithing_side(p); p.rect(4, 6, 8, 5, hex('#2a2c31')); p.rect(5, 7, 6, 3, hex('#ff8a3a')); p.rect(6, 8, 4, 1, hex('#ffd070')); },
+  askesten(p) {
+    ramp(p, field(p, 0.45, 0.35, 0.2), P(['#3e3230', '#4a3b37', '#57463f', '#64524a', '#725e54']), 0.14);
+    for (let k = 0; k < 4; k++) { const x = p.r() * S | 0, y = p.r() * S | 0; p.set(x, y, hex('#2a201e')); p.set(x + 1, y, hex('#8a7468')); }
+    if (p.r() < 2) { const x = p.r() * 14 | 0, y = p.r() * 14 | 0; p.set(x, y, hex('#ff7a30')); p.set(x + 1, y + 1, hex('#c84a1a')); }
+    bevel(p, 0.05);
+  },
+  basalt_side(p) {
+    ramp(p, field(p, 0.2, 0.3, 0.5), P(['#1a191e', '#222127', '#2a2930', '#33323a']), 0.1);
+    for (const x of [0, 5, 10]) for (let y = 0; y < S; y++) { p.set(x, y, hex('#0f0e12')); p.set(x + 1, y, hex('#3e3d46')); }
+    for (let k = 0; k < 3; k++) p.set(p.r() * S | 0, p.r() * S | 0, hex('#5a2a1a'));
+  },
+  basalt_top(p) { stones(p, [P(['#1c1b20', '#25242a', '#2e2d34', '#38373f'])], hex('#0e0d10'), 6, 0.9); },
+  basalt_bricks(p) {
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const row = y >> 2, off = row % 2 ? 4 : 0, mortar = (y & 3) === 3 || ((x + off) & 7) === 7;
+      p.set(x, y, mortar ? shade(hex('#4a140c'), 0.9 + p.r() * 0.3) : shade(hex(row % 2 ? '#2a2628' : '#24212a'), 0.9 + p.r() * 0.18 + ((y & 3) === 0 ? 0.12 : 0)));
+    }
+    for (let k = 0; k < 3; k++) p.set(p.r() * S | 0, (p.r() * 4 | 0) * 4 + 3, hex('#ff6a2a'));
+  },
+  glodsten(p) {
+    ramp(p, field(p, 0.5, 0.3, 0.2), P(['#a2481a', '#c8621e', '#e08a2a', '#f4b244', '#ffd870']), 0.16);
+    for (let k = 0; k < 7; k++) { const x = p.r() * S | 0, y = p.r() * S | 0; p.set(x, y, hex('#fff4c0')); p.set(x + 1, y, hex('#ffe08a')); p.set(x, y + 1, hex('#8a3a12')); }
+  },
+  svavelsand(p) {
+    ramp(p, field(p, 0.4, 0.3, 0.3), P(['#8e7a2e', '#a08a38', '#b49c44', '#c4ac52', '#d4bc62']), 0.12);
+    for (let k = 0; k < 6; k++) p.set(p.r() * S | 0, p.r() * S | 0, hex(p.r() < 0.5 ? '#e8d878' : '#6a5a22'));
+    bevel(p, 0.04);
+  },
+  urmalm(p) {
+    draw.basalt_side(p);
+    for (let k = 0; k < 4; k++) {
+      const cx = 3 + (p.r() * 10 | 0), cy = 3 + (p.r() * 10 | 0);
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const d = Math.hypot(dx, dy); if (d < 2.4) p.setIn(cx + dx, cy + dy, d < 1 ? hex('#e6c070') : d < 1.8 ? hex('#8a5a3a') : hex('#5a3a2e')); }
+    }
+    p.set(7, 7, hex('#fff0b0'));
+  },
+  eldsvamp(p) {
+    p.clear();
+    for (let y = 9; y < 16; y++) { p.set(7, y, hex('#d8c8b0')); p.set(8, y, hex('#b8a890')); }
+    for (let y = 3; y < 10; y++) { const w = y < 5 ? 3 : y < 8 ? 6 : 5; for (let x = 8 - w; x < 8 + w; x++) p.setIn(x, y, y === 9 ? hex('#7a1a0e') : shade(hex('#e0401a'), 0.9 + p.r() * 0.2)); }
+    for (const [x, y] of [[5, 5], [9, 4], [11, 7], [6, 8], [8, 6]]) p.setIn(x, y, hex('#ffd060'));
+  },
+  glodrot(p) {
+    p.clear();
+    for (let k = 0; k < 4; k++) { let x = 3 + k * 3, y = 15; for (let i = 0; i < 12; i++) { p.setIn(x, y, i > 8 ? hex('#ffd070') : shade(hex('#e8641e'), 0.8 + p.r() * 0.3)); y--; if (p.r() < 0.4) x += p.r() < 0.5 ? 1 : -1; } }
+  },
+  spout_top(p) { draw.basalt_top(p); p.rect(3, 3, 10, 10, hex('#141216')); for (let i = 4; i < 12; i += 2) { p.line(i, 4, i, 11, hex('#4a4650')); } p.rect(6, 6, 4, 4, hex('#ff6a1a')); p.rect(7, 7, 2, 2, hex('#ffd070')); },
+  spout_side(p) { draw.basalt_bricks(p); p.rect(5, 5, 6, 5, hex('#141216')); p.rect(6, 6, 4, 3, hex('#c8401a')); },
+  hay_top(p) { ramp(p, field(p, 0.3, 0.3, 0.4), P(['#a8862a', '#c09a32', '#d4b040', '#e6c454']), 0.12); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (Math.hypot(x - 7.5, y - 7.5) % 3 < 0.8) p.set(x, y, hex('#9a7a24')); },
+  hay_side(p) { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) p.set(x, y, shade(hex(x % 3 ? '#d0aa3c' : '#b8922e'), 0.9 + p.r() * 0.2)); for (const y of [3, 12]) { p.rect(0, y, 16, 1, hex('#8a2a1e')); p.rect(0, y + 1, 16, 1, hex('#6a1e16')); } },
+  i_glodkarna(p) {
+    p.clear();
+    for (let y = 2; y < 15; y++) for (let x = 2; x < 15; x++) { const d = Math.hypot(x - 8, y - 8.5); if (d < 5.6) p.set(x, y, d > 4.6 ? hex('#7a2a10') : d < 2 ? hex('#fff0b0') : shade(hex('#ff8a2a'), 0.85 + (5 - d) * 0.06)); }
+    p.line(5, 9, 11, 7, hex('#3a1208')); p.line(8, 4, 7, 13, hex('#3a1208')); p.set(6, 6, hex('#ffffff'));
+  },
+  i_glodfragment(p) { p.clear().mask(['................', '................', '.........o......', '........oOo.....', '.......oOYOo....', '......oOYYOo....', '.....oOOYOOo....', '....oOOOOOo.....', '....oOOOOo......', '.....oOOo.......', '......oo........'], { o: hex('#7a2a10'), O: hex('#ff7a2a'), Y: hex('#ffd070') }); },
+  i_urskarva(p) { p.clear(); for (let y = 4; y < 13; y++) for (let x = 3; x < 13; x++) { const e = Math.abs(x - 8) + Math.abs(y - 8.5) * 1.2; if (e < 5.5) p.set(x, y, e > 4.4 ? hex('#1e1416') : shade(hex('#4a3438'), 0.85 + p.r() * 0.3)); } p.line(5, 7, 10, 10, hex('#d8a860')); p.line(7, 5, 9, 11, hex('#a87a44')); p.set(8, 8, hex('#ffe0a0')); },
+  i_surtstal(p) { ingot(p, hex('#3a2624'), hex('#1e1212')); p.line(4, 8, 11, 8, hex('#ff7a2a')); p.line(5, 10, 10, 10, hex('#c84a1a')); p.set(6, 7, hex('#ffd070')); },
+  i_map_village(p) { mapIcon(p, '#7aa25a'); p.rect(6, 6, 4, 3, hex('#b2633f')); p.rect(5, 5, 6, 1, hex('#5a5d65')); p.line(3, 11, 12, 11, hex('#9a8a6a')); },
+  i_map_explore(p) { mapIcon(p, '#c8b484'); p.line(5, 5, 9, 9, hex('#c8302a')); p.line(9, 5, 5, 9, hex('#c8302a')); for (let x = 3; x < 13; x += 2) p.set(x, 12, hex('#6a5a3a')); },
+  i_map_fort(p) { mapIcon(p, '#7a2a1e'); p.rect(6, 5, 4, 6, hex('#24212a')); p.rect(5, 4, 1, 2, hex('#24212a')); p.rect(10, 4, 1, 2, hex('#24212a')); p.rect(7, 8, 2, 3, hex('#ff8a3a')); },
+  i_glodapple(p) { draw.i_apple(p); for (let y = 4; y < 15; y++) for (let x = 2; x < 14; x++) if (p.alpha(x, y) > 10 && !(x >= 7 && x <= 10 && y <= 4)) { const c = p.get(x, y); if (c[0] > 120) p.set(x, y, mix(c, hex('#ffb030'), 0.55)); } p.set(5, 7, hex('#fff4c0')); p.set(9, 10, hex('#ffe070')); },
+  i_pick_5(p) { tool('i_pick_5')(p); glowTool(p); }, i_axe_5(p) { tool('i_axe_5')(p); glowTool(p); }, i_shovel_5(p) { tool('i_shovel_5')(p); glowTool(p); }, i_sword_5(p) { tool('i_sword_5')(p); glowTool(p); },
   i_spark_dust(p) { p.clear(); for (let k = 0; k < 40; k++) { const a = p.r() * 6.28, r = Math.sqrt(p.r()) * 5.5; p.setIn(Math.round(8 + Math.cos(a) * r), Math.round(9 + Math.sin(a) * r * 0.7), shade(hex(p.r() < 0.3 ? '#ff9a5a' : '#e0422e'), 0.8 + p.r() * 0.4)); } p.set(7, 8, hex('#ffe0b0')); },
   i_hoe(p) { p.clear(); for (let i = 0; i < 11; i++) { p.set(3 + i, 14 - i, hex('#8a5f33')); p.set(4 + i, 14 - i, hex('#5e3f20')); } p.rect(9, 2, 5, 2, hex('#8e9198')); p.rect(9, 4, 2, 1, hex('#6c6f78')); p.set(9, 2, hex('#b4b7bd')); },
   i_seeds(p) { p.clear(); for (const [x, y] of [[5, 9], [8, 7], [10, 10], [6, 12], [9, 13], [12, 8], [4, 6]]) { p.set(x, y, hex('#c8a85a')); p.set(x + 1, y, hex('#a88a40')); p.set(x, y - 1, hex('#7aaa4a')); } },
@@ -622,6 +700,8 @@ function lampTile(p, pal, frameC) {
   for (let i = 0; i < S; i++) { p.set(i, 0, hex(frameC)); p.set(i, 15, hex(frameC)); p.set(0, i, hex(frameC)); p.set(15, i, hex(frameC)); p.set(i, 7, hex(frameC)); p.set(7, i, hex(frameC)); }
 }
 function planks90(p, base) { planks(p, base); const t = new Uint8ClampedArray(p.d); for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const s = (x * S + y) * 4, o = (y * S + x) * 4; p.d[o] = t[s]; p.d[o + 1] = t[s + 1]; p.d[o + 2] = t[s + 2]; p.d[o + 3] = t[s + 3]; } }
+function mapIcon(p, land) { p.clear(); p.rect(2, 2, 12, 12, hex('#e8dcb8')); p.rect(3, 3, 10, 10, hex(land)); for (let i = 2; i < 14; i++) { p.set(i, 2, hex('#b8a888')); p.set(i, 13, hex('#a89878')); p.set(2, i, hex('#b8a888')); p.set(13, i, hex('#a89878')); } }
+function glowTool(p) { for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { if (p.alpha(x, y) < 10) continue; const c = p.get(x, y); if (c[0] < 70 && c[1] < 50 && (x * 5 + y * 3) % 7 === 0) p.set(x, y, hex('#ff5a1a')); } }
 function frame(p, c) { for (let i = 0; i < S; i++) { p.set(i, 0, c); p.set(i, 15, c); p.set(0, i, c); p.set(15, i, c); } }
 function waterFrame(p, f) {
   // djupt nordiskt sjövatten (blågrönt) med mjuka glittervågor
@@ -648,7 +728,7 @@ const ARMOR_ROWS = {
   legs: ['................', '................', '...hhhhhhhhh....', '...hHHHHHHHh....', '...hHHhhhHHh....', '...hHh...hHh....', '...hHh...hHh....', '...hHh...hHh....', '...hHh...hHh....', '...hhh...hhh....'],
   boots: ['................', '................', '................', '................', '................', '...hh.....hh....', '...hH.....Hh....', '...hH.....Hh....', '..hHH....hHH....', '..hhh....hhh....']
 };
-const ARMOR_COL = [['#b87a46', '#7a4a22'], ['#dde0e6', '#8e9198'], ['#f6d040', '#b8901e'], ['#a8ecf8', '#3a9ec0']];
+const ARMOR_COL = [['#b87a46', '#7a4a22'], ['#dde0e6', '#8e9198'], ['#f6d040', '#b8901e'], ['#a8ecf8', '#3a9ec0'], ['#4a2c28', '#ff7a2a']];
 function armorIcon(name) {
   const m = /^i_(helmet|chest|legs|boots)_(\d)$/.exec(name); if (!m) return null;
   const [H, h] = ARMOR_COL[+m[2]].map(hex);
@@ -707,7 +787,7 @@ export function buildIcons(atlas) {
   const make = (id) => {
     const c = document.createElement('canvas'); c.width = Z; c.height = Z;
     const ctx = c.getContext('2d'); ctx.imageSmoothingEnabled = false;
-    const bd = id < 256 ? BLOCKS[id] : null;
+    const bd = isBlock(id) ? BLOCKS[id] : null;
     if (bd && (bd.model === M_CUBE || (bd.model === M_BOX && bd.boxes && bd.boxes.length === 1 && bd.boxes[0][4] >= 8 && bd.boxes[0][0] === 0 && bd.boxes[0][3] === 16 && bd.boxes[0][2] === 0 && bd.boxes[0][5] === 16))) {
       const hh = bd.model === M_BOX ? bd.boxes[0][4] / 16 : 1;
       const top = tc(atlas.tileOf(bd, 2)), left = tc(atlas.tileOf(bd, 4)), right = tc(atlas.tileOf(bd, 0));
@@ -733,7 +813,7 @@ export function buildIcons(atlas) {
     }
     return c.toDataURL();
   };
-  for (let i = 1; i < 256; i++) if (BLOCKS[i]) icons[i] = make(i);
+  for (let i = 1; i < BLOCK_MAX; i++) if (BLOCKS[i]) icons[i] = make(i);
   for (const k in ITEMS) icons[k] = make(+k);
   return icons;
 }

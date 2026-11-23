@@ -230,7 +230,7 @@ async function createWorld() {
   const st = $('nwSeed').value.trim();
   const seed = st ? (/^-?\d+$/.test(st) ? (parseInt(st, 10) >>> 0) : hashStr(st)) : ((Math.random() * 4294967296) >>> 0);
   const id = 'w' + Date.now().toString(36) + ((Math.random() * 1296) | 0).toString(36);
-  const meta = { id, name, seed, mode: nwMode, diff: nwMode === 'creative' ? 0 : nwDiff, created: Date.now(), worldTime: 0.02, version: 2 };
+  const meta = { id, name, seed, mode: nwMode, diff: nwMode === 'creative' ? 0 : nwDiff, created: Date.now(), worldTime: 0.02, version: 3 };
   await kv.set('kubvarld:w:' + id, meta);
   await updateWorldList(meta);
   hide('newworld');

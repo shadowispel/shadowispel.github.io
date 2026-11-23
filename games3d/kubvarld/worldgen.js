@@ -1,6 +1,7 @@
 /** Världsgenerering för Kubvärld. Ren modul – körs i arbetare (och på huvudtråden för spawnsökning). */
 import { makeNoise, mulberry, hash3 } from './noise.js';
 import { CX, CY, CZ, SEA, CHUNK_VOL, B } from './blocks.js';
+import { createStructures, Ctx, newExtra } from './structures.js';
 
 export const BIOMES = ['Äng', 'Granskog', 'Björkskog', 'Fjäll', 'Sanddyner', 'Myr', 'Strand', 'Sjö', 'Tallhed'];
 export const BI = { ang: 0, gran: 1, bjork: 2, fjall: 3, oken: 4, myr: 5, strand: 6, sjo: 7, tall: 8 };
@@ -82,9 +83,13 @@ export function createGen(seed, ver = 1) {
     return c0 + (c1 - c0) * ty;
   }
 
-  /** Genererar en chunk. Returnerar { data, biomes, maxY } */
-  function generate(cx, cz) {
-    const data = new Uint8Array(CHUNK_VOL);
+  const structs = createStructures(seed, (x, z) => column(x, z));
+  const sctx = new Ctx();
+  /** Genererar en chunk. skip: strukturid:n som inte ska byggas (äldre världar). Returnerar { data, biomes, maxY, extra } */
+  function generate(cx, cz, skip = null) {
+    const data = new Uint16Array(CHUNK_VOL);
+    let slist = structs.structuresAt(cx, cz);
+    if (skip && skip.length) slist = slist.filter(st => !skip.includes(st.id));
     const biomes = new Uint8Array(CX * CZ);
     const heights = new Int16Array(CX * CZ);
     const rng = mulberry((seed ^ Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663)) >>> 0);
@@ -264,6 +269,7 @@ export function createGen(seed, ver = 1) {
       if (pick > dens) continue;
       if (bio === BI.fjall && h >= c.snow - 2) continue;
       if (c.river > 0.2) continue;
+      if (slist.length && structs.noTree(slist, wx, wz)) continue;
       const lx = wx - cx * CX, lz = wz - cz * CZ;
       // kontrollera underlaget om det ligger i den här chunken
       if (lx >= 0 && lx < CX && lz >= 0 && lz < CZ) {
@@ -280,11 +286,17 @@ export function createGen(seed, ver = 1) {
       if (ver >= 2 && bio === BI.gran && type === 'pine' && r() < 0.5) type = 'oak';
       placeTree((x, y, z, id, f) => setB(data, x, y, z, id, f), type, lx, h + 1, lz, r);
     }
+    // strukturer (byggs sist så att de skriver över terräng och träd på samma sätt i alla chunkar)
+    let extra = null;
+    if (slist.length) { extra = newExtra(); structs.build(sctx.begin(data, cx, cz, extra), slist); }
     for (let i = CHUNK_VOL - 1; i >= 0; i--) if (data[i] !== 0) { maxY = Math.max(maxY, i >> 8); break; }
-    return { data, biomes, maxY };
+    return { data, biomes, maxY, extra };
   }
+  /** Strukturer som överlappar chunken (för huvudtråden: äldre världar, kartor) */
+  function structuresAt(cx, cz) { return structs.structuresAt(cx, cz); }
+  function structuresNear(x, z, r, kinds) { return structs.near(x, z, r, kinds); }
 
-  return { generate, column };
+  return { generate, column, structuresAt, structuresNear };
 }
 
 /* ---------- träd ---------- */

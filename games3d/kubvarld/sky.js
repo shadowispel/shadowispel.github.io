@@ -111,8 +111,27 @@ export class Sky {
     this._t = new THREE.Color(); this._h = new THREE.Color();
   }
 
+  /** Byt dimension: 'over' (vanlig himmel) eller 'muspel' (glödande röd dimma, ingen sol, inga moln) */
+  setDim(dim) {
+    this.dim = dim;
+    const m = dim === 'muspel';
+    this.sun.visible = this.moon.visible = this.stars.visible = !m; this.clouds.visible = !m;
+    for (const a of this.auroraMeshes) a.visible = false;
+  }
   /** tod: 0 soluppgång, .25 middag, .5 solnedgång, .75 midnatt */
   update(tod, cam, dt, viewDist, nightIdx = 0) {
+    if (this.dim === 'muspel') {
+      const t = (this._mt = (this._mt || 0) + dt);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 0.37) * Math.sin(t * 0.11 + 1);
+      this.uniforms.uTop.value.setRGB(0.09 + pulse * 0.02, 0.02, 0.015); this.uniforms.uHor.value.setRGB(0.34 + pulse * 0.06, 0.09, 0.04);
+      this.uniforms.uGlowAmt.value = 0;
+      this.skyLight.setRGB(1, 0.62, 0.45); this.fog.setRGB(0.24 + pulse * 0.04, 0.065, 0.035);
+      this.daylight = 0;
+      this.group.position.copy(cam.position);
+      this.sun.visible = this.moon.visible = this.stars.visible = false; this.clouds.visible = false;
+      for (const a of this.auroraMeshes) a.visible = false;
+      return;
+    }
     const a = tod * Math.PI * 2;
     const sd = this.sunDir.set(Math.cos(a), Math.sin(a), 0.22).normalize();
     const h = sd.y;

@@ -5,6 +5,7 @@ import {
   T_CONN, fenceLinks, fenceBoxes, fenceColl, fenceSel
 } from './blocks.js';
 import { createGen } from './worldgen.js';
+import { createMuspelGen } from './muspel.js';
 
 export const ckey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 
@@ -29,6 +30,7 @@ void main() {
 #endif
   vWP = wp.xyz;
   vLiq = (fi & 32) != 0 ? vec2(face == 2 ? 2.0 : 1.0, aData.w) : vec2(0.0);
+  if ((fi & 128) != 0) vLiq = vec2(3.0, 0.0);
   vec4 mv = viewMatrix * wp;
   gl_Position = projectionMatrix * mv;
   vFog = length(mv.xyz);
@@ -49,10 +51,21 @@ layout(location = 0) out highp vec4 pc_fragColor;
 #define gl_FragColor pc_fragColor
 uniform sampler2DArray uTex;
 uniform vec3 uSkyLight; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uMinLight; uniform float uTime; uniform float uFlicker;
-uniform float uUnderwater;
+uniform float uUnderwater; uniform vec3 uAmbient;
 in vec3 vUV; in vec4 vL; in vec3 vTint; in float vFog; in vec3 vWP; in vec2 vLiq;
 void main() {
   vec4 c = texture(uTex, vUV);
+  if (vLiq.x > 2.5) {
+    // eldport: virvlande glöd (procedurell, animerad)
+    vec3 q = vWP * 1.3;
+    float n = sin(q.x * 2.1 + q.z * 2.1 + uTime * 1.9) + sin(q.y * 2.6 - uTime * 2.7 + sin(q.x + q.z + uTime) * 1.5) + sin((q.x - q.y + q.z) * 1.4 + uTime * 1.2) + 0.6 * sin(length(fract(q.xy * 0.5 + q.zy * 0.5) - 0.5) * 14.0 - uTime * 4.0);
+    n = clamp(n / 3.6 * 0.5 + 0.5, 0.0, 1.0);
+    vec3 pc = mix(vec3(0.16, 0.004, 0.003), vec3(0.95, 0.26, 0.02), n) + vec3(1.0, 0.75, 0.3) * pow(n, 8.0);
+    float f0 = smoothstep(uFogNear, uFogFar, vFog);
+    gl_FragColor = vec4(mix(pc, uFogColor, f0 * 0.7), 0.82);
+    #include <colorspace_fragment>
+    return;
+  }
   if (vLiq.x > 0.5) {
     // vatten: mjuka, animerade vågor i pixelsteg (ingen upprepad ruta per block), mörkare på djupet
     vec2 q = floor(vWP.xz * 8.0) / 8.0;
@@ -77,7 +90,7 @@ void main() {
   float s = vL.x <= 0.0 ? 0.0 : pow(0.8, (1.0 - vL.x) * 15.0);
   float b = vL.y <= 0.0 ? 0.0 : pow(0.8, (1.0 - vL.y) * 15.0) * uFlicker;
   vec3 light = max(uSkyLight * s, vec3(1.0, 0.66, 0.36) * b * 1.1);
-  light = max(light, vec3(uMinLight));
+  light = max(light, max(vec3(uMinLight), uAmbient));
   float ao = mix(0.42, 1.0, vL.z);
   vec3 col = c.rgb * vTint * light * ao * vL.w;
   // nordisk färgsättning: svala blå skuggor, varmt ljus
@@ -99,7 +112,7 @@ export function createTerrainMaterials(atlas) {
   tex.needsUpdate = true;
   const uniforms = {
     uTex: { value: tex }, uTime: { value: 0 }, uSkyLight: { value: new THREE.Color(1, 1, 1) }, uFogColor: { value: new THREE.Color(0.6, 0.75, 0.9) },
-    uFogNear: { value: 60 }, uFogFar: { value: 100 }, uMinLight: { value: 0.03 }, uFlicker: { value: 1 }, uUnderwater: { value: 0 }
+    uFogNear: { value: 60 }, uFogFar: { value: 100 }, uMinLight: { value: 0.03 }, uFlicker: { value: 1 }, uUnderwater: { value: 0 }, uAmbient: { value: new THREE.Color(0, 0, 0) }
   };
   const base = { uniforms, vertexShader: VS, fragmentShader: FS, glslVersion: THREE.GLSL3 };
   const opaque = new THREE.ShaderMaterial({ ...base, defines: { CUTOUT: 1 } });
@@ -136,14 +149,16 @@ class Pool {
 
 /* ---------- världen ---------- */
 export class World {
-  constructor({ scene, mats, seed, fancy = true, genVer = 2 }) {
-    this.scene = scene; this.mats = mats; this.seed = seed >>> 0; this.fancy = fancy; this.genVer = genVer;
+  /** dim: 'over' (vanliga världen) eller 'muspel' (Muspelheim). structSkip: chunknycklar där strukturer inte får genereras (äldre världar). */
+  constructor({ scene, mats, seed, fancy = true, genVer = 2, dim = 'over', structSkip = null }) {
+    this.scene = scene; this.mats = mats; this.seed = seed >>> 0; this.fancy = fancy; this.genVer = genVer; this.dim = dim;
+    this.structSkip = structSkip && structSkip.length ? new Set(structSkip) : null; this._skipCache = new Map();
     this.onChunkReady = null;
     this.chunks = new Map();
     this.mods = new Map();           // ckey → Map(idx → id)
     this.dirtyMods = new Set();
     this.furnaces = new Map(); this.chests = new Map(); this.saplings = new Map();
-    this.gen = createGen(this.seed, this.genVer);  // för spawnsökning (huvudtråd)
+    this.gen = dim === 'muspel' ? createMuspelGen(this.seed) : createGen(this.seed, this.genVer);  // för spawnsökning och strukturer (huvudtråd)
     this.token = (Math.random() * 1e9) | 0;
     this.radius = 6;
     this.group = new THREE.Group(); scene.add(this.group);
@@ -163,6 +178,31 @@ export class World {
     for (const c of this.chunks.values()) this._disposeMeshes(c);
     this.chunks.clear();
     this.scene.remove(this.group);
+  }
+  /** Lägg världen åt sidan (dimensionsbyte): släpp chunkar och mesher men behåll ändringar, kistor och ugnar. */
+  suspend() {
+    this.token = (this.token + 7919) | 0;
+    for (const c of this.chunks.values()) this._disposeMeshes(c);
+    this.chunks.clear(); this._last = null;
+    this.waterQ = []; this.waterSet.clear(); this.lavaQ = []; this.lavaSet.clear();
+    this.group.visible = false;
+  }
+  resume() { this.group.visible = true; }
+  /** Strukturer som inte får genereras i en chunk (äldre världar: strukturer som överlappar redan ändrade chunkar) */
+  _skipFor(cx, cz) {
+    if (!this.structSkip || !this.gen.structuresAt) return null;
+    const out = [];
+    for (const st of this.gen.structuresAt(cx, cz)) {
+      let bad = this._skipCache.get(st.id);
+      if (bad === undefined) {
+        bad = false;
+        const [x0, , z0, x1, , z1] = st.box;
+        for (let qz = z0 >> 4; qz <= z1 >> 4 && !bad; qz++) for (let qx = x0 >> 4; qx <= x1 >> 4; qx++) if (this.structSkip.has(ckey(qx, qz))) { bad = true; break; }
+        this._skipCache.set(st.id, bad);
+      }
+      if (bad) out.push(st.id);
+    }
+    return out.length ? out : null;
   }
 
   /* ----- block ----- */
@@ -396,7 +436,7 @@ export class World {
     let nx = 0, ny = 0, nz = 0, t = 0;
     for (let i = 0; i < 200 && t <= maxD; i++) {
       const b = this.get(x, y, z);
-      if (b > 0 && !isWater(b)) {
+      if (b > 0 && !isWater(b) && !BLOCKS[b].nosel) {
         const d = BLOCKS[b];
         if (d.model === M_CUBE) { Object.assign(out, { x, y, z, nx, ny, nz, id: b, dist: t }); return out; }
         const boxes = T_CONN[b] === 1 ? fenceSel(this.connMask(x, y, z)) : d.selBox ? [d.selBox] : d.boxes;
@@ -492,10 +532,10 @@ export class World {
   _gen(c) {
     c.busy = true;
     const tok = this.token;
-    const ok = this.pool.post({ type: 'gen', seed: this.seed, ver: this.genVer, cx: c.cx, cz: c.cz, token: tok }, null, r => {
+    const ok = this.pool.post({ type: 'gen', seed: this.seed, ver: this.genVer, dim: this.dim, skip: this._skipFor(c.cx, c.cz), cx: c.cx, cz: c.cz, token: tok }, null, r => {
       c.busy = false;
       if (this.token !== tok || r.type !== 'gen') { if (this.chunks.get(c.key) === c && this.token === tok) this.chunks.delete(c.key); return; }
-      c.data = r.data; c.biomes = r.biomes; c.maxY = r.maxY; c.ver = 1;
+      c.data = r.data; c.biomes = r.biomes; c.maxY = r.maxY; c.ver = 1; c.extra = r.extra || null;
       const m = this.mods.get(c.key);
       if (m) for (const [i, id] of m) { c.data[i] = id; if ((i >> 8) > c.maxY) c.maxY = i >> 8; }
       this.stats.genMs += r.ms; this.stats.gens++;
@@ -595,8 +635,14 @@ export class World {
   }
 
   /* ----- sparning ----- */
-  modsFor(key) { const m = this.mods.get(key); if (!m) return null; const a = new Uint32Array(m.size); let i = 0; for (const [idx, id] of m) a[i++] = (idx << 8) | id; return a; }
-  loadMods(key, arr) { const m = new Map(); for (let i = 0; i < arr.length; i++) m.set(arr[i] >>> 8, arr[i] & 255); this.mods.set(key, m); }
+  /** Format 2 (16-bitars block): första värdet 0xFFFFFFFF, sedan idx * 512 + id. Format 1 (äldre): (idx << 8) | id. */
+  modsFor(key) { const m = this.mods.get(key); if (!m) return null; const a = new Uint32Array(m.size + 1); a[0] = 0xFFFFFFFF; let i = 1; for (const [idx, id] of m) a[i++] = idx * 512 + id; return a; }
+  loadMods(key, arr) {
+    const m = new Map();
+    if (arr.length && arr[0] === 0xFFFFFFFF) for (let i = 1; i < arr.length; i++) m.set(Math.floor(arr[i] / 512), arr[i] % 512);
+    else for (let i = 0; i < arr.length; i++) m.set(arr[i] >>> 8, arr[i] & 255);
+    this.mods.set(key, m);
+  }
 }
 
 export const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];

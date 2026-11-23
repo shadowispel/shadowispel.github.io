@@ -124,6 +124,17 @@ R(B.melon, 1, ['MMM', 'MMM', 'MMM'], { M: I.melon_slice }, 'Mat');
 const AMAT = [I.leather, I.iron_ingot, I.gold_ingot, I.diamond];
 const ASHAPE = [['MMM', 'M M'], ['M M', 'MMM', 'MMM'], ['MMM', 'M M', 'M M'], ['M M', 'M M']];
 for (let m = 0; m < 4; m++) for (let p = 0; p < 4; p++) R(ARMOR0 + m * 4 + p, 1, ASHAPE[p], { M: AMAT[m] }, 'Rustning');
+// utökning 3: eldporten, Muspelheim och byarna
+RS(I.glodkarna, 1, [I.diamond, I.spark_dust, I.spark_dust, B.obsidian], 'Muspelheim');
+RS(I.glodkarna, 1, [I.glodfragment, I.glodfragment, I.glodfragment, I.glodfragment], 'Muspelheim');
+RS(I.surtstal, 1, [I.urskarva, I.urskarva, I.urskarva, I.urskarva, I.gold_ingot, I.gold_ingot, I.gold_ingot, I.gold_ingot], 'Muspelheim');
+R(B.smithing, 1, ['II', 'PP', 'PP'], { I: I.iron_ingot, P: '#planks' }, 'Muspelheim');
+R(B.basalt_bricks, 4, ['SS', 'SS'], { S: B.basalt }, 'Muspelheim');
+R(B.spout, 1, ['BBB', 'BDB', 'BGB'], { B: B.basalt_bricks, D: I.spark_dust, G: B.glodsten }, 'Muspelheim');
+RS(I.glodapple, 1, [I.apple, B.eldsvamp, I.gold_ingot], 'Muspelheim');
+R(B.hay, 1, ['WWW', 'WWW', 'WWW'], { W: I.wheat }, 'Bygg');
+RS(I.wheat, 9, [B.hay], 'Bygg');
+R(B.rail, 16, ['I I', 'ISI', 'I I'], { I: I.iron_ingot, S: I.stick }, 'Bygg');
 
 /** grid: array (4 eller 9) av stack|null, size 2|3 → { recipe, out:{id,n} } | null */
 export function findRecipe(grid, size) {

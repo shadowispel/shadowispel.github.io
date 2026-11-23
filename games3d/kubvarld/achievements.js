@@ -20,6 +20,8 @@ export const ACH_CATS = [
   { id: 'fight', name: 'Strid' },
   { id: 'farm', name: 'Gård och natur' },
   { id: 'circuit', name: 'Gnistkretsar' },
+  { id: 'world', name: 'Byar och fornfynd' },
+  { id: 'muspel', name: 'Muspelheim' },
   { id: 'secret', name: 'Hemligheter' }
 ];
 
@@ -72,7 +74,32 @@ export const ACHIEVEMENTS = [
   { id: 'circuit', cat: 'circuit', name: 'Första kretsen', desc: 'Tänd en gnistlampa med ström.', icon: B.lamp_on, goal: 1, prog: g => g.tl('lamp', [1]) },
   { id: 'autodoor', cat: 'circuit', name: 'Automatisk dörr', desc: 'Öppna en dörr med ström – en tryckplatta eller knapp.', icon: I.door, goal: 1, prog: g => g.tl('autodoor', [1]) },
   { id: 'piston', cat: 'circuit', name: 'Kolvkraft', desc: 'Låt en kolv skjuta ut.', icon: B.piston_0, goal: 1, prog: g => g.tl('piston', [1]) },
+  // byar och fornfynd
+  { id: 'village', cat: 'world', name: 'Bygemenskap', desc: 'Hitta en by.', icon: B.hay, goal: 1, prog: g => g.tl('found', ['village']) },
+  { id: 'trade', cat: 'world', name: 'Bybo', desc: 'Handla med en bybo.', icon: I.emerald, goal: 1, prog: g => g.tl('trade', [1]) },
+  { id: 'trader', cat: 'world', name: 'Köpman', desc: 'Gör 25 byten med bybor.', icon: B.emerald_block, goal: 25, prog: g => g.tl('trade', [1]) },
+  { id: 'cartographer', cat: 'world', name: 'Kartläsare', desc: 'Köp en karta av en kartograf.', icon: I.map_explore, goal: 1, prog: g => g.tl('buy', [I.map_village, I.map_explore, I.map_fort]) },
+  { id: 'archaeologist', cat: 'world', name: 'Arkeolog', desc: 'Hitta en fornlämning – en domarring i skogen.', icon: B.mossy_cobble, goal: 1, prog: g => g.tl('found', ['ruin']) },
+  { id: 'miner', cat: 'world', name: 'Gruvarbetare', desc: 'Hitta en övergiven gruvgång.', icon: B.rail, goal: 1, prog: g => g.tl('found', ['mine']) },
+  { id: 'temple', cat: 'world', name: 'Ökenskatten', desc: 'Öppna en kista i ett ökentempel.', icon: B.sandstone, goal: 1, prog: g => g.tl('lootT', ['temple']) },
+  { id: 'wreck', cat: 'world', name: 'Vrakplundrare', desc: 'Öppna en sjökista i ett skeppsvrak.', icon: B.spruce_planks, goal: 1, prog: g => g.tl('lootT', ['wreck']) },
+  { id: 'explorer', cat: 'world', name: 'Upptäcktsresande', desc: 'Hitta fem olika sorters platser (by, gruva, ruin, tempel, vrak, torn, stuga, eldport).', icon: I.map_village, goal: 5, prog: g => ['village', 'mine', 'ruin', 'temple', 'wreck', 'tower', 'cabin', 'portal'].filter(k => g.tl('found', [k]) > 0).length },
+  { id: 'treasure', cat: 'world', name: 'Skattjägare', desc: 'Öppna 10 kistor i strukturer.', icon: B.chest, goal: 10, prog: g => g.tl('loot', [1]) },
+  // Muspelheim
+  { id: 'glodkarna', cat: 'muspel', name: 'Gnistan', desc: 'Tillverka en Glödkärna.', icon: I.glodkarna, goal: 1, prog: g => g.tl('c', [I.glodkarna]) },
+  { id: 'eldport', cat: 'muspel', name: 'Portalbyggare', desc: 'Tänd en eldport av obsidian.', icon: B.portal_x, goal: 1, prog: g => g.tl('portal', [1]) },
+  { id: 'through_fire', cat: 'muspel', name: 'Genom elden', desc: 'Res till Muspelheim.', icon: '🔥', goal: 1, prog: g => g.tl('dim', ['muspel']) },
+  { id: 'home_again', cat: 'muspel', name: 'Hem igen', desc: 'Återvänd från Muspelheim.', icon: '🏡', goal: 1, prog: g => g.tl('dim', ['over']) },
+  { id: 'urkraft', cat: 'muspel', name: 'Urkraft', desc: 'Bryt urmalm djupt nere i Muspelheim.', icon: B.urmalm, goal: 1, prog: g => g.tl('p', [B.urmalm]) },
+  { id: 'surtstal', cat: 'muspel', name: 'Surtstål', desc: 'Tillverka en surtståltacka.', icon: I.surtstal, goal: 1, prog: g => g.tl('c', [I.surtstal]) },
+  { id: 'master_smith', cat: 'muspel', name: 'Mästersmed', desc: 'Uppgradera ett diamantföremål till surtstål vid smidesbänken.', icon: B.smithing, goal: 1, prog: g => g.tl('smith', [1]) },
+  { id: 'fortress', cat: 'muspel', name: 'Borgfynd', desc: 'Hitta Surts borg.', icon: B.basalt_bricks, goal: 1, prog: g => g.tl('found', ['fortress']) },
+  { id: 'lord', cat: 'muspel', name: 'Borgherre', desc: 'Ta dig in i skattkammaren under Surts borg.', icon: B.gold_block, goal: 1, prog: g => g.tl('found', ['treasure']) },
+  { id: 'giant', cat: 'muspel', name: 'Jättefall', desc: 'Besegra eldjätten som vaktar borgen.', icon: B.glodsten, goal: 1, prog: g => g.tl('k', ['eldjatte']) },
+  { id: 'ghost', cat: 'muspel', name: 'Gastjägare', desc: 'Besegra en glödgast.', icon: I.spark_dust, goal: 1, prog: g => g.tl('k', ['glodgast']) },
+  { id: 'salamander', cat: 'muspel', name: 'Salamanderfångare', desc: 'Besegra tre eldsalamandrar.', icon: I.leather, goal: 3, prog: g => g.tl('k', ['salamander']) },
   // hemliga
+  { id: 'fizz', cat: 'secret', hidden: true, name: 'Pyss!', desc: 'Försök hälla ut vatten i Muspelheim.', icon: I.bucket_water, goal: 1, prog: g => g.tl('fizz', [1]) },
   { id: 'rotten', cat: 'secret', hidden: true, name: 'Usch!', desc: 'Ät ruttet kött.', icon: I.rotten_flesh, goal: 1, prog: g => g.tl('e', [I.rotten_flesh]) },
   { id: 'lava', cat: 'secret', hidden: true, name: 'Het om fötterna', desc: 'Bränn dig på lava – och överlev.', icon: B.lava, goal: 1, prog: g => g.tl('lavahurt', [1]) },
   { id: 'fall', cat: 'secret', hidden: true, name: 'Hård landning', desc: 'Överlev ett fall på minst 15 block.', icon: '🪂', goal: 1, prog: g => g.tl('bigfall', [1]) },

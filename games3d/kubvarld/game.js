@@ -1,17 +1,20 @@
 /** En spelomgång i en värld: binder ihop värld, spelare, varelser, inventarie, HUD och sparning. */
 import * as THREE from 'three';
-import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0, armorOf, LAVA, isLava, waterLevel, isHoe, TRAP0, BUTTON0, GATE0, REP0, PISTON0, STICKY0, DISP0, OBS0, isTrap, isGate, isButton, isRep, DIR6 } from './blocks.js';
+import { BLOCKS, B, I, ITEMS, CY, SEA, isWater, isDoor, isBed, DOOR0, BED0, toolOf, foodOf, itemName, placeOf, T_SOLID, M_CROSS, WATER, itemDef, TOOL0, armorOf, LAVA, isLava, waterLevel, isHoe, TRAP0, BUTTON0, GATE0, REP0, PISTON0, STICKY0, DISP0, OBS0, isTrap, isGate, isButton, isRep, DIR6, isBlock, isPortal, ARMOR0, SURT_ARMOR0 } from './blocks.js';
+import { rollLoot, LOOT_NAMES, PORTAL_FRAME, PORTAL_INNER } from './structures.js';
+import { MUSPEL_SCALE } from './muspel.js';
+import { PROFS } from './models.js';
 import { World, DIR4, ckey } from './world.js';
 import { Sky } from './sky.js';
 import { Player } from './player.js';
-import { Entities, lightColor, MOBS } from './entities.js';
+import { Entities, lightColor, MOBS, AMBIENT } from './entities.js';
 import { Inventory, newFurnace, tickFurnace, wantName } from './inventory.js';
 import { UI } from './ui.js';
 import { Hand } from './hand.js';
 import { matSound, birdChirp } from './sfx.js';
 import { placeTree, BIOMES } from './worldgen.js';
 import { mulberry } from './noise.js';
-import { kv, toast, submitScore, isTouchDevice } from '../../engine/kit.js';
+import { kv, toast, submitScore, isTouchDevice, loadingScreen, show } from '../../engine/kit.js';
 import { Achievements } from './achievements.js';
 import { Circuits } from './circuits.js';
 import { hasCustomSkin } from './skin.js';
@@ -27,6 +30,23 @@ const MOON_SVG = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4
 const REACH = 5, REACH_C = 6;
 
 const CROP_T = () => 0.1 + Math.random() * 0.1; // dagar per växtsteg
+const PORTAL_TIME = 2.6, DIM_NAME = { over: 'den vanliga världen', muspel: 'Muspelheim' };
+// Muspelheims musik: långsam frygisk skala, mörka sågtandsackord och trummor som slår som en smedja
+const MUSPEL_MUSIC = { tempo: 56, root: 45, scale: [0, 1, 3, 5, 7, 8, 10], chords: [[0, 2, 4], [1, 3, 5], [0, 2, 4], [5, 7, 9], [6, 8, 10], [1, 3, 5]], pad: 'sawtooth', arp: true, arpEvery: 4, arpType: 'square', arpVol: 0.012, bass: true, drums: true };
+/** Bybornas byteserbjudanden per yrke: give = [[id, antal]...], get = [id, antal] */
+const TRADES = {
+  bonde: [[[[I.wheat, 20]], [I.emerald, 1]], [[[I.carrot, 16]], [I.emerald, 1]], [[[I.potato, 18]], [I.emerald, 1]], [[[I.emerald, 1]], [I.bread, 6]], [[[I.emerald, 1]], [I.apple, 4]], [[[I.emerald, 2]], [I.pie, 3]], [[[I.emerald, 1]], [I.pumpkin_seeds, 4]]],
+  smed: [[[[I.coal, 15]], [I.emerald, 1]], [[[I.iron_ingot, 4]], [I.emerald, 1]], [[[I.diamond, 1]], [I.emerald, 3]], [[[I.emerald, 3]], [TOOL0 + 8, 1]], [[[I.emerald, 4]], [TOOL0 + 11, 1]], [[[I.emerald, 6]], [ARMOR0 + 5, 1]], [[[I.emerald, 9], [I.iron_ingot, 2]], [TOOL0 + 12, 1]], [[[I.emerald, 6]], [B.obsidian, 2]]],
+  bibliotekarie: [[[[I.paper, 24]], [I.emerald, 1]], [[[I.emerald, 2]], [B.bookshelf, 2]], [[[I.emerald, 4]], [I.compass, 1]], [[[I.emerald, 5]], [I.clock, 1]], [[[I.emerald, 3]], [B.lantern, 3]], [[[I.emerald, 10]], [I.glodfragment, 1]]],
+  fiskare: [[[[I.fish, 6]], [I.emerald, 1]], [[[I.string, 12]], [I.emerald, 1]], [[[I.emerald, 1]], [I.fish_cooked, 6]], [[[I.emerald, 2]], [I.rod, 1]], [[[I.emerald, 2]], [I.bucket, 1]]],
+  kartograf: [[[[I.paper, 12]], [I.emerald, 1]], [[[I.emerald, 1]], [I.paper, 8]], [[[I.emerald, 4]], [I.map_village, 1]], [[[I.emerald, 6]], [I.map_explore, 1]], [[[I.emerald, 10], [I.compass, 1]], [I.map_fort, 1]]]
+};
+const FOUND_MSG = {
+  village: 'Du har hittat en by! Högerklicka på en bybo för att handla.', mine: 'En övergiven gruvgång… Akta dig för spindlarna.', ruin: 'En uråldrig domarring. Kanske finns något gömt vid runstenen?',
+  temple: 'Ett ökentempel! Se upp för fällor.', wreck: 'Ett gammalt skeppsvrak.', tower: 'Resterna av ett vakttorn.', cabin: 'En övergiven stuga i skogen.',
+  portal: 'En förfallen eldport… Laga bågen med obsidian och tänd den med en Glödkärna.', fortress: 'Surts borg reser sig ur lavan!', ashruin: 'En askruin i Muspelheim.', treasure: 'Skattkammaren under Surts borg!'
+};
+const KIND_NAME = { village: 'By', mine: 'Gruvgång', ruin: 'Fornlämning', temple: 'Ökentempel', wreck: 'Skeppsvrak', tower: 'Vakttorn', cabin: 'Stuga', portal: 'Förfallen eldport', fortress: 'Surts borg', ashruin: 'Askruin' };
 export class Game {
   constructor(app, meta) {
     this.app = app;
@@ -42,11 +62,13 @@ export class Game {
     this.flags = Object.assign({}, meta.flags || {});
     this.flags.tally = Object.assign({}, this.flags.tally || {});
     this.touch = isTouchDevice();
-    this.world = new World({ scene: this.scene, mats: this.mats, seed: meta.seed, fancy: this.settings.get('fancyLeaves'), genVer: (meta.version || 1) >= 2 ? 2 : 1 });
+    // dimensioner: 'over' (vanliga världen) och 'muspel' (Muspelheim). this.dim är spelarens dimension (synkbart tillstånd).
+    this.dim = meta.dim === 'muspel' ? 'muspel' : 'over';
+    this.worlds = {}; this.circs = {};
+    this.portals = { over: [], muspel: [], ...(meta.portals || {}) };
+    this.markers = new Map(); this.spawned = new Set();
+    this.world = this._createWorld('over');
     this.applyView();
-    this.world.onBlockChange = (x, y, z, o, n) => this._onBlockChange(x, y, z, o, n);
-    this.world.onFall = (x, y, z, id) => this.ents.fallBlock(x, y, z, id);
-    this.world.onDrop = (x, y, z, id) => { if (!this.creative) this._dropsFor(id, x, y, z, null); };
     this.sky = new Sky(this.scene, meta.seed);
     this.player = new Player(this);
     this.player.creative = this.creative;
@@ -72,8 +94,7 @@ export class Game {
     this.ready = false; this.paused = false; this.sleeping = 0;
     this.saveT = 45; this.musicT = 0; this.ambT = 8; this.curMusic = null;
     this.achievements = new Achievements(this);
-    this.circuits = new Circuits(this);
-    this.world.onChunkReady = (c, m) => this.circuits.onChunkReady(c, m);
+    this.circuits = this.circs.over = new Circuits(this, meta.circ || []);
     this.customSkin = hasCustomSkin();
     this.tutMoved = 0; this._lastPos = new THREE.Vector3();
     this.lastW = 0; this.lastSpace = 0;
@@ -84,9 +105,10 @@ export class Game {
     // ladda sparat
     if (meta.inv) this.inv.load(meta.inv);
     else if (this.creative) { [B.grass, B.cobble, B.spruce_planks, B.glass, B.torch, B.stone_bricks, B.birch_log, B.lantern, B.wool_red].forEach((id, i) => this.inv.slots[i] = { id, n: 64, d: 0 }); }
-    if (meta.furnaces) for (const [k, f] of meta.furnaces) this.world.furnaces.set(k, f);
-    if (meta.chests) for (const [k, c] of meta.chests) this.world.chests.set(k, c);
-    if (meta.saplings) for (const [k, t] of meta.saplings) this.world.saplings.set(k, t);
+    this._loadWorldState(this.world, meta);
+    this.flags.seen = this.flags.seen || {}; this.flags.bosses = this.flags.bosses || {};
+    this.spouts = []; this.portalT = 0; this.portalCd = false;
+    this._mkOverlay();
     this.spawn = meta.spawn || null;
     this.bed = meta.bed || null;
     this.ui.updateHotbar(true);
@@ -110,7 +132,17 @@ export class Game {
       if (arr) this.world.loadMods(ckey(cx, cz), arr instanceof Uint32Array ? arr : new Uint32Array(arr));
       if (++i % 20 === 0) progress(0.1 * i / keys.length, 'Läser sparade ändringar…');
     }
+    // äldre världar: strukturer får inte byggas där spelaren redan har ändrat något
+    if (!this.meta.structInit) { this.meta.structInit = 1; if ((this.meta.version || 1) < 3 && this.world.mods.size) this.meta.structSkip = [...this.world.mods.keys()]; }
+    if (this.meta.structSkip && this.meta.structSkip.length) this.world.structSkip = new Set(this.meta.structSkip);
     if (!this.spawn) { const s = this.world.findSpawn(); this.spawn = [s.x, s.y, s.z]; }
+    if (this.dim === 'muspel') {
+      progress(0.08, 'Läser Muspelheim…');
+      const W = await this._ensureWorld('muspel');
+      this.world.suspend(); W.resume();
+      this.world = W; this.circuits = this.circs.muspel;
+    }
+    this.sky.setDim(this.dim);
     const p = this.meta.player;
     if (p) { this.player.pos.set(p.pos[0], p.pos[1], p.pos[2]); this.player.yaw = p.yaw; this.player.pitch = p.pitch; Object.assign(this.player, { health: p.health, food: p.food, sat: p.sat ?? 5, air: 15, flying: !!p.flying && this.creative }); this.player.view = p.view || 0; }
     else { this.player.pos.set(this.spawn[0], this.spawn[1], this.spawn[2]); this.needGround = true; }
@@ -128,7 +160,9 @@ export class Game {
     // se till att spelaren inte är inne i ett block
     this._unstuck();
     this.ready = true;
+    this.portalCd = this._inPortal();
     this._lastPos.copy(this.player.pos);
+    if (this.dim === 'muspel') this.log('Du är i Muspelheim. Hitta en eldport för att ta dig hem.', 'bad');
     this.log(this.creative ? (this.touch ? 'Kreativt läge: dubbeltryck Hoppa för att flyga.' : 'Kreativt läge: dubbeltryck mellanslag för att flyga.') : `Dag ${this.day}. Lycka till!`);
   }
   _placeOnGround() {
@@ -296,6 +330,12 @@ export class Game {
     W.update(P.pos.x, P.pos.z, dt);
     this.ents.update(dt);
     this.circuits.update(dt);
+    this._portalTick(dt);
+    if (this.spouts.length) this._tickSpouts(dt);
+    if ((this._secT = (this._secT || 0) - dt) <= 0) { this._secT = 1; this._markerTick(); this._discover(); }
+    if (this.dim === 'muspel') this._muspelFx(dt);
+    this._hudExtras(dt);
+    if (!this.ready) return;
     this._tickFish(dt);
     if (P.alive && !this.creative) this._lavaContact(dt);
     this._heldInfo();
@@ -310,13 +350,16 @@ export class Game {
     U.uSkyLight.value.copy(this.sky.skyLight);
     const bright = this.settings.get('brightness');
     U.uMinLight.value = 0.02 + bright * 0.08;
+    if (this.dim === 'muspel') U.uAmbient.value.setRGB(0.2 + bright * 0.08, 0.1 + bright * 0.05, 0.075 + bright * 0.04); else U.uAmbient.value.setRGB(0, 0, 0);
+    AMBIENT.copy(U.uAmbient.value);
     U.uFlicker.value = 0.94 + Math.sin(this.time * 7.3) * 0.03 + Math.sin(this.time * 13.1) * 0.03;
     if (P.headInWater) {
       U.uFogColor.value.setRGB(0.04, 0.12, 0.28).multiplyScalar(0.3 + this.sky.daylight * 0.7);
       U.uFogNear.value = 0; U.uFogFar.value = 22;
     } else {
       U.uFogColor.value.copy(this.sky.fog);
-      U.uFogNear.value = this.viewDist * 0.6; U.uFogFar.value = this.viewDist * 0.96;
+      if (this.dim === 'muspel') { U.uFogNear.value = this.viewDist * 0.22; U.uFogFar.value = this.viewDist * 0.88; }
+      else { U.uFogNear.value = this.viewDist * 0.6; U.uFogFar.value = this.viewDist * 0.96; }
     }
     this.app.renderer.setClearColor(U.uFogColor.value);
     document.getElementById('water').classList.toggle('on', P.headInWater);
@@ -386,6 +429,8 @@ export class Game {
     // brytning
     if (lmb && this.target && !this.mobTarget) this._mine(dt, lmbP);
     else { this.mine = null; this.crack.visible = false; }
+    // handla med en bybo
+    if (rmbP && this.mobTarget && this.mobTarget.mob.def.villager) { this.openTrade(this.mobTarget.mob); return; }
     // ät
     const food = held ? foodOf(held.id) : 0;
     const interactable = this.target && BLOCKS[this.target.id] && BLOCKS[this.target.id].interact && !P.sneaking;
@@ -400,6 +445,7 @@ export class Game {
         if (!this.creative) this.inv.useHeld(1);
         this.audio.play('power', { vol: 0.35 });
         if (held.id === I.lingon || held.id === I.cloudberry) this.log('Mums, ' + itemName(held.id).toLowerCase() + '!');
+        if (held.id === I.glodapple) { P.fireRes = 60; P.health = Math.min(20, P.health + 6); P.burnT = 0; this.log('Glödäpplet värmer inifrån – du tål eld en stund.', 'good'); }
         if (held.id === I.rotten_flesh && Math.random() < 0.5) { P.sat = 0; P.exh += 10; this.log('Usch! Det ruttna köttet gjorde dig illamående.', 'bad'); }
       }
       return;
@@ -476,10 +522,11 @@ export class Game {
     const d = BLOCKS[id];
     // innehåll i kistor/ugnar
     const k = x + ',' + y + ',' + z;
+    if (id === B.chest) this._openLoot(k, x, y, z);
     if (W.chests.has(k)) { for (const s of W.chests.get(k)) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5, s.d); W.chests.delete(k); }
     if (W.furnaces.has(k)) { const f = W.furnaces.get(k); for (const s of [f.in, f.fuel, f.out]) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5); W.furnaces.delete(k); }
     W.saplings.delete(k); this.circuits.forget(x, y, z);
-    if (id === B.ice && !this.creative) W.set(x, y, z, WATER); else W.set(x, y, z, 0);
+    if (id === B.ice && !this.creative && this.dim !== 'muspel') W.set(x, y, z, WATER); else W.set(x, y, z, 0);
     this.ents.blockBurst(x, y, z, id, this.creative ? 10 : 18);
     matSound(this.audio, d.sound, 'break');
     this.stats.broken++; this.stats.lifeEdits++;
@@ -588,6 +635,14 @@ export class Game {
       const cur = W.get(tx, ty, tz);
       if (cur < 0 || !(cur === 0 || (BLOCKS[cur] && BLOCKS[cur].replace) || isLava(cur))) return false;
       if (cur > 0 && !isWater(cur) && !isLava(cur) && BLOCKS[cur].model === M_CROSS) this._dropsFor(cur, tx, ty, tz);
+      if (id === I.bucket_water && this.dim === 'muspel') {
+        // vatten fräser bort i Muspelheims hetta
+        for (let i = 0; i < 24; i++) this.ents.particle(tx + Math.random(), ty + Math.random() * 0.5, tz + Math.random(), (Math.random() - 0.5) * 1.5, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 1.5, new THREE.Color('#e8e8f0'), 0.12 + Math.random() * 0.1, 1.2, -0.3);
+        this.audio.noise({ dur: 0.7, vol: 0.3, freq: 4000, type: 'highpass' });
+        if (!this.creative) this._swapHeld(I.bucket);
+        this.tally('fizz', 1); if (!this.flags.fizzTip) { this.flags.fizzTip = true; this.toast('Pyss! Vattnet kokar bort direkt i Muspelheim.'); }
+        return true;
+      }
       W.set(tx, ty, tz, id === I.bucket_water ? WATER : LAVA);
       if (!this.creative) this._swapHeld(I.bucket);
       matSound(this.audio, 'water', 'place'); return true;
@@ -639,7 +694,7 @@ export class Game {
     const t = held && toolOf(held.id);
     if (!t || !held.d) { this.toast('Håll ett slitet verktyg eller en rustningsdel och använd städet för att laga det.'); return; }
     const a = armorOf(held.id);
-    const mat = a ? [I.leather, I.iron_ingot, I.gold_ingot, I.diamond][a.mat] : (held.id === I.bow || held.id === I.rod) ? I.string : held.id === I.shears ? I.iron_ingot : t.rep || ['#planks', '#stone', I.iron_ingot, I.diamond][t.tier] || '#planks';
+    const mat = a ? [I.leather, I.iron_ingot, I.gold_ingot, I.diamond, I.urskarva][a.mat] : (held.id === I.bow || held.id === I.rod) ? I.string : held.id === I.shears ? I.iron_ingot : t.rep || ['#planks', '#stone', I.iron_ingot, I.diamond][t.tier] || '#planks';
     if (!this.creative && this.inv.count(mat) <= 0) { this.toast('Du behöver ' + wantName(mat).toLowerCase() + ' för att laga det.'); this.audio.play('error'); return; }
     if (!this.creative) this.inv.take(mat, 1);
     held.d = Math.max(0, held.d - Math.ceil(t.dur * 0.3));
@@ -672,9 +727,10 @@ export class Game {
       const x = cx + dx, y = cy + dy, z = cz + dz, b = W.get(x, y, z);
       if (b <= 0) continue;
       const d = BLOCKS[b];
-      if (!d || d.hardness < 0 || b === B.obsidian || isWater(b) || isLava(b)) continue;
+      if (!d || d.hardness < 0 || b === B.obsidian || d.blast || isPortal(b) || isWater(b) || isLava(b)) continue;
       if (b === B.tnt) { this._ignite(x, y, z, 0.4 + Math.random() * 0.6); continue; }
       const k = x + ',' + y + ',' + z;
+      if (b === B.chest) this._openLoot(k, x, y, z);
       if (W.chests.has(k)) { for (const s of W.chests.get(k)) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5, s.d); W.chests.delete(k); }
       if (W.furnaces.has(k)) { const f = W.furnaces.get(k); for (const s of [f.in, f.fuel, f.out]) if (s) this.ents.drop(s.id, s.n, x + 0.5, y + 0.5, z + 0.5); W.furnaces.delete(k); }
       W.saplings.delete(k);
@@ -696,7 +752,7 @@ export class Game {
     const fx = Math.floor(P.pos.x), fz = Math.floor(P.pos.z);
     const inLava = isLava(W.get(fx, Math.floor(P.pos.y + 0.1), fz)) || isLava(W.get(fx, Math.floor(P.pos.y + 0.9), fz));
     if (inLava) { P.burnT = 4; P.vel.x *= 0.85; P.vel.z *= 0.85; }
-    if (P.inWater) P.burnT = 0;
+    if (P.inWater || P.fireRes > 0) P.burnT = 0;
     if (P.burnT > 0) {
       P.burnT -= dt; this._burnAcc = (this._burnAcc || 0) + dt;
       if (Math.random() < dt * 20) this.ents.particle(P.pos.x + (Math.random() - 0.5) * 0.6, P.pos.y + Math.random() * 1.6, P.pos.z + (Math.random() - 0.5) * 0.6, 0, 1.5, 0, new THREE.Color('#ff9a30'), 0.1, 0.5, -0.2, true);
@@ -707,7 +763,9 @@ export class Game {
   _heldInfo() {
     const h = this.inv.held, id = h ? h.id : 0;
     let txt = '';
-    if (id === I.compass) {
+    if (id === I.map_village || id === I.map_explore || id === I.map_fort) txt = this._mapText(id);
+    else if (id === I.compass && this.dim === 'muspel') txt = '🧭 Nålen snurrar planlöst i Muspelheims hetta…';
+    else if (id === I.compass) {
       const P = this.player, sp = this.bed || this.spawn;
       const dx = sp[0] - P.pos.x, dz = sp[2] - P.pos.z, dist = Math.hypot(dx, dz);
       const ang = Math.atan2(dx, -dz) * 180 / Math.PI; const dirs = ['norr', 'nordost', 'öster', 'sydost', 'söder', 'sydväst', 'väster', 'nordväst'];
@@ -772,7 +830,14 @@ export class Game {
     if (d.interact && !P.sneaking && pressed) {
       if (d.interact === 'bench') { this.openInventory('bench'); return true; }
       if (d.interact === 'furnace') { if (!W.furnaces.has(k)) W.furnaces.set(k, newFurnace()); this.openInventory('furnace', { f: W.furnaces.get(k), key: k }); return true; }
-      if (d.interact === 'chest') { if (!W.chests.has(k)) W.chests.set(k, new Array(27).fill(null)); this.openInventory('chest', { c: W.chests.get(k), key: k }); this.audio.play('select', { vol: 0.5, pitch: 0.6 }); return true; }
+      if (d.interact === 'chest') {
+        const lt = this._openLoot(k, T.x, T.y, T.z);
+        if (!W.chests.has(k)) W.chests.set(k, new Array(27).fill(null));
+        this.openInventory('chest', { c: W.chests.get(k), key: k, title: lt ? LOOT_NAMES[lt] : (T.id === B.barrel ? 'Tunna' : undefined) });
+        this.audio.play('select', { vol: 0.5, pitch: lt ? 1.1 : 0.6 }); if (lt) this.audio.play('pickup', { vol: 0.4, pitch: 0.7 });
+        return true;
+      }
+      if (d.interact === 'smith') { this.openInventory('smith'); this.audio.play('select', { vol: 0.5, pitch: 0.8 }); return true; }
       if (d.interact === 'door') {
         const dd = d.door, other = dd.upper ? T.y - 1 : T.y + 1;
         const nid = DOOR0 + (dd.upper ? 8 : 0) + (dd.open ? 0 : 4) + dd.f;
@@ -797,6 +862,7 @@ export class Game {
     if (!held) return false;
     let id = held.id;
     if (id === I.bone_meal) return pressed ? this._boneMeal(T) : false;
+    if (id === I.glodkarna) { if (pressed && T.id === B.obsidian) this._ignitePortal(T); else if (pressed) this.toast('Använd Glödkärnan på en obsidianbåge (eldport).'); return pressed; }
     if (isHoe(id)) {
       if (!pressed) return false;
       if ((T.id === B.grass || T.id === B.dirt || T.id === B.snowgrass) && T.ny === 1 && W.get(T.x, T.y + 1, T.z) <= 0) {
@@ -811,7 +877,7 @@ export class Game {
     let tx = T.x + T.nx, ty = T.y + T.ny, tz = T.z + T.nz;
     if (BLOCKS[T.id].replace && !isWater(T.id)) { tx = T.x; ty = T.y; tz = T.z; }
     // platta på platta → helt block
-    const fullOf = id === B.cobble_slab ? B.cobble : id === B.plank_slab ? B.spruce_planks : (id < 256 && BLOCKS[id] && BLOCKS[id].full) || 0;
+    const fullOf = id === B.cobble_slab ? B.cobble : id === B.plank_slab ? B.spruce_planks : (isBlock(id) && BLOCKS[id] && BLOCKS[id].full) || 0;
     if (fullOf && T.id === id && T.ny === 1) {
       W.set(T.x, T.y, T.z, fullOf);
       this._placed(id, T.x, T.y, T.z); return true;
@@ -897,6 +963,7 @@ export class Game {
   }
   _sleep(T) {
     const P = this.player;
+    if (this.dim === 'muspel') { this.toast('Här finns ingen natt att sova bort – sängen fungerar inte i Muspelheim.'); this.audio.play('error', { vol: 0.4 }); return; }
     this.bed = [T.x + 0.5, T.y + 1, T.z + 0.5];
     if (!this.flags.bedMsg) { this.flags.bedMsg = true; }
     this.log('Återuppståndelsepunkt satt vid sängen.', 'good');
@@ -906,7 +973,357 @@ export class Game {
     P.vel.set(0, 0, 0);
   }
   _onBlockChange(x, y, z, o, n) {
-    this.circuits.onBlockChange(x, y, z, o, n);
+    if (this.circuits) this.circuits.onBlockChange(x, y, z, o, n);
+    if ((o === B.obsidian || isPortal(o)) && n !== B.obsidian && !isPortal(n)) this._collapsePortal(x, y, z);
+  }
+
+  /* =====================================================================
+   * Dimensioner, eldportar, strukturer, byte och handel
+   * ===================================================================== */
+  _createWorld(dim) {
+    const w = new World({ scene: this.scene, mats: this.mats, seed: this.meta.seed, fancy: this.settings.get('fancyLeaves'), genVer: (this.meta.version || 1) >= 2 ? 2 : 1, dim });
+    w.onBlockChange = (x, y, z, o, n) => this._onBlockChange(x, y, z, o, n);
+    w.onFall = (x, y, z, id) => this.ents.fallBlock(x, y, z, id);
+    w.onDrop = (x, y, z, id) => { if (!this.creative) this._dropsFor(id, x, y, z, null); };
+    w.onChunkReady = (c, m) => this._onChunkReady(w, c, m);
+    w.loot = new Map();
+    w.radius = this.world ? this.world.radius : w.radius;
+    this.worlds[dim] = w;
+    return w;
+  }
+  _loadWorldState(w, src) {
+    if (!src) return;
+    if (src.furnaces) for (const [k, f] of src.furnaces) w.furnaces.set(k, f);
+    if (src.chests) for (const [k, c] of src.chests) w.chests.set(k, c);
+    if (src.saplings) for (const [k, t] of src.saplings) w.saplings.set(k, t);
+  }
+  /** Skapa (och läs in) en dimensions värld första gången den behövs */
+  async _ensureWorld(dim) {
+    if (this.worlds[dim]) return this.worlds[dim];
+    const w = this._createWorld(dim);
+    const prefix = 'kubvarld:w:' + this.id + (dim === 'muspel' ? ':m:' : ':c:');
+    for (const k of await kv.keys(prefix)) {
+      const arr = await kv.get(k); if (!arr) continue;
+      const [cx, cz] = k.slice(prefix.length).split(',').map(Number);
+      w.loadMods(ckey(cx, cz), arr instanceof Uint32Array ? arr : new Uint32Array(arr));
+    }
+    const src = dim === 'muspel' ? (this.meta.mus || {}) : this.meta;
+    this._loadWorldState(w, src);
+    const prev = this.world; this.world = w;
+    this.circs[dim] = new Circuits(this, src.circ || []);
+    this.world = prev;
+    w.suspend();
+    return w;
+  }
+  /** En chunk är klar: kretsar, kistor med byte och varelser från strukturer */
+  _onChunkReady(w, c, m) {
+    const circ = this.circs[w.dim]; if (circ) circ.onChunkReady(c, m);
+    const ex = c.extra; if (!ex) return;
+    for (const [x, y, z, table, o] of ex.loot) { const k = x + ',' + y + ',' + z; if (!w.chests.has(k)) w.loot.set(k, [table, o]); }
+    for (const [type, x, y, z, o] of ex.ents) {
+      const key = w.dim + ':' + type + ':' + Math.floor(x) + ',' + Math.floor(y) + ',' + Math.floor(z);
+      if (!this.markers.has(key)) this.markers.set(key, { dim: w.dim, type, x, y, z, o: o || {}, key });
+    }
+  }
+  /** Fyll en strukturkista med sitt seedade byte (första gången den öppnas eller går sönder) */
+  _openLoot(k, x, y, z) {
+    const W = this.world, L = W.loot.get(k);
+    if (!L || W.chests.has(k)) return null;
+    W.loot.delete(k);
+    const slots = rollLoot(this.meta.seed + (W.dim === 'muspel' ? 7 : 0), L[0], x, y, z, L[1]);
+    W.chests.set(k, slots);
+    this.tally('loot', 1); this.tally('lootT', L[0]);
+    return L[0];
+  }
+  _markerTick() {
+    const P = this.player, W = this.world;
+    for (const mk of this.markers.values()) {
+      if (mk.dim !== this.dim || this.spawned.has(mk.key)) continue;
+      if (Math.abs(mk.x - P.pos.x) > 64 || Math.abs(mk.z - P.pos.z) > 64 || !W.isLoaded(Math.floor(mk.x), Math.floor(mk.z))) continue;
+      if (mk.type === 'eldjatte' && this.flags.bosses[mk.o.key]) continue;
+      this.spawned.add(mk.key);
+      if (mk.type === 'askvandrare') { for (let k = 0; k < (mk.o.n || 3); k++) this.ents.spawnMob('askvandrare', mk.x + (k % 2) * 0.9 - 0.4, mk.y, mk.z + (k >> 1) * 0.9 - 0.4); continue; }
+      this.ents.spawnMob(mk.type, mk.x, mk.y, mk.z, { prof: mk.o.prof, home: mk.o.home, c: mk.o.c, key: mk.o.key, marker: mk.key });
+    }
+  }
+  onMobRemoved(m) { if (m.marker && !m.dead) this.spawned.delete(m.marker); }
+  onMobKilled(m, byPlayer) {
+    if (m.def.boss && m.key) { this.flags.bosses[m.key] = 1; if (byPlayer) { this.log('Eldjätten har fallit! Skattkammaren under borgen är din.', 'good'); this.audio.play('victory', { vol: 0.6 }); } }
+    if (m.def.villager && byPlayer) this.log('En bybo dog… Byborna kommer att minnas det.', 'bad');
+  }
+  /** Upptäck strukturer i närheten (för prestationer och meddelanden) */
+  _discover() {
+    const P = this.player, G = this.world.gen; if (!G.structuresNear) return;
+    for (const { s, d } of G.structuresNear(P.pos.x, P.pos.z, 70)) {
+      let hit = false;
+      if (s.kind === 'mine') hit = (d < s.r && P.pos.y < s.y + 8 && P.pos.y > s.y - 3) || (Math.hypot(P.pos.x - s.x - 3, P.pos.z - s.z - 3) < 7 && Math.abs(P.pos.y - s.surf) < 6);
+      else if (s.kind === 'village') hit = d < 38;
+      else if (s.kind === 'fortress') hit = d < 40 && Math.abs(P.pos.y - s.y) < 22;
+      else hit = d < s.r && Math.abs(P.pos.y - s.y) < 14;
+      if (hit && !this.flags.seen[s.id]) { this.flags.seen[s.id] = 1; this.tally('found', s.kind); this.log(FOUND_MSG[s.kind] || 'Du har hittat något!', 'good'); this.audio.play('select', { vol: 0.5, pitch: 1.2 }); }
+      if (s.kind === 'fortress' && !this.flags.seen[s.id + ':t'] && Math.abs(P.pos.x - s.x) <= 6 && Math.abs(P.pos.z - s.z) <= 6 && P.pos.y > s.y - 7.5 && P.pos.y < s.y - 0.5) {
+        this.flags.seen[s.id + ':t'] = 1; this.tally('found', 'treasure'); this.log(FOUND_MSG.treasure, 'good'); this.audio.play('levelup', { vol: 0.5 });
+      }
+    }
+  }
+  /** Närmaste struktur för en karta (eller F3). Returnerar { s, d } eller null */
+  nearestStructure(kinds, unseen = true, minD = 0) {
+    const G = this.world.gen, P = this.player; if (!G.structuresNear) return null;
+    const list = G.structuresNear(P.pos.x, P.pos.z, this.dim === 'muspel' ? 700 : 2200, kinds);
+    return list.find(e => e.d >= minD && (!unseen || !this.flags.seen[e.s.id])) || list.find(e => e.d >= minD) || null;
+  }
+  _dirText(dx, dz) {
+    const P = this.player, ang = Math.atan2(dx, -dz) * 180 / Math.PI, dirs = ['norr', 'nordost', 'öster', 'sydost', 'söder', 'sydväst', 'väster', 'nordväst'];
+    const rel = (((Math.atan2(-dx, -dz) - P.yaw) * 180 / Math.PI) % 360 + 540) % 360 - 180;
+    const arrow = Math.abs(rel) < 22 ? '↑' : Math.abs(rel) > 158 ? '↓' : rel > 0 ? (rel < 68 ? '↖' : rel < 112 ? '←' : '↙') : (rel > -68 ? '↗' : rel > -112 ? '→' : '↘');
+    return `${Math.round(Math.hypot(dx, dz))} m åt ${dirs[Math.round(((ang % 360) + 360) % 360 / 45) % 8]} ${arrow}`;
+  }
+  _mapText(id) {
+    if ((this._mapT = (this._mapT || 0) - 1) > 0 && this._mapId === id) return this._mapCache;
+    this._mapT = 30; this._mapId = id;
+    let txt;
+    if (id === I.map_fort) {
+      if (this.dim !== 'muspel') txt = '🗺 Eldkartan visar Muspelheims glödande salar – här är den tom.';
+      else { const n = this.nearestStructure(['fortress']); txt = n ? '🗺 Surts borg: ' + this._dirText(n.s.x - this.player.pos.x, n.s.z - this.player.pos.z) : '🗺 Ingen borg i närheten.'; }
+    } else if (this.dim !== 'over') txt = '🗺 Kartan är tom här – den visar den vanliga världen.';
+    else if (id === I.map_village) { const n = this.nearestStructure(['village'], false, 30); txt = n ? '🗺 By: ' + this._dirText(n.s.x - this.player.pos.x, n.s.z - this.player.pos.z) : '🗺 Inga byar inom räckhåll.'; }
+    else { const n = this.nearestStructure(['ruin', 'temple', 'wreck', 'tower', 'cabin', 'portal', 'mine']); txt = n ? `🗺 ${KIND_NAME[n.s.kind]}: ` + this._dirText(n.s.x - this.player.pos.x, n.s.z - this.player.pos.z) : '🗺 Inget okänt inom räckhåll.'; }
+    this._mapCache = txt;
+    return txt;
+  }
+  /** Handla med en bybo. Returnerar true om bytet gick igenom. */
+  trade(o) {
+    const inv = this.inv;
+    if (!o.give.every(([id, n]) => inv.count(id) >= n)) { this.audio.play('error', { vol: 0.5 }); return false; }
+    for (const [id, n] of o.give) inv.take(id, n);
+    const [gid, gn] = o.get;
+    const left = inv.add(gid, gn); if (left) this.throwItem({ id: gid, n: left, d: 0 });
+    this.tally('trade', 1); this.tally('buy', gid); this.onPickup(gid, gn);
+    this.audio.play('pickup', { vol: 0.6, pitch: 1.1 });
+    const m = this.ui.ctx && this.ui.ctx.mob; if (m) this.ents.puff(m.pos.x, m.pos.y + 1.8, m.pos.z, '#3ad47a', 6, 0.4, true);
+    return true;
+  }
+  openTrade(m) {
+    const offers = (TRADES[m.prof] || TRADES.bonde).map(([give, get]) => ({ give, get }));
+    m.trading = true;
+    this.openInventory('trade', { mob: m, prof: m.prof, offers });
+    this.audio.play('select', { vol: 0.5, pitch: 1.3 });
+    if (!this.flags.tradeTip) { this.flags.tradeTip = true; this.toast('Byborna tar betalt i smaragder – och betalar med smaragder för dina varor.'); }
+  }
+  onSmith(id) { this.tally('smith', 1); this.tally('c', id); this.audio.play('levelup', { vol: 0.45 }); matSound(this.audio, 'metal', 'break', { vol: 1.2 }); this.log(itemName(id) + ' – smidd i surtstål!', 'good'); }
+
+  /* ---------- eldportar ---------- */
+  _portalCells(ox, oy, oz, axis, list) { const ax = axis ? 0 : 1, az = axis ? 1 : 0; return list.map(([du, dy]) => [ox + ax * du, oy + dy, oz + az * du]); }
+  /** Glödkärnan används på obsidian: hitta en hel båge och tänd den */
+  _ignitePortal(T) {
+    const W = this.world;
+    for (let axis = 0; axis < 2; axis++) for (const [fu, fy] of PORTAL_FRAME) {
+      const ax = axis ? 0 : 1, az = axis ? 1 : 0;
+      const ox = T.x - ax * fu, oy = T.y - fy, oz = T.z - az * fu;
+      const frame = this._portalCells(ox, oy, oz, axis, PORTAL_FRAME), inner = this._portalCells(ox, oy, oz, axis, PORTAL_INNER);
+      if (!frame.every(([x, y, z]) => W.get(x, y, z) === B.obsidian)) continue;
+      if (!inner.every(([x, y, z]) => { const b = W.get(x, y, z); return b === 0 || (b > 0 && BLOCKS[b].replace && !isWater(b)); })) continue;
+      this._fillPortal(W, ox, oy, oz, axis);
+      if (!this.creative) this.inv.useHeld(1);
+      this.tally('portal', 1);
+      this.log('Eldporten flammar upp! Stå i elden en stund för att resa.', 'good');
+      return true;
+    }
+    this.toast('Bygg först en båge av 12 obsidian: 3 i botten, 3 upp på var sida, två axlar och en slutsten överst – öppningen är 3 bred.');
+    this.audio.play('error', { vol: 0.5 });
+    return false;
+  }
+  _fillPortal(W, ox, oy, oz, axis) {
+    const id = axis ? B.portal_z : B.portal_x;
+    for (const [x, y, z] of this._portalCells(ox, oy, oz, axis, PORTAL_INNER)) W.set(x, y, z, id, { noUpdate: true });
+    const list = this.portals[W.dim] || (this.portals[W.dim] = []);
+    if (!list.some(p => p[0] === ox && p[1] === oy && p[2] === oz)) list.push([ox, oy, oz, axis]);
+    this.audio.play('power', { vol: 0.6, pitch: 0.6 }); this.audio.noise({ dur: 1.2, vol: 0.15, freq: 300, type: 'lowpass', to: 900 });
+    const c = new THREE.Color('#ff8a30');
+    const [mx, , mz] = this._portalCells(ox, oy, oz, axis, [[1, 2]])[0];
+    for (let i = 0; i < 40; i++) this.ents.particle(mx + Math.random(), oy + 1 + Math.random() * 4, mz + Math.random(), (Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2, c, 0.12, 1, -0.3, true);
+  }
+  _buildPortal(W, ox, oy, oz, axis) {
+    const ax = axis ? 0 : 1, az = axis ? 1 : 0, px = az, pz = ax;
+    // fri plats och en liten plattform framför och bakom
+    for (let du = -2; du <= 4; du++) for (let p = -2; p <= 2; p++) {
+      const x = ox + ax * du + px * p, z = oz + az * du + pz * p;
+      for (let dy = 1; dy <= 6; dy++) W.set(x, oy + dy, z, 0, { noUpdate: true });
+      const f = W.get(x, oy, z); if (f <= 0 || !T_SOLID[f] || isLava(f)) W.set(x, oy, z, W.dim === 'muspel' ? B.basalt_bricks : B.cobble, { noUpdate: true });
+    }
+    for (const [x, y, z] of this._portalCells(ox, oy, oz, axis, PORTAL_FRAME)) W.set(x, y, z, B.obsidian, { noUpdate: true });
+    this._fillPortal(W, ox, oy, oz, axis);
+  }
+  /** Ramen eller portalen ändrades: släck portalblock som inte längre sitter i en hel båge */
+  _collapsePortal(x, y, z) {
+    if (this._collapsing) return; this._collapsing = true;
+    const W = this.world, seen = new Set(), q = [];
+    for (const [dx, dy, dz] of DIR6) { const nx = x + dx, ny = y + dy, nz = z + dz; if (isPortal(W.get(nx, ny, nz))) q.push([nx, ny, nz]); }
+    while (q.length && seen.size < 40) {
+      const [a, b, c] = q.pop(), k = a + ',' + b + ',' + c; if (seen.has(k)) continue; seen.add(k);
+      W.set(a, b, c, 0, { noUpdate: true }); this.ents.puff(a + 0.5, b + 0.3, c + 0.5, '#ff8a30', 3, 0.6, true);
+      for (const [dx, dy, dz] of DIR6) if (isPortal(W.get(a + dx, b + dy, c + dz))) q.push([a + dx, b + dy, c + dz]);
+    }
+    if (seen.size) { this.audio.noise({ dur: 0.6, vol: 0.15, freq: 900, type: 'lowpass', to: 200 }); this.portals[this.dim] = (this.portals[this.dim] || []).filter(p => { const b = W.get(...this._portalCells(p[0], p[1], p[2], p[3], [[1, 1]])[0]); return b < 0 || isPortal(b); }); }
+    this._collapsing = false;
+  }
+  _inPortal() {
+    const P = this.player, W = this.world, x = Math.floor(P.pos.x), z = Math.floor(P.pos.z);
+    return isPortal(W.get(x, Math.floor(P.pos.y + 0.2), z)) || isPortal(W.get(x, Math.floor(P.pos.y + 1.2), z));
+  }
+  _portalTick(dt) {
+    const inP = this.player.alive && this._inPortal();
+    if (!inP) { this.portalCd = false; this.portalT = Math.max(0, this.portalT - dt * 2); }
+    else if (!this.portalCd) {
+      if (this.portalT === 0) { this.audio.noise({ dur: 2.4, vol: 0.12, freq: 200, type: 'lowpass', to: 1400 }); this.audio.tone({ freq: 90, to: 260, dur: 2.4, vol: 0.06, type: 'sawtooth' }); }
+      this.portalT += dt;
+      if (Math.random() < dt * 30) { const P = this.player; this.ents.particle(P.pos.x + (Math.random() - 0.5), P.pos.y + Math.random() * 2, P.pos.z + (Math.random() - 0.5), 0, 1.5, 0, new THREE.Color('#ffa040'), 0.08, 0.6, -0.3, true); }
+      if (this.portalT >= (this.creative ? 1 : PORTAL_TIME)) { this.portalT = 0; this._travel(); }
+    }
+    const o = Math.min(1, this.portalT / PORTAL_TIME);
+    if (this._portalEl && Math.abs(o - (this._portalO || 0)) > 0.01) { this._portalO = o; this._portalEl.style.opacity = o.toFixed(2); }
+  }
+  /** Res genom eldporten till den andra dimensionen (koordinatskala 1:8) */
+  async _travel() {
+    const P = this.player, to = this.dim === 'over' ? 'muspel' : 'over';
+    const tx = to === 'muspel' ? P.pos.x / MUSPEL_SCALE : P.pos.x * MUSPEL_SCALE, tz = to === 'muspel' ? P.pos.z / MUSPEL_SCALE : P.pos.z * MUSPEL_SCALE;
+    await this._switchDim(to, tx, tz, W => this._arrivePortal(W, tx, tz));
+    this.tally('dim', to);
+    this.log(to === 'muspel' ? 'Du kliver ut i Muspelheim. Hettan slår emot dig…' : 'Du är tillbaka i den vanliga världen.', to === 'muspel' ? 'bad' : 'good');
+  }
+  /** Byt dimension med laddskärm. place(W) returnerar [x, y, z] för spelarens fötter när chunkarna finns. */
+  async _switchDim(to, tx, tz, place) {
+    if (this._traveling) return; this._traveling = true;
+    const loadEl = document.getElementById('loading'), ls = loadingScreen(loadEl);
+    document.getElementById('loadTitle').textContent = to === 'muspel' ? 'Genom elden…' : 'Hemåt…';
+    show('loading'); ls.set(0.05, to === 'muspel' ? 'Reser till Muspelheim…' : 'Reser till den vanliga världen…');
+    try {
+      if (this.ui.open) this.ui.close();
+      await this.save();
+      this.ready = false;
+      this._endFish(); this.mine = null; this.crack.visible = false;
+      const old = this.world;
+      const W = await this._ensureWorld(to);
+      old.suspend(); this.ents.clearAll(); this.spawned.clear(); this.spouts.length = 0;
+      W.resume(); W.radius = old.radius;
+      this.world = W; this.circuits = this.circs[to]; this.dim = to; this.sky.setDim(to);
+      if (this._disposed) return;
+      const P = this.player;
+      P.pos.set(tx, 70, tz); P.vel.set(0, 0, 0); P.fallY = null;
+      const wait = async (x, z, f0, f1, label) => {
+        const t0 = performance.now();
+        for (; ;) {
+          W.update(x, z, 0.016);
+          const r = W.readyAround(x, z, 2);
+          ls.set(f0 + (f1 - f0) * r.ok / r.need, label + ' ' + Math.round(r.ok / r.need * 100) + ' %');
+          if (r.ok >= r.need || performance.now() - t0 > 20000 || this._disposed) break;
+          await new Promise(res => setTimeout(res, 16));
+        }
+      };
+      await wait(tx, tz, 0.1, 0.8, to === 'muspel' ? 'Muspelheim glöder fram…' : 'Världen tar form…');
+      if (this._disposed) return;
+      const pos = place(W);
+      P.pos.set(pos[0], pos[1], pos[2]);
+      if (Math.hypot(pos[0] - tx, pos[2] - tz) > 20) await wait(pos[0], pos[2], 0.8, 1, 'Nästan framme…');
+      this._unstuck();
+      this.portalCd = true; this.portalT = 0;
+      this._lastPos.copy(P.pos);
+      this.musicT = 0; this.curMusic = null;
+    } catch (e) { console.warn('Dimensionsbyte misslyckades', e); }
+    ls.done();
+    this.ready = true; this._traveling = false;
+  }
+  /** Hitta en registrerad portal nära målet, annars bygg en ny */
+  _arrivePortal(W, tx, tz) {
+    const list = this.portals[W.dim] || (this.portals[W.dim] = []);
+    const R = W.dim === 'muspel' ? 32 : 200;
+    let best = null, bd = R;
+    for (const p of list) {
+      const [cx, cy, cz] = this._portalCells(p[0], p[1], p[2], p[3], [[1, 1]])[0];
+      const d = Math.hypot(cx - tx, cz - tz); if (d >= bd) continue;
+      if (!W.isLoaded(cx, cz)) continue;
+      if (!isPortal(W.get(cx, cy, cz))) continue;
+      best = p; bd = d;
+    }
+    if (!best) {
+      const sp = this._findPortalSpot(W, Math.floor(tx), Math.floor(tz));
+      this._buildPortal(W, sp[0], sp[1], sp[2], sp[3]);
+      best = sp;
+    }
+    const [cx, cy, cz] = this._portalCells(best[0], best[1], best[2], best[3], [[1, 1]])[0];
+    return [cx + 0.5, cy, cz + 0.5];
+  }
+  _findPortalSpot(W, tx, tz) {
+    const mus = W.dim === 'muspel';
+    const solid = b => b > 0 && T_SOLID[b] && !isLava(b) && !isPortal(b) && BLOCKS[b].model === 1;
+    const air = b => b === 0 || (b > 0 && BLOCKS[b].replace && !isWater(b) && !isLava(b));
+    const fits = (x, y, z, axis) => {
+      const ax = axis ? 0 : 1, az = axis ? 1 : 0, px = az, pz = ax;
+      for (let du = -1; du <= 3; du++) {
+        const bx = x + ax * du, bz = z + az * du;
+        if (!solid(W.get(bx, y, bz))) return false;
+        for (let dy = 1; dy <= 6; dy++) if (!air(W.get(bx, y + dy, bz))) return false;
+        for (const p of [-1, 1]) { if (!air(W.get(bx + px * p, y + 1, bz + pz * p)) || !air(W.get(bx + px * p, y + 2, bz + pz * p))) return false; }
+      }
+      return true;
+    };
+    for (let r = 0; r <= 14; r++) for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const x = tx + dx, z = tz + dz;
+      if (!W.isLoaded(x, z)) continue;
+      if (mus) { for (let y = 96; y > 33; y--) { if (solid(W.get(x, y, z)) && air(W.get(x, y + 1, z))) { for (let axis = 0; axis < 2; axis++) if (fits(x, y, z, axis)) return [x, y, z, axis]; } } }
+      else { const y = W.topY(x, z); if (y > SEA - 1 && !isWater(W.get(x, y + 1, z))) for (let axis = 0; axis < 2; axis++) if (fits(x, y, z, axis)) return [x, y, z, axis]; }
+    }
+    // ingen bra plats: bygg en plattform
+    const y = mus ? 50 : Math.max(SEA + 1, W.topY(tx, tz));
+    return [tx, y, tz, 0];
+  }
+
+  /* ---------- eldsprutare (fälla) ---------- */
+  fireSpout(x, y, z) {
+    this.spouts.push({ x, y, z, t: 1.8, hit: 0 });
+    const d = this.player.pos.distanceTo(this._tmp.set(x + 0.5, y + 1, z + 0.5));
+    this.audio.noise({ dur: 1.2, vol: 0.25 * Math.max(0.1, 1 - d / 24), freq: 700, type: 'bandpass', to: 300 });
+  }
+  _tickSpouts(dt) {
+    const P = this.player;
+    for (let i = this.spouts.length - 1; i >= 0; i--) {
+      const s = this.spouts[i]; s.t -= dt; s.hit -= dt;
+      for (let k = 0; k < 4; k++) this.ents.particle(s.x + 0.2 + Math.random() * 0.6, s.y + 1.05, s.z + 0.2 + Math.random() * 0.6, (Math.random() - 0.5) * 1.2, 5 + Math.random() * 3, (Math.random() - 0.5) * 1.2, new THREE.Color(Math.random() < 0.5 ? '#ff7a20' : '#ffc040'), 0.16, 0.5, -0.2, true);
+      if (s.hit <= 0 && P.alive && Math.abs(P.pos.x - s.x - 0.5) < 1.1 && Math.abs(P.pos.z - s.z - 0.5) < 1.1 && P.pos.y > s.y + 0.5 && P.pos.y < s.y + 3.5) {
+        s.hit = 0.8; if (!(P.fireRes > 0)) { this.damagePlayer(1.5, null, 0, 'eld', true); P.burnT = Math.max(P.burnT || 0, 2); }
+      }
+      if (s.t <= 0) this.spouts.splice(i, 1);
+    }
+  }
+  /* ---------- HUD-tillägg: portalglöd, väktarmätare, brand ---------- */
+  _mkOverlay() {
+    const hud = document.getElementById('hud');
+    const mk = (cls, html) => { const e = document.createElement('div'); e.className = cls; if (html) e.innerHTML = html; hud.appendChild(e); return e; };
+    this._portalEl = mk('kv-portal'); this._burnEl = mk('kv-burn');
+    this._bossEl = mk('kv-boss', '<span>Eldjätten – borgens väktare</span><div class="bar"><i></i></div>'); this._bossEl.style.display = 'none';
+  }
+  _hudExtras(dt) {
+    const P = this.player;
+    const boss = this.ents.mobs.find(m => m.def.boss && !m.dead && m.pos.distanceTo(P.pos) < 36);
+    if (!!boss !== !!this._bossShown) { this._bossShown = !!boss; this._bossEl.style.display = boss ? '' : 'none'; }
+    if (boss) { const f = Math.max(0, boss.hp / (boss.def.hp * this.diffHp())); if (Math.abs(f - (this._bossF || 0)) > 0.005) { this._bossF = f; this._bossEl.querySelector('i').style.transform = `scaleX(${f.toFixed(3)})`; } }
+    const burn = (P.burnT > 0 && P.alive) ? 1 : 0;
+    if (burn !== this._burnO) { this._burnO = burn; this._burnEl.style.opacity = burn; }
+    if (P.fireRes > 0) P.fireRes -= dt;
+  }
+  /** Muspelheim: glöd som stiger, aska som faller, mullrande lava */
+  _muspelFx(dt) {
+    const P = this.player;
+    if (Math.random() < dt * 14) {
+      const x = P.pos.x + (Math.random() - 0.5) * 24, z = P.pos.z + (Math.random() - 0.5) * 24, y = P.pos.y + (Math.random() - 0.3) * 10;
+      if (this.world.get(Math.floor(x), Math.floor(y), Math.floor(z)) === 0) this.ents.particle(x, y, z, (Math.random() - 0.5) * 0.4, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.4, new THREE.Color(Math.random() < 0.3 ? '#ffc060' : Math.random() < 0.5 ? '#ff6a20' : '#6a5a54'), 0.05 + Math.random() * 0.04, 3 + Math.random() * 2, -0.02, true);
+    }
+    this._rumbleT = (this._rumbleT ?? 3) - dt;
+    if (this._rumbleT <= 0) {
+      this._rumbleT = 3 + Math.random() * 7;
+      try { if (Math.random() < 0.6) this.audio.noise({ dur: 0.18, vol: 0.06, freq: 260 + Math.random() * 200, type: 'lowpass' }); else this.audio.tone({ freq: 48 + Math.random() * 12, to: 36, dur: 2.2, vol: 0.05, type: 'sine' }); } catch (e) { }
+    }
   }
 
   /* ---------- överlevnad ---------- */
@@ -942,6 +1359,7 @@ export class Game {
       }
     }
     if (source !== 'fall' && source !== 'svält' && source !== 'drunkning') amount = this._armorReduce(amount);
+    if ((source === 'lava' || source === 'eld') && this.inv.armor.some(s => s && s.id >= SURT_ARMOR0 && s.id < SURT_ARMOR0 + 4)) amount *= 1 - 0.15 * this.inv.armor.filter(s => s && s.id >= SURT_ARMOR0 && s.id < SURT_ARMOR0 + 4).length;
     P.health -= amount; P.hurtT = 0.5;
     if (dir) { P.vel.x += dir.x * kb; P.vel.z += dir.z * kb; P.vel.y = Math.max(P.vel.y, 4.5); }
     this.audio.play('hurt', { vol: 0.8 });
@@ -999,12 +1417,20 @@ export class Game {
     this.inv.changed();
     this.audio.play('lose', { vol: 0.7 });
     const MD = MOBS[source];
-    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.', arrow: 'Du sköts ihjäl av ett skelett.', tnt: 'Du sprängdes i luften.', lava: 'Du brann upp i lavan.' }[source] || (MD ? `Du besegrades av ${MD.art} ${MD.name.toLowerCase()}.` : source ? `Du besegrades av ${String(source).toLowerCase()}.` : 'Du dog.');
+    const reason = { fall: 'Du föll för hårt.', 'drunkning': 'Du drunknade.', 'svält': 'Du svalt ihjäl.', arrow: 'Du sköts ihjäl av ett skelett.', tnt: 'Du sprängdes i luften.', lava: 'Du brann upp i lavan.', eld: 'Du brann upp.' }[source] || (MD ? `Du besegrades av ${MD.art} ${MD.name.toLowerCase()}.` : source ? `Du besegrades av ${String(source).toLowerCase()}.` : 'Du dog.');
     this.app.showDeath({ reason, days, score, best: res.best, isNew: res.isNew });
     this.save();
   }
   respawn() {
     const P = this.player;
+    if (this.dim !== 'over') {
+      // dör man i Muspelheim vaknar man hemma
+      P.health = 20; P.food = 20; P.sat = 5; P.air = 15; P.alive = true; P.fallY = null; P.exh = 0; P.burnT = 0;
+      this.stats.lifeStartDay = Math.floor(this.worldTime); this.stats.lifeEdits = 0; this.lifeScoreSubmitted = false;
+      const sp = this.bed || this.spawn;
+      this._switchDim('over', sp[0], sp[2], () => [sp[0], sp[1], sp[2]]).then(() => this.log('Du vaknar hemma igen. Var försiktig!'));
+      return;
+    }
     let sp = this.spawn;
     if (this.bed) { const b = this.world.get(Math.floor(this.bed[0]), Math.floor(this.bed[1] - 1), Math.floor(this.bed[2])); if (isBed(b) || b < 0) sp = this.bed; else { this.bed = null; this.log('Din säng saknas – du vaknar vid startplatsen.', 'bad'); } }
     P.pos.set(sp[0], sp[1], sp[2]); P.vel.set(0, 0, 0);
@@ -1141,7 +1567,8 @@ export class Game {
     const P = this.player, W = this.world;
     const x = Math.floor(P.pos.x), y = Math.floor(P.pos.y), z = Math.floor(P.pos.z);
     const c = W.getChunk(x >> 4, z >> 4);
-    const bio = c && c.biomes ? BIOMES[c.biomes[((z & 15) << 4) | (x & 15)]] : '?';
+    const bio = this.dim === 'muspel' ? 'Muspelheim' : c && c.biomes ? BIOMES[c.biomes[((z & 15) << 4) | (x & 15)]] : '?';
+    const ns = this.nearestStructure(null, false);
     const L = W.light(x, y + 1, z);
     let loaded = 0, meshed = 0; for (const ch of W.chunks.values()) { if (ch.data) loaded++; if (ch.meshed) meshed++; }
     const t = this.tod * 24 + 6; const hh = Math.floor(t % 24), mm = Math.floor((t % 1) * 60);
@@ -1149,7 +1576,8 @@ export class Game {
     document.getElementById('debug').textContent =
       `Kubvärld · ${this.app.loop.fps} FPS · uppd ${this.app.perf.upd.toFixed(1)} ms · rit ${this.app.perf.ren.toFixed(1)} ms\n` +
       `XYZ: ${P.pos.x.toFixed(1)} / ${P.pos.y.toFixed(1)} / ${P.pos.z.toFixed(1)}  Chunk: ${x >> 4}, ${z >> 4}\n` +
-      `Biom: ${bio}  Ljus: himmel ${L >> 4} block ${L & 15}\n` +
+      `Biom: ${bio}  Ljus: himmel ${L >> 4} block ${L & 15}  Dimension: ${this.dim}\n` +
+      `Närmaste struktur: ${ns ? KIND_NAME[ns.s.kind] + ' ' + Math.round(ns.d) + ' m (' + ns.s.x + ', ' + ns.s.y + ', ' + ns.s.z + ')' : '–'}\n` +
       `Dag ${this.day}  Klockan ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}\n` +
       `Chunkar: ${loaded} laddade, ${meshed} meshade, radie ${W.radius}  Frö: ${this.meta.seed}\n` +
       `Varelser: ${this.ents.mobs.length}${this.ents.mobs.length ? ' (' + this.ents.census() + ')' : ''}\n` +
@@ -1172,7 +1600,7 @@ export class Game {
       document.getElementById('dayIc').innerHTML = night ? MOON_SVG : SUN_SVG;
       document.getElementById('dayTx').textContent = 'Dag ' + day;
       if (!first && !night && (wasNight || slept)) this.tally('x', 'night');
-      if (!first && !this.creative && this.player.alive) {
+      if (!first && !this.creative && this.player.alive && this.dim === 'over') {
         if (night) { this.log('Natten faller – akta dig för zombier, skelett och spindlar!', 'bad'); this.audio.play('countdown', { vol: 0.4, pitch: 0.6 }); }
         else if (!slept && wasNight) { this.log(`Du överlevde natten! Dag ${day} (+100 poäng).`, 'good'); this.audio.play('levelup', { vol: 0.5 }); }
       }
@@ -1182,25 +1610,27 @@ export class Game {
     this.musicT -= dt;
     if (this.musicT <= 0) {
       this.musicT = 6;
-      const want = !this.settings.get('music') ? null : this.player.pos.y < SEA - 12 && this.world.light(Math.floor(this.player.pos.x), Math.floor(this.player.pos.y + 1), Math.floor(this.player.pos.z)) >> 4 < 4 ? 'tense' : this.isNight ? 'night' : (this.day % 2 ? 'calm' : 'adventure');
+      const want = !this.settings.get('music') ? null : this.dim === 'muspel' ? MUSPEL_MUSIC : this.player.pos.y < SEA - 12 && this.world.light(Math.floor(this.player.pos.x), Math.floor(this.player.pos.y + 1), Math.floor(this.player.pos.z)) >> 4 < 4 ? 'tense' : this.isNight ? 'night' : (this.day % 2 ? 'calm' : 'adventure');
       if (want !== this.curMusic) { this.curMusic = want; if (want) this.audio.music(want); else this.audio.stopMusic(); }
     }
     this.ambT -= dt;
     if (this.ambT <= 0) {
       this.ambT = 5 + Math.random() * 12;
       const P = this.player;
-      if (this.sky.daylight > 0.6 && (this.world.light(Math.floor(P.pos.x), Math.floor(P.pos.y + 1), Math.floor(P.pos.z)) >> 4) > 12) birdChirp(this.audio, 0.9);
+      if (this.dim === 'over' && this.sky.daylight > 0.6 && (this.world.light(Math.floor(P.pos.x), Math.floor(P.pos.y + 1), Math.floor(P.pos.z)) >> 4) > 12) birdChirp(this.audio, 0.9);
     }
   }
 
   /* ---------- sparning ---------- */
   serialize() {
-    const P = this.player;
+    const P = this.player, O = this.worlds.over, M = this.worlds.muspel;
+    const mus = M ? { furnaces: [...M.furnaces], chests: [...M.chests], saplings: [...M.saplings], circ: this.circs.muspel.serialize() } : (this.meta.mus || null);
     return Object.assign({}, this.meta, {
       worldTime: this.worldTime, played: Date.now(), day: this.day,
       player: { pos: [P.pos.x, P.pos.y, P.pos.z], yaw: P.yaw, pitch: P.pitch, health: P.alive ? P.health : 20, food: P.alive ? P.food : 20, sat: P.sat, flying: P.flying, view: P.view },
       inv: this.inv.serialize(), spawn: this.spawn, bed: this.bed, stats: this.stats, flags: this.flags,
-      furnaces: [...this.world.furnaces], chests: [...this.world.chests].map(([k, c]) => [k, c]), saplings: [...this.world.saplings], circ: this.circuits.serialize()
+      dim: this.dim, portals: this.portals, mus,
+      furnaces: [...O.furnaces], chests: [...O.chests].map(([k, c]) => [k, c]), saplings: [...O.saplings], circ: this.circs.over.serialize()
     });
   }
   async save() {
@@ -1213,15 +1643,18 @@ export class Game {
     const meta = this.serialize();
     try {
       await kv.set('kubvarld:w:' + this.id, meta);
-      const W = this.world;
-      // ta en ögonblicksbild: ändringar som görs medan vi sparar ligger kvar som "smutsiga" till nästa gång
-      const keys = [...W.dirtyMods];
-      for (const key of keys) {
-        W.dirtyMods.delete(key);
-        const cx = Math.floor(key / 65536) - 32768, cz = (key % 65536) - 32768;
-        const data = W.modsFor(key);
-        try { await kv.set('kubvarld:w:' + this.id + ':c:' + cx + ',' + cz, data); }
-        catch (e) { W.dirtyMods.add(key); throw e; }
+      // varje dimension sparas för sig (vanliga världen ':c:', Muspelheim ':m:')
+      for (const W of Object.values(this.worlds)) {
+        const tag = W.dim === 'muspel' ? ':m:' : ':c:';
+        // ta en ögonblicksbild: ändringar som görs medan vi sparar ligger kvar som "smutsiga" till nästa gång
+        const keys = [...W.dirtyMods];
+        for (const key of keys) {
+          W.dirtyMods.delete(key);
+          const cx = Math.floor(key / 65536) - 32768, cz = (key % 65536) - 32768;
+          const data = W.modsFor(key);
+          try { await kv.set('kubvarld:w:' + this.id + tag + cx + ',' + cz, data); }
+          catch (e) { W.dirtyMods.add(key); throw e; }
+        }
       }
       await this.app.updateWorldList(meta);
     } catch (e) { console.warn('Sparning misslyckades', e); }
@@ -1236,12 +1669,14 @@ export class Game {
   }
 
   dispose() {
+    this._disposed = true;
     this._endFish(); if (this._bobGeo) { this._bobGeo.dispose(); this._bobMat.dispose(); }
     if (this._infoEl) this._infoEl.remove();
     this.ui.close();
     this.ui.dispose();
     this.hand.dispose();
-    this.world.dispose();
+    for (const W of Object.values(this.worlds)) W.dispose();
+    for (const e of [this._portalEl, this._bossEl, this._burnEl]) if (e) e.remove();
     this.sky.dispose(this.scene);
     this.ents.dispose();
     this.player.dispose();
