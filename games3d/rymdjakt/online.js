@@ -9,6 +9,9 @@
  *   skott när ägaren håller in avtryckaren. Skada på en proxy skickas till ägaren ('dmg'), som drar av den på sitt
  *   eget skepp. Hos klienterna är fienderna proxyskepp som interpoleras från värdens ögonblicksbilder (~12 Hz);
  *   klientens egna skott/missiler ritas lokalt men gör ingen skada där (World.netVisual).
+ * Missiler: magasinet laddas om lokalt hos varje spelare (oändliga missiler); själva missilen, träffarna och
+ *   skadan är värdens. Asteroider som spricker avgörs av värden och skickas som händelse [7, index, frö] –
+ *   asteroidfältet har samma antal hos alla (fixed) så att index och bitar blir identiska.
  */
 import * as THREE from 'three';
 import { createNet, createLobby, V, emoteBar, backgroundTicker } from '../../engine/net.js';
@@ -49,7 +52,7 @@ const END = V.obj({ m: V.oneOf(['coop', 'duel']), sc: V.int(0, 1e9), w: V.int(0,
 const _fire = Ship.prototype.fireLaser;
 Ship.prototype.fireLaser = function () { const r = _fire.call(this); if (r) this._netFired = true; return r; };
 const _fm = World.prototype.fireMissile;
-World.prototype.fireMissile = function (s, def, target, sub) { const m = _fm.call(this, s, def, target, sub); if (this.netHook) this.netHook.missile(s, def, target); return m; };
+World.prototype.fireMissile = function (s, def, target, sub) { const m = _fm.call(this, s, def, target, sub); if (this.netHook) this.netHook.missile(s, def, target, m); return m; };
 const _hit = World.prototype.onBoltHit;
 World.prototype.onBoltHit = function (ship, sub, point, dir, dmg, sm, hm, owner) { if (this.netVisual) return this.netVisual.boltHit(ship, sub, point, dir, owner); return _hit.apply(this, arguments); };
 const _blast = World.prototype.blast;
@@ -58,11 +61,16 @@ const _cand = PlayerControl.prototype.candidates;
 PlayerControl.prototype.candidates = function () { const W = this.W; if (!W.netDuel || !W.player) return _cand.call(this); return W.ships.filter(s => !s.dead && s.targetable && s.team !== W.player.team); };
 const _fs = PlayerControl.prototype.fireSecondary;
 PlayerControl.prototype.fireSecondary = function () {
-  const P = this.W.player; const before = P ? P.missiles : 0;
-  _fs.call(this);
+  const T = this.W.playerTarget, locked = this.locked;
+  const ok = _fs.call(this);
   const on = this.g.online;
-  if (on && on.active && P && P.missiles < before) on.localMissile(this.W.playerTarget);
+  // bara låsta mål blir målsökande hos värden – annars flyger missilen rakt fram precis som lokalt
+  if (on && on.active && ok) on.localMissile(locked ? T : null);
+  return ok;
 };
+/** Online: samma asteroidfält hos alla (ingen skalning efter kvalitetsinställningen). */
+const fixedRocks = a => a ? Object.assign({}, a, { fixed: true }) : null;
+const ROCK_REF = 900000; // referens till asteroid i nätmeddelanden: ROCK_REF + index
 
 /* ---------------------------------------------------------------- proxyskepp */
 const _qa = new THREE.Quaternion();
@@ -112,7 +120,7 @@ const _qd = new THREE.Vector3();
 /* ---------------------------------------------------------------- samarbetsvågor (körs hos värden) */
 function coopDef(env, start) {
   return Object.assign({}, SURVIVAL, {
-    id: 'online-coop', title: 'Online: Samarbete', env, start, onKill: null,
+    id: 'online-coop', title: 'Online: Samarbete', env, start, onKill: null, asteroids: fixedRocks(SURVIVAL.asteroids),
     async run(m, g) {
       const on = g.online; m.wave = 0;
       await m.wait(2);
@@ -236,7 +244,7 @@ export class Online {
       names: players.map(x => (x && x.name) || 'Pilot'), metas: players.map(x => x && x.meta),
       proxies: new Map(), enemies: new Map(), killed: new Set(), kills: [0, 0, 0, 0], dd: [0, 0, 0, 0],
       score: 0, wave: 0, left: 0, reserves: 2 + p.pl.length, tl: -1, t: 0,
-      dmgQ: new Map(), evQ: [], stT: 0, snT: 0, infT: 0, dmgT: 0, respawn: [], ended: false, spawnProt: 0, lastInfo: ''
+      dmgQ: new Map(), evQ: [], netMissiles: new Map(), stT: 0, snT: 0, infT: 0, dmgT: 0, respawn: [], ended: false, spawnProt: 0, lastInfo: ''
     };
     const s = this.s;
     g.ui.hideAll();
@@ -255,7 +263,7 @@ export class Online {
       else def = {
         id: 'online-' + p.m, title: p.m === 'duel' ? 'Online: Luftstrid' : 'Online: Samarbete', env: p.env, music: 'strid', par: 0, reward: 0, start: sp,
         bounds: p.m === 'duel' ? { center: [0, 0, 0], radius: 2800 } : SURVIVAL.bounds,
-        asteroids: p.m === 'duel' ? { count: 90, shape: 'sphere', center: [0, 0, 0], radius: 2300, minR: 14, maxR: 110, seed: 91, avoid: [{ p: V3(0, 0, 0), r: 500 }] } : SURVIVAL.asteroids,
+        asteroids: fixedRocks(p.m === 'duel' ? { count: 90, shape: 'sphere', center: [0, 0, 0], radius: 2300, minR: 14, maxR: 110, seed: 91, avoid: [{ p: V3(0, 0, 0), r: 500 }] } : SURVIVAL.asteroids),
         async run() { /* styrs av värden / Online */ }
       };
       g.cur = { def, opts: { mode: 'online' } };
@@ -266,8 +274,11 @@ export class Online {
       W.on('flare', () => { if (!s.host) net.send('fx', [2, 0]); });
       if (!host) { W.netVisual = { boltHit: (ship, sub, pt, dir, owner) => this.visualHit(ship, sub, pt, dir, owner), blast: (pos, r) => this.visualBlast(pos, r) }; m.liveScore = () => fmt(s.score); }
       else {
-        W.netHook = { missile: (sh, d, tg) => { const o = this.ref(sh), t = this.ref(tg); if (o !== 0) this.hostEvent([2, o, t, d.torpedo ? 1 : 0]); } };
+        W.netHook = { missile: (sh, d, tg, m) => { const o = this.ref(sh), t = this.ref(tg); if (o !== 0) this.hostEvent([2, o, t, d.torpedo ? 1 : 0, m ? m.uid % 900000 : 0]); } };
+        // nedskjutna missiler/torpeder försvinner även hos klienterna
+        W.on('missileDown', m => { if (m.uid) this.hostEvent([8, m.uid % 900000]); });
         W.on('kill', (sh, from) => this.hostKill(sh, from));
+        W.on('rockBreak', (i, seed) => this.hostEvent([7, i, seed]));
         if (p.m === 'coop') m.liveScore = () => fmt(this.coopScore());
         else m.liveScore = () => fmt(s.kills[slot]) + ' nedskjutna';
       }
@@ -319,13 +330,13 @@ export class Online {
   makePlayerProxy(id, slot) {
     const W = this.W, s = this.s, meta = s.metas[slot] || { ship: 'svala', prim: 'pulse', sec: 'homing', dm: 1 };
     const base = PLAYER_SHIPS[meta.ship];
-    const stats = Object.assign({}, base, { primary: PRIMARY[meta.prim], secondary: SECONDARY[meta.sec], dmgMult: meta.dm, ammo: 99, flares: 99, ai: undefined });
+    const stats = Object.assign({}, base, { primary: PRIMARY[meta.prim], secondary: SECONDARY[meta.sec], dmgMult: meta.dm, magazine: 2, reload: 1, flares: 99, ai: undefined });
     // luftstrid: hos värden får varje fjärrspelare ett eget lag (1–3), hos klienten är alla andra lag 1
     const team = s.mode === 'duel' ? (s.host ? (slot < s.slot ? slot + 1 : slot) : 1) : 0;
     const sp = this.spawnPoint(slot, true);
     const pr = W.spawn('player', { stats, team, pos: sp.pos, look: sp.look, throttle: 0.6, weapon: stats.primary, name: s.names[slot], callsign: s.names[slot] });
     pr.ai = null; pr.static = true; pr.netPlayer = true; pr.netName = s.names[slot]; pr.netColor = SLOT_COL[slot]; pr.netSlot = slot; pr.netPeer = id; pr.netOwner = this;
-    pr.missiles = 99; pr.flares = 99; pr.secondary = stats.secondary;
+    pr.flares = 99; pr.secondary = stats.secondary;
     pr.buf = []; pr.update = proxyUpdate;
     pr.damage = s.host ? hostProxyDamage : function () {};
     s.proxies.set(id, pr);
@@ -335,6 +346,8 @@ export class Online {
   /** Referens till ett skepp i nätmeddelanden: >0 fiende-id (värdens), <0 spelare −(slot+1), 0 inget. */
   ref(sh) {
     if (!sh || sh.isFlare) return 0;
+    if (sh.isAsteroid) return sh.dead ? 0 : ROCK_REF + sh.idx;
+    if (sh.isMissile) return 0;
     const s = this.s;
     if (sh === this.W.player) return -(s.slot + 1);
     if (sh.netPlayer) return -(sh.netSlot + 1);
@@ -343,6 +356,7 @@ export class Online {
   }
   resolve(r) {
     const s = this.s, W = this.W;
+    if (r >= ROCK_REF) { const A = W.asteroids, i = r - ROCK_REF; return A && i < A.n && !A.dead[i] ? A.target(i) : null; }
     if (r < 0) { const slot = -r - 1; if (slot === s.slot) return W.player; for (const p of s.proxies.values()) if (p.netSlot === slot) return p; return null; }
     if (r > 0) { if (s.host) return W.ships.find(x => x.id === r) || null; return s.enemies.get(r) || null; }
     return null;
@@ -502,7 +516,8 @@ export class Online {
       if (!owner) return;
       const def = (e[3] | 0) === 1 ? NPC_TORPEDO : (e[3] | 0) === 2 && owner.secondary ? owner.secondary : NPC_MISSILE;
       const pos = owner.pos.clone().addScaledVector(owner.fwd, owner.radius * 0.6);
-      W.missiles.fire({ pos, dir: owner.fwd, baseVel: owner.vel, def, team: owner.team, owner, target, dmgMult: 1 });
+      const mm = W.missiles.fire({ pos, dir: owner.fwd, baseVel: owner.vel, def, team: owner.team, owner, target, dmgMult: 1 });
+      if (e[4]) { if (s.netMissiles.size > 300) s.netMissiles.clear(); s.netMissiles.set(e[4] | 0, mm); }
       W.sfxAt('missile', owner.pos, 0.9);
     } else if (k === 3) {                // ny våg
       s.wave = e[1] | 0;
@@ -512,7 +527,7 @@ export class Online {
       const bonus = e[2] | 0;
       g.hud.flashMsg(`Våg ${e[1] | 0} avklarad! +${fmt(bonus)} i bonus`, 3); g.sfx.play('objective');
       const P = W.player;
-      if (P && !P.dead) { P.shield = P.maxShield; P.hull = Math.min(P.maxHull, P.hull + P.maxHull * 0.3); P.missiles = Math.min(g.playerStats().ammo, P.missiles + 2); P.flares = Math.min(P.maxFlares, P.flares + 2); }
+      if (P && !P.dead) { P.shield = P.maxShield; P.hull = Math.min(P.maxHull, P.hull + P.maxHull * 0.3); P.mag = P.magMax; P.flares = Math.min(P.maxFlares, P.flares + 2); }
       if (s.host) {
         s.reserves = Math.min(9, s.reserves + 1);
         // utslagna piloter utan reservskepp kommer tillbaka
@@ -525,6 +540,14 @@ export class Online {
       let txt = by >= 0 && by !== v ? `${by === s.slot ? 'Du' : s.names[by]} sköt ner ${v === s.slot ? 'dig' : s.names[v]}!` : `${vn} blev nedskjuten!`;
       if (by === s.slot && v !== s.slot) { g.hud.hit(true); g.sfx.play('kill'); }
       toast(txt, { ms: 2200 });
+    } else if (k === 8) {                // missil nedskjuten [8, id]
+      if (s.host) return;
+      const mm = s.netMissiles.get(e[1] | 0);
+      s.netMissiles.delete(e[1] | 0);
+      if (mm && mm.alive) W.missiles.shootDown(mm, W);
+    } else if (k === 7) {                // asteroid spräckt [7, index, frö] (värden har redan gjort det)
+      if (s.host) return;
+      W.breakAsteroid(e[1] | 0, e[2] | 0, null);
     } else if (k === 6) {                // återuppstå [6, slot, x, y, z]
       const slot = e[1] | 0;
       if (s.host) s.dd[slot] = 0;
@@ -570,20 +593,21 @@ export class Online {
     if (k === 2) { W.launchFlares(pr); return; }
     if (k === 1) {
       const t = this.resolve(d[1] | 0);
-      const target = t && t !== pr && t.team !== pr.team && !t.dead ? t : null;
+      const target = t && t !== pr && t.team !== pr.team && !t.dead ? t : null; // ships eller asteroider (lag −1)
       const def = pr.secondary || SECONDARY.homing;
       const n = def.salvo || 1;
       for (let i = 0; i < n; i++) {
         const pos = V3((i % 2 ? 1 : -1) * (1 + Math.floor(i / 2)) * (n > 1 ? 1.4 : 0), -1, -2).applyQuaternion(pr.quat).add(pr.pos);
-        W.missiles.fire({ pos, dir: pr.fwd, baseVel: pr.vel, def, team: pr.team, owner: pr, target, dmgMult: 1 + (pr.dmgMult - 1) * 0.5, wobble: n > 1 ? Math.random() * 10 : 0 });
+        var last = W.missiles.fire({ pos, dir: pr.fwd, baseVel: pr.vel, def, team: pr.team, owner: pr, target, dmgMult: 1 + (pr.dmgMult - 1) * 0.5, wobble: n > 1 ? Math.random() * 10 : 0 });
       }
-      this.hostEvent([2, -(pr.netSlot + 1), this.ref(target), 2]);
+      this.hostEvent([2, -(pr.netSlot + 1), this.ref(target), 2, last ? last.uid % 900000 : 0]);
     }
   }
   /** Egen missil avfyrad (lokalt, PlayerControl). Klient: be värden skjuta den på riktigt. Värd: visa för andra. */
   localMissile(T) {
     const s = this.s; if (!s) return;
-    if (s.host) this.hostEvent([2, -(s.slot + 1), this.ref(T), 2]);
+    const L = this.W.missiles.list, m = L[L.length - 1];
+    if (s.host) this.hostEvent([2, -(s.slot + 1), this.ref(T), 2, m ? m.uid % 900000 : 0]);
     else this.net.send('fx', [1, this.ref(T)]);
   }
 

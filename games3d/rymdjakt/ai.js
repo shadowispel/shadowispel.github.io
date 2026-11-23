@@ -239,7 +239,7 @@ function wingman(s, W, dt) {
   ai.think -= dt;
   if (!P || P.dead) { ai.kind = 'fighter'; return; }
   if (ai.order === 'attack') {
-    const t = W.playerTarget && !W.playerTarget.dead && W.playerTarget.team !== s.team && !W.playerTarget.aiIgnore ? W.playerTarget : null;
+    const t = W.playerTarget && !W.playerTarget.dead && !W.playerTarget.isProxy && W.playerTarget.team !== s.team && !W.playerTarget.aiIgnore ? W.playerTarget : null;
     if (t) { ai.target = t; ai.think = 1; fighterCore(s, W, dt, t); return; }
     ai.order = 'free';
   }

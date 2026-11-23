@@ -28,6 +28,7 @@ export class PlayerControl {
     this.boostWas = false;
     this.disabled = false;
     this.tCycle = 0;
+    this._lastThr = null; // senaste absoluta gasläge från flygspaken
   }
   get W() { return this.g.world; }
 
@@ -35,8 +36,14 @@ export class PlayerControl {
     const g = this.g, W = this.W, P = W.player, I = g.input, S = g.settings;
     if (!P || P.dead) return;
     this.missileCd -= dt; this.flareCd -= dt; this.warnT -= dt;
+    // ------------------------------------------------ missilomladdning (oändliga missiler, en i taget)
+    if (P.mag < P.magMax) {
+      P.reloadT += dt;
+      if (P.reloadT >= P.reloadTime) { P.mag++; P.reloadT = 0; g.sfx.play('reload'); }
+    } else P.reloadT = 0;
     const touch = this.g.touchOn;
     const c = P.ctrl;
+    const H = g.stick ? g.stick.frame : null; // flygspak / HOTAS (flightstick.js)
     if (this.disabled) { c.pitch = c.yaw = c.roll = 0; c.boost = false; c.brake = false; c.fire = false; return; }
     // ------------------------------------------------ styrning
     const sens = S.get('sensitivity');
@@ -70,9 +77,16 @@ export class PlayerControl {
       yaw += curve(t.x, 1.3); pitch += -curve(t.y, 1.3) * inv;
     }
     if (I.down('TRollL')) roll -= 1; if (I.down('TRollR')) roll += 1;
+    // flygspak: absoluta axlar (tippning, rollning, girning)
+    if (H && H.active) {
+      if (H.moved) this.lastInput = 'stick';
+      pitch += H.pitch; roll += H.roll; yaw += H.yaw;
+    }
     c.pitch = clamp(pitch, -1, 1); c.yaw = clamp(yaw, -1, 1); c.roll = clamp(roll, -1, 1);
     // ------------------------------------------------ gas
     let thr = this.throttleTarget;
+    // gasreglaget sätter målfarten direkt (absolut läge); tangenterna kan justera tills reglaget rörs igen
+    if (H && H.thr != null && (this._lastThr == null || Math.abs(H.thr - this._lastThr) > 0.004)) { thr = H.thr; this._lastThr = H.thr; }
     if (I.down('KeyW')) thr += 0.7 * dt;
     if (I.down('KeyS')) thr -= 0.7 * dt;
     if (ry) thr += -ry * 0.8 * dt;
@@ -80,14 +94,14 @@ export class PlayerControl {
     if (touch && !I.down('KeyW', 'KeyS')) thr = 0.75;
     this.throttleTarget = clamp(thr, 0, 1);
     c.throttle = this.throttleTarget;
-    c.boost = I.down('ShiftLeft', 'ShiftRight', 'Pad0', 'TBoost');
-    c.brake = I.down('KeyX', 'Pad1');
+    c.boost = I.down('ShiftLeft', 'ShiftRight', 'Pad0', 'TBoost') || !!(H && H.down.boost);
+    c.brake = I.down('KeyX', 'Pad1') || !!(H && H.down.brake);
     if (c.boost && !this.boostWas && !P.energyLock && P.energy > 5) g.sfx.play('boostOn');
     this.boostWas = c.boost;
     // ------------------------------------------------ mål
-    if (I.pressed('KeyR', 'Pad5')) this.targetNearest();
-    if (I.pressed('KeyT', 'Pad3')) this.targetNext(1);
-    if (I.pressed('KeyG', 'Pad4')) this.targetSub();
+    if (I.pressed('KeyR', 'Pad5') || (H && H.pressed.tnear)) this.targetNearest();
+    if (I.pressed('KeyT', 'Pad3') || (H && H.pressed.tnext)) this.targetNext(1);
+    if (I.pressed('KeyG', 'Pad4') || (H && H.pressed.tsub)) this.targetSub();
     if (I.pressed('KeyY')) this.targetAttacker();
     let T = W.playerTarget;
     if (T && (T.dead || T.removed)) { W.playerTarget = T = null; this.g.targetSub = null; }
@@ -109,17 +123,17 @@ export class PlayerControl {
       this.leadPos = lead;
     } else this.leadPos = null;
     // ------------------------------------------------ eld
-    c.fire = I.down('Space', 'Pad7', 'TFire') || (I.locked && I.mouseDown(0));
+    c.fire = I.down('Space', 'Pad7', 'TFire') || (I.locked && I.mouseDown(0)) || !!(H && H.down.fire);
     if (c.fire) P.fireLaser();
     // ------------------------------------------------ låsning
     const sec = P.secondary;
-    if (T && sec.lockTime > 0 && !T.isFlare) {
+    if (T && sec.lockTime > 0 && !T.isFlare && T.team !== P.team) {
       const tp = sub ? sub.w : T.pos;
       _v2.copy(tp).sub(P.pos);
       const d = _v2.length();
       const ang = P.fwd.angleTo(_v2);
       const cone = T.isLarge ? 0.35 : 0.22;
-      if (d < sec.lockRange + (T.isLarge ? T.boundR : 0) && ang < cone && T.team !== 0 && T.targetable) {
+      if (d < sec.lockRange + (T.isLarge ? T.boundR : (T.isAsteroid ? T.radius : 0)) && ang < cone && T.targetable) {
         this.lock = Math.min(1, this.lock + dt / sec.lockTime);
       } else this.lock = Math.max(0, this.lock - dt * 1.5);
     } else this.lock = Math.max(0, this.lock - dt * 3);
@@ -127,9 +141,9 @@ export class PlayerControl {
     this.locked = this.lock >= 1;
     if (this.locked && !wasLocked) g.sfx.play('locked');
     if (!this.locked && this.lock > 0.02) { this.lockBeep -= dt; if (this.lockBeep <= 0) { this.lockBeep = 0.32 - this.lock * 0.22; g.sfx.play('lockBeep'); } }
-    if (I.pressed('KeyC', 'Pad6', 'TMissile') || (I.locked && I.mousePressed(2))) this.fireSecondary();
+    if (I.pressed('KeyC', 'Pad6', 'TMissile') || (I.locked && I.mousePressed(2)) || (H && H.pressed.missile)) this.fireSecondary();
     // ------------------------------------------------ motåtgärder
-    if (I.pressed('KeyF', 'Pad2', 'TFlare')) {
+    if (I.pressed('KeyF', 'Pad2', 'TFlare') || (H && H.pressed.flares)) {
       if (P.flares > 0 && this.flareCd <= 0) { W.launchFlares(P); P.flares--; this.flareCd = 1.0; W.emit('flare', P); }
       else if (P.flares <= 0) g.sfx.play('empty');
     }
@@ -145,7 +159,7 @@ export class PlayerControl {
       this.order(next);
     }
     // ------------------------------------------------ vy
-    if (I.pressed('KeyV', 'Pad8')) { this.view = this.view === 'chase' ? 'cockpit' : 'chase'; }
+    if (I.pressed('KeyV', 'Pad8') || (H && H.pressed.cam)) { this.view = this.view === 'chase' ? 'cockpit' : 'chase'; }
     // ------------------------------------------------ missilvarning
     const inc = W.missiles.incomingTo(P);
     this.incoming = inc;
@@ -171,18 +185,18 @@ export class PlayerControl {
 
   fireSecondary() {
     const g = this.g, W = this.W, P = W.player;
-    if (this.missileCd > 0) return;
-    if (P.missiles <= 0) { g.sfx.play('empty'); return; }
+    if (this.missileCd > 0) return false;
+    if (P.mag <= 0) { g.sfx.play('empty'); this.g.hud.flashMsg('Missilerna laddas om …', 0.9); return false; }
     const sec = P.secondary;
-    const T = W.playerTarget;
+    const T = W.playerTarget && !W.playerTarget.dead ? W.playerTarget : null;
     const sub = this.g.targetSub && this.g.targetSub.alive ? this.g.targetSub : null;
     const dmgMult = 1 + (P.dmgMult - 1) * 0.5;
     if (sec.salvo) {
       // svärmraketer: söker målet om det ligger framför, annars närmaste fiende framför
-      let tg = T && T.team !== 0 && P.fwd.angleTo(_v.copy(T.pos).sub(P.pos)) < 0.7 ? T : null;
+      let tg = T && T.team !== P.team && P.fwd.angleTo(_v.copy(T.pos).sub(P.pos)) < 0.7 ? T : null;
       if (!tg) {
         let bd = sec.lockRange;
-        for (const e of W.teams[1]) { if (e.dead || !e.targetable || e.kind === 'object') continue; const d = e.pos.distanceTo(P.pos); if (d < bd && P.fwd.angleTo(_v.copy(e.pos).sub(P.pos)) < 0.6) { bd = d; tg = e; } }
+        for (const e of this.candidates()) { if (e.kind === 'object') continue; const d = e.pos.distanceTo(P.pos); if (d < bd && P.fwd.angleTo(_v.copy(e.pos).sub(P.pos)) < 0.6) { bd = d; tg = e; } }
       }
       for (let i = 0; i < sec.salvo; i++) {
         const side = (i % 2 ? 1 : -1) * (1 + Math.floor(i / 2));
@@ -198,31 +212,79 @@ export class PlayerControl {
       this.missileCd = sec.id === 'torpedo' ? 1.2 : 0.45;
       if (!guided) this.g.hud.flashMsg('Ingen låsning – missilen flyger rakt fram', 1.4);
     }
-    P.missiles--;
+    P.mag--;
     W.stats.missiles++;
     g.sfx.play('missile');
+    return true;
   }
 
   /* ---------------------------------------------------------------- målval */
+  /** Skepp som går att välja: allt som inte tillhör det egna laget (vänliga skepp kan aldrig låsas). */
   candidates() {
-    const W = this.W;
-    return W.teams[1].filter(s => !s.dead && s.targetable);
+    const W = this.W, P = W.player;
+    return W.ships.filter(s => !s.dead && s.targetable && s !== P && s.team !== P.team);
   }
+  /** Alla valbara mål: skepp, fiendens missiler/torpeder och asteroider/skräp i närheten och framför. */
+  allTargets(rockCone = 0.75) {
+    const W = this.W, P = W.player, out = this.candidates();
+    for (const m of W.missiles.list) if (m.alive && m.team !== P.team && m.pos.distanceToSquared(P.pos) < 2600 * 2600) out.push(m);
+    const A = W.asteroids;
+    if (A) {
+      A.query(P.pos.x, P.pos.y, P.pos.z, 1900, i => {
+        if (A.dead[i] || A.r[i] < 1) return;
+        _v.set(A.px[i] - P.pos.x, A.py[i] - P.pos.y, A.pz[i] - P.pos.z);
+        const d = _v.length();
+        if (d - A.cr[i] > 1800 || P.fwd.angleTo(_v) - Math.atan(A.cr[i] / Math.max(1, d)) > rockCone) return;
+        out.push(A.target(i));
+      });
+    }
+    return out;
+  }
+  /** Vinkel mellan nosen och målets kant (0 om siktet ligger över målet). */
+  _aimAng(t) {
+    const P = this.W.player;
+    _v.copy(t.pos).sub(P.pos);
+    const d = _v.length();
+    const r = t.isLarge ? t.radius * 0.8 : (t.radius || t.hitR || 3);
+    return { a: Math.max(0, P.fwd.angleTo(_v) - Math.atan(r / Math.max(1, d))), d };
+  }
+  /** Närmast siktet: det mål nosen pekar mot (även asteroider, missiler och delsystem); annars närmaste fiende. */
   targetNearest() {
     const W = this.W, P = W.player;
     let best = null, bs = Infinity;
-    for (const s of this.candidates()) {
-      _v.copy(s.pos).sub(P.pos);
-      const d = _v.length();
-      const ang = P.fwd.angleTo(_v);
-      const sc = d * (1 + ang * 1.5) * (s.kind === 'mine' ? 1.6 : s.kind === 'object' ? 4 : 1);
-      if (sc < bs) { bs = sc; best = s; }
+    for (const t of this.allTargets(0.32)) {
+      const { a, d } = this._aimAng(t);
+      if (a > 0.3) continue;
+      const sc = a * (t.isAsteroid ? 2.2 : 1) + d / 30000 + (t.isAsteroid ? 0.01 : 0);
+      if (sc < bs) { bs = sc; best = t; }
+    }
+    if (!best) {
+      for (const s of this.candidates()) {
+        _v.copy(s.pos).sub(P.pos);
+        const d = _v.length();
+        const ang = P.fwd.angleTo(_v);
+        const sc = d * (1 + ang * 1.5) * (s.kind === 'mine' ? 1.6 : s.kind === 'object' ? 4 : 1);
+        if (sc < bs) { bs = sc; best = s; }
+      }
     }
     this.setTarget(best);
+    // pekar siktet på ett delsystem (t.ex. ett kanontorn) väljs det direkt
+    if (best && best.isLarge) {
+      let bsub = null, ba = Infinity;
+      for (const sub of best.subs) {
+        if (!sub.alive) continue;
+        _v.copy(sub.w).sub(P.pos);
+        const a = P.fwd.angleTo(_v); // vinkel till delsystemets mitt – det siktet ligger närmast vinner
+        if (a - Math.atan(sub.r / Math.max(1, _v.length())) < 0.06 && a < ba) { ba = a; bsub = sub; }
+      }
+      if (bsub) { this.g.targetSub = bsub; this.lock = 0; }
+    }
   }
+  /** Växlar mellan alla synliga mål, sorterade efter hur nära siktet de ligger. */
   targetNext(dir) {
-    const W = this.W, P = W.player;
-    const list = this.candidates().sort((a, b) => a.pos.distanceTo(P.pos) - b.pos.distanceTo(P.pos));
+    const W = this.W;
+    const list = this.allTargets(0.5).map(t => { const { a, d } = this._aimAng(t); return { t, k: a < 0.9 ? a : 10 + d / 1000 }; })
+      .sort((x, y) => x.k - y.k).map(x => x.t);
     if (!list.length) { this.setTarget(null); return; }
     let i = list.indexOf(W.playerTarget);
     i = (i + dir + list.length) % list.length;
@@ -248,6 +310,7 @@ export class PlayerControl {
   }
   setTarget(t) {
     const W = this.W;
+    if (t && t.isAsteroid && t.dead) t = null;
     if (W.playerTarget !== t) { this.lock = 0; this.g.targetSub = null; }
     W.playerTarget = t;
     if (t) this.g.sfx.play('target');

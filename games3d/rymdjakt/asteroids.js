@@ -1,11 +1,30 @@
 /**
  * Rymdjakt – asteroidfält: deformerade ikosaedrar som instansieras, med rumsligt rutnät för snabba kollisionstester.
+ * Asteroider kan skjutas sönder med missiler: de spricker i mindre bitar (reservplatser i instansbuffertarna)
+ * eller blir skräp. Uppspräckningen är deterministisk (frö) så att den kan synkas online.
  */
 import * as THREE from 'three';
 import { makeRng } from '../../engine/kit.js';
 import { makeNoise3, mat } from './gfx.js';
 
 const VARIANTS = 6;
+/** Asteroidernas tålighet. Riktigt stora block går inte att spräcka. */
+export const BIG_ROCK = 75;
+export function rockHp(R) { return R > BIG_ROCK ? 1e9 : 10 + R * R * 0.11; }
+
+/** Målbar asteroid (för målväljaren, låsning och missiler). */
+class RockTarget {
+  constructor(f, i) {
+    this.f = f; this.idx = i;
+    this.isProxy = true; this.isAsteroid = true; this.kind = 'asteroid'; this.team = -1; this.targetable = true; this.dead = false;
+    this.subs = []; this.isLarge = false; this.shield = 0; this.maxShield = 0; this.points = 0;
+    this.pos = new THREE.Vector3(f.px[i], f.py[i], f.pz[i]); this.vel = new THREE.Vector3();
+    this.radius = this.hitR = this.boundR = f.cr[i];
+    this.maxHull = f.hp[i]; this.big = f.hp[i] >= 1e9;
+    this.name = this.big ? 'Jätteasteroid' : (f.r[i] < 16 ? 'Stenblock' : 'Asteroid');
+  }
+  get hull() { return Math.max(0, this.f.hp[this.idx]); }
+}
 let GEOS = null;
 function buildGeos() {
   if (GEOS) return GEOS;
@@ -46,10 +65,15 @@ export class AsteroidField {
     const rng = makeRng(opts.seed || 1);
     const N = opts.count;
     const c = new THREE.Vector3(...(opts.center || [0, 0, 0]));
-    this.n = N;
-    this.px = new Float32Array(N); this.py = new Float32Array(N); this.pz = new Float32Array(N); this.r = new Float32Array(N);
-    this.cr = new Float32Array(N);
-    this.ax = []; this.spin = new Float32Array(N); this.ang = new Float32Array(N); this.base = []; this.var = new Uint8Array(N); this.slot = new Uint16Array(N);
+    // reservplatser för bitar från uppspräckta asteroider
+    const SPARE = Math.min(220, Math.max(60, Math.round(N * 0.6)));
+    const NT = N + SPARE;
+    this.n = NT; this.n0 = N;
+    this.px = new Float32Array(NT); this.py = new Float32Array(NT); this.pz = new Float32Array(NT); this.r = new Float32Array(NT);
+    this.cr = new Float32Array(NT); this.hp = new Float32Array(NT); this.dead = new Uint8Array(NT);
+    this.ax = []; this.spin = new Float32Array(NT); this.ang = new Float32Array(NT); this.base = []; this.var = new Uint8Array(NT); this.slot = new Uint16Array(NT);
+    this.proxies = new Map();
+    this.center = c.clone();
     const counts = new Array(VARIANTS).fill(0);
     const v = new THREE.Vector3();
     const avoid = opts.avoid || [];
@@ -79,6 +103,15 @@ export class AsteroidField {
       this.ax.push(new THREE.Vector3(rng() - 0.5, rng() - 0.5, rng() - 0.5).normalize());
       this.spin[i] = (rng() - 0.5) * (R > 60 ? 0.05 : 0.4); this.ang[i] = rng() * 6;
       this.base.push(new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6)));
+      this.hp[i] = ok ? rockHp(R) : 1e9; this.dead[i] = ok ? 0 : 1;
+    }
+    this.free = [];
+    for (let i = N; i < NT; i++) {
+      const k = i % VARIANTS;
+      this.px[i] = c.x; this.py[i] = c.y; this.pz[i] = c.z; this.r[i] = 0; this.cr[i] = 0; this.dead[i] = 1;
+      this.var[i] = k; this.slot[i] = counts[k]++;
+      this.ax.push(new THREE.Vector3(0, 1, 0)); this.base.push(new THREE.Quaternion());
+      this.free.push(NT - 1 - (i - N)); // pop() ger lägsta lediga index först
     }
     this.meshes = [];
     const tint = new THREE.Color(opts.tint || '#ffffff');
@@ -99,7 +132,7 @@ export class AsteroidField {
       const R = this.cr[i];
       this._cells(this.px[i], this.py[i], this.pz[i], R, key => { let a = this.grid.get(key); if (!a) this.grid.set(key, a = []); a.push(i); });
     }
-    this.stamp = new Uint32Array(N); this.stampN = 1;
+    this.stamp = new Uint32Array(this.n); this.stampN = 1;
     this._q = new THREE.Quaternion(); this._m = new THREE.Matrix4(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3();
     this.time = 0;
     this.update(0, true);
@@ -116,7 +149,7 @@ export class AsteroidField {
     const s = ++this.stampN;
     this._cells(x, y, z, r, key => {
       const a = this.grid.get(key); if (!a) return;
-      for (const i of a) { if (this.stamp[i] === s) continue; this.stamp[i] = s; fn(i); }
+      for (const i of a) { if (this.stamp[i] === s || this.dead[i]) continue; this.stamp[i] = s; fn(i); }
     });
   }
   /** Närmaste kollision mellan sfär (x,y,z,r) och asteroid. Returnerar index eller −1. */
@@ -144,18 +177,54 @@ export class AsteroidField {
     });
     return best;
   }
+  _write(i) {
+    const q = this._q, m = this._m, p = this._p, s = this._s;
+    q.setFromAxisAngle(this.ax[i], this.ang[i]).multiply(this.base[i]);
+    p.set(this.px[i], this.py[i], this.pz[i]); s.setScalar(this.dead[i] ? 0 : this.r[i]);
+    m.compose(p, q, s);
+    this.meshes[this.var[i]].setMatrixAt(this.slot[i], m);
+  }
   update(dt, force = false) {
     this.time += dt;
-    const q = this._q, m = this._m, p = this._p, s = this._s;
     for (let i = 0; i < this.n; i++) {
-      if (!force && this.spin[i] === 0) continue;
+      if (!force && (this.spin[i] === 0 || this.dead[i])) continue;
       this.ang[i] += this.spin[i] * dt;
-      q.setFromAxisAngle(this.ax[i], this.ang[i]).multiply(this.base[i]);
-      p.set(this.px[i], this.py[i], this.pz[i]); s.setScalar(this.r[i]);
-      m.compose(p, q, s);
-      this.meshes[this.var[i]].setMatrixAt(this.slot[i], m);
+      this._write(i);
     }
     for (const mesh of this.meshes) { mesh.instanceMatrix.needsUpdate = true; if (force) mesh.computeBoundingSphere(); }
+  }
+  /** Målobjekt för asteroid i (cachat så att målväljaren får samma objekt varje gång). */
+  target(i) {
+    let t = this.proxies.get(i);
+    if (!t) { t = new RockTarget(this, i); this.proxies.set(i, t); }
+    return t;
+  }
+  /**
+   * Spräcker asteroid i. Deterministiskt utifrån seed (samma resultat hos alla onlinespelare).
+   * Returnerar { pos, R, frags: [index] } eller null.
+   */
+  fracture(i, seed) {
+    if (i < 0 || i >= this.n || this.dead[i]) return null;
+    const R = this.r[i], pos = new THREE.Vector3(this.px[i], this.py[i], this.pz[i]);
+    this.dead[i] = 1; this.hp[i] = 0; this._write(i);
+    const pr = this.proxies.get(i); if (pr) { pr.dead = true; this.proxies.delete(i); }
+    const rng = makeRng((seed | 0) + 1);
+    const n = R < 14 ? 0 : R < 28 ? 2 : 3 + (rng() < 0.5 ? 1 : 0);
+    const geos = buildGeos(), frags = [], v = new THREE.Vector3();
+    for (let k = 0; k < n && this.free.length; k++) {
+      const j = this.free.pop();
+      const r = R * (0.36 + rng() * 0.16);
+      v.set(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1); if (v.lengthSq() < 0.01) v.set(1, 0, 0); v.normalize();
+      this.px[j] = pos.x + v.x * R * 0.5; this.py[j] = pos.y + v.y * R * 0.5; this.pz[j] = pos.z + v.z * R * 0.5;
+      this.r[j] = r; this.cr[j] = r * geos[this.var[j]].userData.rad; this.hp[j] = rockHp(r); this.dead[j] = 0;
+      this.ax[j].set(rng() - 0.5, rng() - 0.5, rng() - 0.5).normalize(); this.spin[j] = (rng() - 0.5) * 0.9; this.ang[j] = rng() * 6;
+      this.base[j].setFromEuler(new THREE.Euler(rng() * 6, rng() * 6, rng() * 6));
+      this._cells(this.px[j], this.py[j], this.pz[j], this.cr[j], key => { let a = this.grid.get(key); if (!a) this.grid.set(key, a = []); a.push(j); });
+      this._write(j);
+      frags.push(j);
+    }
+    for (const mesh of this.meshes) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
+    return { pos, R, frags };
   }
   /** Normal i punkten (från asteroidens centrum). */
   normalAt(i, x, y, z, out) { return out.set(x - this.px[i], y - this.py[i], z - this.pz[i]).normalize(); }

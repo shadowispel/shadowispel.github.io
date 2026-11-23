@@ -213,8 +213,21 @@ export function mat(key) {
     case 'rust': m = triplanar(std({ color: 0x8a3a22, map: panelTexture(), metalness: 0.5, roughness: 0.6 }), 0.05); break;
     case 'grey': m = std({ color: 0x8a9099, metalness: 0.6, roughness: 0.45 }); break;
     case 'dark': m = std({ color: 0x45484f, metalness: 0.5, roughness: 0.5 }); break;
-    case 'glass': m = std({ color: 0x0d1a33, metalness: 0.9, roughness: 0.08, emissive: 0x0a2a55, emissiveIntensity: 0.6 }); break;
-    case 'glassRed': m = std({ color: 0x220806, metalness: 0.9, roughness: 0.1, emissive: 0xff2a10, emissiveIntensity: 1.6 }); break;
+    // cockpitglas med klarlack som speglar omgivningen (scene.environment)
+    case 'glass': m = new THREE.MeshPhysicalMaterial({ color: 0x0c1a36, metalness: 0.35, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.04, emissive: 0x0a2a55, emissiveIntensity: 0.45, envMapIntensity: 2.2 }); break;
+    case 'glassRed': m = new THREE.MeshPhysicalMaterial({ color: 0x220806, metalness: 0.4, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.05, emissive: 0xff2a10, emissiveIntensity: 1.5, envMapIntensity: 1.6 }); break;
+    // detaljmaterial för skeppen
+    case 'metal': m = std({ color: 0xb4bcc8, metalness: 0.92, roughness: 0.26 }); break;
+    case 'nozzle': m = std({ color: 0x2c2e33, metalness: 0.85, roughness: 0.32, side: THREE.DoubleSide }); break;
+    case 'carbon': m = triplanar(std({ color: 0x3a3f4a, map: panelTexture(), metalness: 0.35, roughness: 0.62 }), 0.16); break;
+    case 'carbonRed': m = triplanar(std({ color: 0x5a1c14, map: panelTexture(), metalness: 0.4, roughness: 0.55 }), 0.14); break;
+    case 'hullFine': m = triplanar(std({ color: 0xeef1f5, map: panelTexture(), metalness: 0.38, roughness: 0.4 }), 0.16); break;
+    case 'hullDFine': m = triplanar(std({ color: 0x8a8f99, map: panelTexture(), metalness: 0.55, roughness: 0.42 }), 0.15); break;
+    case 'blueGloss': m = std({ color: 0x1d5fd0, metalness: 0.35, roughness: 0.28 }); break;
+    case 'goldGloss': m = std({ color: 0xf2c230, metalness: 0.7, roughness: 0.25 }); break;
+    case 'redGloss': m = std({ color: 0xb0281a, metalness: 0.45, roughness: 0.3 }); break;
+    case 'glowCore': m = glow(0.9, 1.25, 1.8); break;
+    case 'glowCoreRed': m = glow(1.8, 0.95, 0.4); break;
     case 'solar': m = std({ color: 0xffffff, map: solarTexture(), metalness: 0.8, roughness: 0.25, emissive: 0x0a1a40, emissiveIntensity: 0.4 }); break;
     case 'rock': m = std({ color: 0xffffff, map: rockTexture(), vertexColors: true, metalness: 0.05, roughness: 0.95, flatShading: true }); break;
     case 'rockBase': m = triplanar(std({ color: 0xb8ae9e, map: rockTexture(), metalness: 0.05, roughness: 0.95, flatShading: true }), 0.012); break;

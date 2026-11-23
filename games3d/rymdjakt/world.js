@@ -52,7 +52,9 @@ export class World {
     if (asteroids) {
       const q = this.game.settings.q;
       const k = q.view;
-      this.asteroids = new AsteroidField(this.scene, Object.assign({}, asteroids, { count: Math.round(asteroids.count * Math.min(1.25, Math.max(0.55, k))) }));
+      // online (fixed): samma antal hos alla spelare så att uppspräckta asteroider kan synkas
+      const count = asteroids.fixed ? asteroids.count : Math.round(asteroids.count * Math.min(1.25, Math.max(0.55, k)));
+      this.asteroids = new AsteroidField(this.scene, Object.assign({}, asteroids, { count }));
     }
     this.time = 0;
     this.stats = this.freshStats();
@@ -114,7 +116,9 @@ export class World {
   }
   spawnPlayer(stats, pos, look) {
     const p = this.spawn('player', { stats, team: 0, isPlayer: true, pos, look, throttle: 0.6, name: 'Stjärna Ett', callsign: 'Stjärna Ett' });
-    p.missiles = stats.ammo; p.flares = stats.flares; p.maxFlares = stats.flares;
+    // missiler: oändliga, magasin om två som laddas om en i taget
+    p.magMax = stats.magazine || 2; p.mag = p.magMax; p.reloadTime = stats.reload || 3.6; p.reloadT = 0;
+    p.flares = stats.flares; p.maxFlares = stats.flares;
     p.secondary = stats.secondary;
     this.player = p;
     // vingspetsstrimmor
@@ -244,6 +248,29 @@ export class World {
   }
   /** Explosion med skada i radie. direct får full skada. */
   blast(pos, radius, dmg, team, owner, direct, sub, capMult = 1, def = null) {
+    // direktträff på en asteroid eller en missil/torped
+    const directRock = direct && direct.isAsteroid ? direct.idx : -1;
+    if (direct && direct.isProxy) {
+      if (dmg > 0 && direct.isAsteroid) this.damageAsteroid(direct.idx, dmg * capMult, owner, pos);
+      else if (dmg > 0 && direct.isMissile && direct.alive && direct.team !== team) {
+        this.missiles.shootDown(direct, this);
+        this.emit('missileDown', direct);
+        if (owner && owner.isPlayer) { this.game.hud.hit(true); this.sfx.play('hitConfirm'); this.game.hud.floater(pos, direct.kind === 'torpedo' ? 'Torped nedskjuten' : 'Missil nedskjuten', '#9ad8ff'); }
+      }
+      direct = null;
+    }
+    if (dmg > 0) {
+      this.missiles.blastKill(pos, radius, team, this);
+      if (this.asteroids) {
+        const A = this.asteroids, hits = [];
+        A.query(pos.x, pos.y, pos.z, radius, i => {
+          if (i === directRock) return;
+          const d = Math.hypot(A.px[i] - pos.x, A.py[i] - pos.y, A.pz[i] - pos.z) - A.cr[i];
+          if (d < radius) hits.push(i, 1 - Math.max(0, d) / radius);
+        });
+        for (let k = 0; k < hits.length; k += 2) this.damageAsteroid(hits[k], dmg * 0.5 * hits[k + 1] * capMult, owner, null, true);
+      }
+    }
     if (dmg > 0 && direct && !direct.dead && direct.team !== team) {
       direct.damage(dmg, { from: owner, point: pos, sub, kind: 'blast', capMult });
       if (owner && owner.isPlayer) { this.stats.hits++; this.emit('playerHit', direct, sub, false); }
@@ -261,6 +288,36 @@ export class World {
       const d = this.player.pos.distanceTo(pos);
       if (d < radius * 4) this.shakeAmt = Math.min(1.6, this.shakeAmt + (1 - d / (radius * 4)) * 0.8);
     }
+  }
+  /** Skada på asteroid i (missiler/explosioner). Små och medelstora asteroider spricker. */
+  damageAsteroid(i, amount, owner, point, splash = false) {
+    const A = this.asteroids;
+    if (!A || A.dead[i] || amount <= 0) return;
+    const p = point || _v.set(A.px[i], A.py[i], A.pz[i]);
+    if (A.hp[i] >= 1e9) {
+      if (!splash && owner && owner.isPlayer && (this.time - (this._bigMsgT || -9)) > 4) { this._bigMsgT = this.time; this.game.hud.flashMsg('För stor för att spräckas – välj ett mindre block', 1.6); }
+      return;
+    }
+    A.hp[i] -= amount;
+    if (!splash) this.fx.spark(p, null, 10, 50, [2.4, 1.8, 1.2], 0.7);
+    if (A.hp[i] <= 0) this.breakAsteroid(i, Math.floor(Math.random() * 900000), owner);
+    else if (!splash && owner && owner.isPlayer) this.sfx.play('hitConfirm');
+  }
+  /** Spräcker asteroid i (deterministiskt via seed). Online: värden skickar händelsen till alla. */
+  breakAsteroid(i, seed, owner = null) {
+    const A = this.asteroids; if (!A) return;
+    const res = A.fracture(i, seed);
+    if (!res) return;
+    const { pos, R } = res;
+    const k = Math.min(1, R / 40);
+    this.fx.explode(pos, 3 + R * 0.35, null, { debris: 0, color: [1.4, 1.0, 0.7] });
+    this.fx.debrisBurst(pos, _v2.set(0, 0, 0), Math.round(5 + k * 12), Math.max(1.2, R * 0.12), 20 + R * 0.8);
+    for (let n = 0; n < 4 + k * 6; n++) { _v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(R).add(pos); this.fx.smokePuff(_v, null, R * 0.5, 2.5, 0.5, 0.45); }
+    this.sfxAt(R > 25 ? 'boom' : 'explode', pos, 0.9 + k * 0.4);
+    this.shake(pos, 0.4 + k * 0.6, 260 + R * 4);
+    if (owner && owner.isPlayer) { this.game.hud.hit(true); this.game.hud.floater(pos, res.frags.length ? 'Asteroid spräckt' : 'Stenblock krossat', '#d8c8a8'); }
+    if (this.playerTarget && this.playerTarget.isAsteroid && this.playerTarget.dead) this.playerTarget = null;
+    this.emit('rockBreak', i, seed);
   }
   /** Segmenttest mot fientliga skepp (för missiler). */
   segmentHitShips(p0, p1, team, pad = 0) {

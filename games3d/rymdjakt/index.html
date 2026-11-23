@@ -36,7 +36,7 @@
       <div class="rj-speed"><b id="txtSpeed">0</b><small>m/s</small></div>
       <div class="rj-thr"><span>Gas</span><div class="rj-bar th"><i id="barThr"></i></div></div>
       <div class="rj-w"><span id="txtWeap"></span></div>
-      <div class="rj-w"><span id="txtSec"></span> <b id="txtAmmo"></b></div>
+      <div class="rj-w rj-secrow"><span id="txtSec"></span> <span class="rj-mag" id="txtAmmo" title="Missilmagasin – laddas om en i taget"><i><u></u></i><i><u></u></i></span></div>
       <div class="rj-w">Motåtgärder <b id="txtFlares"></b></div>
     </div>
     <div class="rj-wing" id="wing"></div>
@@ -157,6 +157,7 @@
         <button class="btn primary" id="pResume">Fortsätt</button>
         <button class="btn" id="pRestart">Starta om uppdraget</button>
         <button class="btn" id="pSettings">Inställningar</button>
+        <button class="btn" id="pCtrl">Ställ in kontroller</button>
         <button class="btn" id="pHelp">Hur man spelar</button>
         <button class="btn" id="pQuit">Avsluta till huvudmenyn</button>
       </div>
@@ -168,7 +169,20 @@
     <div class="g3-panel">
       <h2 class="g3-h2">Inställningar</h2>
       <div id="setBox"></div>
-      <div class="g3-row"><button class="btn primary" data-back>Klar</button></div>
+      <div class="g3-row"><button class="btn" id="btnCtrl">🕹️ Ställ in kontroller</button><button class="btn primary" data-back>Klar</button></div>
+    </div>
+  </div>
+
+  <!-- ======================================================= Ställ in kontroller (flygspak/HOTAS) -->
+  <div class="g3-screen hidden" id="ctrlScr">
+    <div class="g3-panel wide rj-ctrl">
+      <h2 class="g3-h2">Ställ in kontroller</h2>
+      <p class="g3-sub">Flygspakar (HOTAS), gasreglage, pedaler och andra styrenheter – flera samtidigt. Klicka på <b>Ändra</b> och rör axeln eller tryck på knappen du vill använda. Inställningarna sparas för varje enhet.</p>
+      <h3>Anslutna enheter</h3>
+      <div id="ctrlDevs"></div>
+      <h3>Funktioner</h3>
+      <div id="ctrlMap"></div>
+      <div class="g3-row"><button class="btn" id="ctrlReset">Återställ förval</button><button class="btn primary" data-back>Klar</button></div>
     </div>
   </div>
 
@@ -176,7 +190,7 @@
   <div class="g3-screen hidden" id="help">
     <div class="g3-panel wide">
       <h2 class="g3-h2">Hur man spelar</h2>
-      <div class="g3-tabs" id="helpTabs"><button data-h="kb" class="on">Tangentbord och mus</button><button data-h="pad">Handkontroll</button><button data-h="touch">Pekskärm</button><button data-h="tips">Tips</button></div>
+      <div class="g3-tabs" id="helpTabs"><button data-h="kb" class="on">Tangentbord och mus</button><button data-h="pad">Handkontroll</button><button data-h="touch">Pekskärm</button><button data-h="stick">Flygspak</button><button data-h="tips">Tips</button></div>
       <div class="g3-keys" data-hp="kb">
         <span>Mus</span><span>Styr nosen som en mjuk styrspak (klicka i bilden först)</span>
         <span><kbd>W</kbd> <kbd>S</kbd></span><span>Öka / minska gas (även mushjulet)</span>
@@ -186,9 +200,9 @@
         <span><kbd>Skift</kbd></span><span>Boost (drar energi)</span>
         <span><kbd>X</kbd></span><span>Broms</span>
         <span>Vänsterklick / <kbd>Mellanslag</kbd></span><span>Laser (se upp för överhettning)</span>
-        <span>Högerklick / <kbd>C</kbd></span><span>Missil (lås först genom att hålla målet i siktet)</span>
+        <span>Högerklick / <kbd>C</kbd></span><span>Missil – lås genom att hålla målet i siktet, eller skjut utan låsning rakt fram</span>
         <span><kbd>F</kbd></span><span>Motåtgärder mot missiler</span>
-        <span><kbd>R</kbd> / <kbd>T</kbd> / <kbd>Y</kbd></span><span>Närmaste mål / nästa mål / den som anfaller dig</span>
+        <span><kbd>R</kbd> / <kbd>T</kbd> / <kbd>Y</kbd></span><span>Målet närmast siktet / växla mellan alla synliga mål / den som anfaller dig</span>
         <span><kbd>G</kbd></span><span>Välj delsystem på stora skepp</span>
         <span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></span><span>Vingmän: anfall mitt mål / skydda mig / fri jakt</span>
         <span><kbd>V</kbd></span><span>Jaktkamera / cockpitvy</span>
@@ -201,7 +215,7 @@
         <span>RT / LT</span><span>Laser / missil</span>
         <span>A / B</span><span>Boost / broms</span>
         <span>X</span><span>Motåtgärder</span>
-        <span>RB / Y</span><span>Närmaste mål / nästa mål</span>
+        <span>RB / Y</span><span>Målet närmast siktet / nästa mål</span>
         <span>LB</span><span>Välj delsystem</span>
         <span>Styrkors</span><span>Upp: anfall mitt mål · Ner: skydda mig · Vänster: fri jakt</span>
         <span>Select</span><span>Byt kameravy</span>
@@ -210,7 +224,7 @@
       <div class="g3-keys hidden" data-hp="touch">
         <span>Vänster halva</span><span>Dra för att styra nosen</span>
         <span>Skjut</span><span>Håll in för laser</span>
-        <span>Missil</span><span>Avfyra missil (lås först)</span>
+        <span>Missil</span><span>Avfyra missil (lås först, eller skjut rakt fram)</span>
         <span>Boost</span><span>Håll in för boost</span>
         <span>Fackla</span><span>Motåtgärder (facklor) mot missiler</span>
         <span>Mål</span><span>Välj närmaste mål</span>
@@ -218,11 +232,22 @@
         <span>Order</span><span>Växla vingmännens order: skydda mig → anfall mitt mål → fri jakt</span>
         <span>Gas</span><span>Sköts automatiskt</span>
       </div>
+      <div class="g3-keys hidden" data-hp="stick">
+        <span>Anslut</span><span>Koppla in spaken och tryck på en knapp. Thrustmaster T.Flight HOTAS X känns igen och får ett färdigt förval.</span>
+        <span>Spak</span><span>Framåt/bakåt tippar nosen, åt sidorna rollar</span>
+        <span>Vridning / vippa</span><span>Girar (pedaler fungerar också)</span>
+        <span>Gasreglage</span><span>Reglagets läge är farten: helt fram = full fart, helt bak = stilla</span>
+        <span>Avtryckare</span><span>Laser</span>
+        <span>Övriga knappar</span><span>Missil, mål närmast siktet, nästa mål, boost, motåtgärder, broms, delsystem, kamera och paus (förval: knapp 2–10)</span>
+        <span>Ställ in</span><span>Inställningar → <b>Ställ in kontroller</b> (även i pausmenyn): byt axlar och knappar, invertera, ställ dödzon och känslighet och se allt live.</span>
+      </div>
       <div class="rj-helptips hidden" data-hp="tips">
         <p><b>Förhandsringen:</b> den gula ringen framför ett rörligt mål visar var skotten möts. Lägg siktet på ringen, inte på skeppet.</p>
         <p><b>Värme:</b> bågen runt siktet visar laservärmen. Blir den full överhettas vapnen en stund – skjut i korta skurar.</p>
         <p><b>Sköld och skrov:</b> skölden laddas om när du inte blivit träffad på ett par sekunder. Skrovet lagas inte under uppdraget.</p>
-        <p><b>Missiler:</b> håll målet nära siktet tills det står LÅST. Olåsta missiler flyger rakt fram.</p>
+        <p><b>Missiler:</b> de tar aldrig slut. Magasinet rymmer två och laddas om en i taget – ikonerna nere till höger och under siktet visar läget. Uppgraderingen Laddsystem i hangaren ger snabbare omladdning.</p>
+        <p><b>Skjut på allt:</b> du kan låsa på och skjuta missiler mot fiendeskepp, delsystem, kanontorn, minor, stationer, asteroider (som spricker i mindre bitar), skräp och fiendens missiler och torpeder. Håll målet i siktet tills det står LÅST – utan låsning flyger missilen rakt fram och smäller vid träff eller efter en bit. <kbd>R</kbd> väljer det mål siktet pekar på, <kbd>T</kbd> växlar mellan alla synliga mål.</p>
+        <p><b>Vänner:</b> allierade skepp och andra piloter i samarbetsläget kan aldrig låsas, och dina missiler skadar dem inte – så du kan inte råka förstöra ett uppdrag. I Luftstrid går de andra piloterna förstås att låsa.</p>
         <p><b>Stora skepp:</b> sköldgeneratorer skyddar skrovet. Välj skeppet och tryck G för att sikta på delsystem – motorer, kanontorn, hangarer och generatorer.</p>
         <p><b>Vingmän:</b> ge order med 1–3. ”Skydda mig” är guld värt när du jagas.</p>
         <p><b>Hangaren:</b> krediter från uppdragen köper nya skepp, uppgraderingar och vapen. Spela om uppdrag för bättre betyg och mer krediter.</p>

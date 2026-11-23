@@ -7,7 +7,7 @@ import { MISSIONS } from './missions.js';
 import { portraitURL } from './portraits.js';
 
 const $ = id => document.getElementById(id);
-const SCREENS = ['menu', 'campaign', 'briefing', 'survival', 'hangar', 'debrief', 'pause', 'settingsScr', 'help', 'records', 'loading', 'online'];
+const SCREENS = ['menu', 'campaign', 'briefing', 'survival', 'hangar', 'debrief', 'pause', 'settingsScr', 'help', 'records', 'loading', 'online', 'ctrlScr'];
 const kr = n => Number(Math.floor(n)).toLocaleString('sv-SE') + ' kr';
 const pts = n => Number(Math.floor(n)).toLocaleString('sv-SE');
 const GRADE_ORDER = ['S', 'A', 'B', 'C', 'D'];
@@ -42,6 +42,8 @@ export class UI {
     click('pResume', () => this.g.resume());
     click('pRestart', () => this.g.restartMission());
     click('pSettings', () => this.openSettings());
+    click('pCtrl', () => this.openControls());
+    click('btnCtrl', () => this.openControls());
     click('pHelp', () => this.show('help'));
     click('pQuit', () => this.g.quitToMenu());
     click('recReset', () => this.resetProgress());
@@ -70,6 +72,7 @@ export class UI {
     const prev = this.stack.pop();
     if (!prev) { this.show('menu', false); return; }
     if (prev === 'briefing') this.openBriefing(this.brIdx, false);
+    else if (prev === 'ctrlScr') this.openControls();
     else if (prev === 'survival') { this.buildSurvival(); this.show('survival', false); }
     else if (prev === 'campaign') { this.buildCampaign(); this.show('campaign', false); }
     else this.show(prev, false);
@@ -93,6 +96,8 @@ export class UI {
     ]);
     this.show('settingsScr');
   }
+  /** Skärmen "Ställ in kontroller" (flygspak/HOTAS, pedaler). */
+  openControls() { this.show('ctrlScr'); this.g.stickScreen.show(); }
 
   /* ---------------------------------------------------------------- kampanj */
   openCampaign() { this.buildCampaign(); this.show('campaign'); }
@@ -137,7 +142,7 @@ export class UI {
   shipSummary() {
     const s = this.save, st = playerStats(s), u = s.upgrades[s.ship];
     const up = UPGRADES.map(x => `${x.name} ${u[x.id] || 0}/${MAX_UPG}`).join(' · ');
-    return `<div class="rj-shipsum"><b>${st.name}</b> – ${st.role}<br>Laser: ${st.primary.name}<br>${st.secondary.name}: ${st.ammo} st · Motåtgärder: ${st.flares}<br><small>${up}</small></div>`;
+    return `<div class="rj-shipsum"><b>${st.name}</b> – ${st.role}<br>Laser: ${st.primary.name}<br>${st.secondary.name}: ${st.magazine} i magasinet, ${String(st.reload).replace('.', ',')} s omladdning · Motåtgärder: ${st.flares}<br><small>${up}</small></div>`;
   }
 
   /* ---------------------------------------------------------------- överlevnad */
@@ -196,7 +201,7 @@ export class UI {
   }
   weaponCard(d, w, slot, btn) {
     const s = this.save, owned = !!s.owned[w.id], sel = s[slot] === w.id, locked = s.unlocked < w.unlock;
-    const extra = slot === 'primary' ? `Skada ${w.dmg}${w.mode === 'spread' ? ' × 3' : ''} · ${Math.round(1 / w.cd)} skott/s${w.shieldMult > 1 ? ' · ×' + w.shieldMult + ' mot sköld' : ''}` : `Skada ${w.dmg}${w.salvo ? ' × ' + w.salvo : ''} · ${w.ammo} st${w.lockTime ? ' · låsning ' + String(w.lockTime).replace('.', ',') + ' s' : ' · ingen låsning'}`;
+    const extra = slot === 'primary' ? `Skada ${w.dmg}${w.mode === 'spread' ? ' × 3' : ''} · ${Math.round(1 / w.cd)} skott/s${w.shieldMult > 1 ? ' · ×' + w.shieldMult + ' mot sköld' : ''}` : `Skada ${w.dmg}${w.salvo ? ' × ' + w.salvo : ''} · omladdning ${String(w.reload).replace('.', ',')} s${w.lockTime ? ' · låsning ' + String(w.lockTime).replace('.', ',') + ' s' : ' · ingen låsning'}`;
     d.innerHTML = `<h4>${w.name} <small>${extra}</small></h4><p>${w.desc}</p>`;
     const row = document.createElement('div'); row.className = 'row'; d.appendChild(row);
     if (owned) btn(row, sel ? 'Monterad' : 'Montera', () => { s[slot] = w.id; writeSave(s); this.g.sfx.play('select'); this.buildHangar(); }, !sel, sel);

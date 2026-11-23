@@ -112,7 +112,18 @@ export class HUD {
     this._w('thr', this.el.thr, pc.throttleTarget);
     this._set('wp', this.el.weap, st.weapon.name);
     this._set('sec', this.el.sec, st.secondary.name);
-    this._set('am', this.el.ammo, '× ' + st.missiles);
+    // missilmagasin: fulla ikoner för laddade missiler, den som laddas fylls successivt
+    if (!this.magEls) this.magEls = [...this.el.ammo.querySelectorAll('i')];
+    for (let k = 0; k < this.magEls.length; k++) {
+      const f = k < st.mag ? 1 : (k === st.mag ? Math.min(1, st.reloadT / st.reloadTime) : 0);
+      const key = 'mg' + k, v = Math.round(f * 50) / 50;
+      if (this.cache[key] !== v) {
+        this.cache[key] = v;
+        const el = this.magEls[k];
+        el.firstChild.style.height = (v * 100) + '%';
+        el.classList.toggle('full', v >= 1); el.classList.toggle('load', v > 0 && v < 1);
+      }
+    }
     this._set('fl', this.el.flares, '× ' + st.flares);
     // mål
     const T = W.playerTarget;
@@ -120,13 +131,15 @@ export class HUD {
       this.el.tgt.classList.add('on');
       const sub = g.targetSub;
       this._set('tn', this.el.tgtName, T.name);
-      this._set('tc', this.el.tgtClass, T.team === 0 ? 'Allierad' : (T.isLarge ? (T.kind === 'station' ? 'Station' : 'Stort skepp') : ({ mine: 'Mina', drone: 'Övningsmål', object: 'Föremål', bomber: 'Bombplan' })[T.kind] || 'Jaktplan'));
+      this._set('tc', this.el.tgtClass, T.team === 0 && !T.isProxy ? 'Allierad' : (T.isLarge ? (T.kind === 'station' ? 'Station' : 'Stort skepp') : ({ mine: 'Mina', drone: 'Övningsmål', object: 'Föremål', bomber: 'Bombplan', asteroid: 'Asteroid', missile: 'Missil', torpedo: 'Torped' })[T.kind] || 'Jaktplan'));
       this._set('td', this.el.tgtDist, fmtDist(T.pos.distanceTo(P.pos)));
       this._w('th', this.el.tgtHull, T.hull / T.maxHull);
       this._w('ts', this.el.tgtShield, T.maxShield ? T.shield / T.maxShield : 0);
       this.el.tgtShield.parentNode.style.display = T.maxShield ? '' : 'none';
       let subTxt = '';
       if (sub && sub.alive) subTxt = 'Delsystem: ' + sub.name + ' ' + Math.ceil(sub.hp / sub.maxHp * 100) + ' %';
+      else if (T.isAsteroid) subTxt = T.big ? 'För stor för att spräckas' : 'Spricker av missilträffar';
+      else if (T.isMissile) subTxt = 'Skjut ner den med en missil';
       else if (T.isLarge && T.hullLocked()) subTxt = T.def.targetsKill ? 'Slå ut målen (G växlar delsystem)' : 'Skyddas av sköldgenerator – G växlar delsystem';
       else if (T.isLarge) subTxt = 'G: välj delsystem';
       this._set('tsub', this.el.tgtSub, subTxt);
@@ -216,14 +229,15 @@ export class HUD {
         ctx.fillStyle = C.nav; ctx.fillText(n.label, o.x, o.y - 14 * s); ctx.fillText(fmtDist(d), o.x, o.y + 22 * s);
       } else { const e = this.edge(o); this.arrow(ctx, e, C.nav, n.label + ' ' + fmtDist(d)); }
     }
-    // ---- skepp
-    for (const sh of W.ships) {
+    // ---- skepp (+ valt mål som inte är ett skepp: asteroid eller missil)
+    const marks = T && T.isProxy && !T.dead ? W.ships.concat([T]) : W.ships;
+    for (const sh of marks) {
       if (sh === P || sh.dead || !sh.targetable) continue;
       const d = sh.pos.distanceTo(P.pos);
       const isT = sh === T;
       if (!isT && !sh.hudMark && d > (sh.isLarge ? 9000 : 3200)) continue;
       this.proj(sh.pos, o);
-      const col = isT ? C.target : sh.hudMark === 'protect' ? C.protect : sh.hudMark === 'disable' ? C.mine : sh.kind === 'mine' ? C.mine : sh.team === 0 ? C.ally : (sh.kind === 'object' ? C.obj : C.enemy);
+      const col = isT ? C.target : sh.hudMark === 'protect' ? C.protect : sh.hudMark === 'disable' ? C.mine : sh.kind === 'mine' ? C.mine : sh.team === P.team ? C.ally : (sh.kind === 'object' ? C.obj : C.enemy);
       if (o.on) {
         const r = Math.max(9 * s, Math.min(this.H * 0.45, (sh.isLarge ? sh.radius * 0.9 : sh.radius) * focal / Math.max(1, o.depth)));
         if (isT) this.bracket(ctx, o.x, o.y, r + 5 * s, col, 2.2 * s, 0.32);
@@ -346,6 +360,16 @@ export class HUD {
     ctx.moveTo(x, y - r * 1.4); ctx.lineTo(x, y - r * 0.6); ctx.moveTo(x, y + r * 0.6); ctx.lineTo(x, y + r * 1.4);
     ctx.stroke();
     ctx.beginPath(); ctx.arc(x, y, 1.5 * s, 0, Math.PI * 2); ctx.fillStyle = 'rgba(200,240,255,0.9)'; ctx.fill();
+    // missilmagasin under siktet
+    if (P.magMax) {
+      const w = 7 * s, hh = 3 * s, gap = 4 * s, y0 = y + r * 2.1;
+      for (let k = 0; k < P.magMax; k++) {
+        const x0 = x + (k - (P.magMax - 1) / 2) * (w + gap) - w / 2;
+        const f = k < P.mag ? 1 : (k === P.mag ? Math.min(1, P.reloadT / P.reloadTime) : 0);
+        ctx.fillStyle = 'rgba(200,240,255,0.18)'; ctx.fillRect(x0, y0, w, hh);
+        ctx.fillStyle = f >= 1 ? 'rgba(150,215,255,0.95)' : 'rgba(255,200,90,0.85)'; ctx.fillRect(x0, y0, w * f, hh);
+      }
+    }
     // värmebåge
     const h = P.heat / 100;
     if (h > 0.02) {
@@ -452,11 +476,12 @@ export class HUD {
     };
     for (const n of W.navs) if (n.active) dot(n.pos, C.nav, 3.2, true, 'dia');
     const T = W.playerTarget;
-    for (const sh of W.ships) {
+    const dots = T && T.isProxy && !T.dead ? W.ships.concat([T]) : W.ships;
+    for (const sh of dots) {
       if (sh === P || sh.dead || !sh.targetable) continue;
       _v2.copy(sh.pos).sub(P.pos).applyQuaternion(_q);
       const front = _v2.z < 0;
-      const col = sh === T ? C.target : sh.hudMark === 'protect' ? C.protect : sh.kind === 'mine' ? C.mine : sh.team === 0 ? C.ally : (sh.kind === 'object' ? C.obj : C.enemy);
+      const col = sh === T ? C.target : sh.hudMark === 'protect' ? C.protect : sh.kind === 'mine' ? C.mine : sh.team === P.team ? C.ally : (sh.kind === 'object' ? C.obj : C.enemy);
       const r = dot(sh.pos, col, sh.isLarge ? 3.4 : 2.2, front, sh.isLarge ? 'sq' : 'c');
       if (r && sh === T) { ctx.strokeStyle = C.target; ctx.beginPath(); ctx.arc(r.x, r.y, 6 * s, 0, Math.PI * 2); ctx.stroke(); }
     }

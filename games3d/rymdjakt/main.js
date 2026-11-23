@@ -21,6 +21,7 @@ import { Sfx, MUSIC } from './sfx.js';
 import { UI } from './ui.js';
 import { portrait } from './portraits.js';
 import { Online } from './online.js';
+import { FlightStick, StickScreen } from './flightstick.js';
 
 window.Spelhallen && Spelhallen.init(GAME_ID);
 const $ = id => document.getElementById(id);
@@ -37,6 +38,7 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(this.settings.get('fov'), 1, 0.5, 24000);
     this.R.setCamera(this.camera);
     this.input = new Input(this.R.canvas, this.settings);
+    this.stick = new FlightStick(this); // flygspakar/HOTAS (egen avläsning av navigator.getGamepads)
     this.audio = new Audio(this.settings);
     this.sfx = new Sfx(this.audio);
     this.save = loadSave();
@@ -47,6 +49,7 @@ class Game {
     this.rig = new CameraRig(this.camera);
     this.ui = new UI(this);
     this.online = new Online(this);
+    this.stickScreen = new StickScreen(this, this.stick);
     this.overlay = false; // onlineläge: pausmenyn visas men simuleringen fortsätter
     this.state = 'loading';
     this.mission = null; this.targetSub = null;
@@ -167,7 +170,7 @@ class Game {
     } catch (e) { try { c.requestPointerLock(); } catch (e2) { /* ignorera */ } }
   }
   _lockHint() {
-    const show = this.state === 'flight' && !this.input.locked && !this.touchOn && !this.overlay;
+    const show = this.state === 'flight' && !this.input.locked && !this.touchOn && !this.overlay && !this.stick.hasStick;
     $('lockhint').classList.toggle('hidden', !show);
   }
 
@@ -329,8 +332,9 @@ class Game {
     if (this.stepT > 2) { this.stepT = 0; const f = this.loop.fps; const want = f > 100 ? 1 / 120 : 1 / 60; if (Math.abs(want - this.loop.step) > 1e-6) this.loop.step = want; }
     this.audio.update();
     const I = this.input, W = this.world;
+    this.stick.poll(I);
     if (this.state === 'flight') {
-      if (I.pressed('Escape', 'KeyP', 'Pad9')) { if (this.overlay) this.resume(); else this.pause(); I.endFrame(); return; }
+      if (I.pressed('Escape', 'KeyP', 'Pad9') || this.stick.pressed('pause')) { if (this.overlay) this.resume(); else this.pause(); I.endFrame(); return; }
       if (this.overlay) { const c = W.player && W.player.ctrl; if (c) { c.fire = false; c.pitch = c.yaw = c.roll = 0; c.boost = false; c.brake = false; } }
       else this.pc.update(dt);
       W.update(dt);
@@ -341,7 +345,7 @@ class Game {
       this.hud.update(dt);
       if (P) this.sfx.setEngine(Math.min(1.4, P.speed / P.def.speed), P.boosting, !P.dead);
     } else if (this.state === 'paused') {
-      if (I.pressed('KeyP', 'Pad9')) this.resume();
+      if (I.pressed('KeyP', 'Pad9') || (this.stick.pressed('pause') && this.ui.cur === 'pause')) this.resume();
       this.ui.padNav(I, dt);
     } else if (this.state === 'menu') {
       W.update(dt);

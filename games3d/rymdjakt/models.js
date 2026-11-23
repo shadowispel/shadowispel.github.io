@@ -4,6 +4,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mat, glowSpriteMat, makeNoise3 } from './gfx.js';
 import { makeRng } from '../../engine/kit.js';
 
@@ -20,6 +21,18 @@ function prep(geo) {
   return g;
 }
 
+/** Speglar en geometri i x och vänder trianglarnas ordning (så att ytorna fortfarande pekar utåt). */
+function mirrorX(geo) {
+  const g = prep(geo);
+  const atts = Object.values(g.attributes);
+  const pos = g.attributes.position, nor = g.attributes.normal;
+  for (let i = 0; i < pos.count; i++) { pos.setX(i, -pos.getX(i)); nor.setX(i, -nor.getX(i)); }
+  for (const a of atts) {
+    const n = a.itemSize, arr = a.array;
+    for (let i = 0; i + 2 < a.count; i += 3) for (let k = 0; k < n; k++) { const b = (i + 1) * n + k, c = (i + 2) * n + k; const t = arr[b]; arr[b] = arr[c]; arr[c] = t; }
+  }
+  return g;
+}
 /** Modellbyggare: samlar geometrier per material och slår ihop dem. */
 class MB {
   constructor() { this.parts = new Map(); }
@@ -33,11 +46,11 @@ class MB {
     this.parts.get(mk).push(g);
     return this;
   }
-  /** Spegla (x → −x) och lägg till båda. */
+  /** Spegla (x → −x) och lägg till båda (geometrin speglas också, så osymmetriska delar blir rätt). */
   pair(mk, geoFn, p, r, s) {
     this.add(mk, geoFn(), p, r, s);
     const p2 = p ? [-p[0], p[1], p[2]] : null, r2 = r ? [r[0], -r[1], -r[2]] : null;
-    this.add(mk, geoFn(true), p2, r2, s);
+    this.add(mk, mirrorX(geoFn(true)), p2, r2, s);
     return this;
   }
   build(group = new THREE.Group()) {
@@ -57,9 +70,11 @@ class MB {
 
 /* -------------------------------------------------------------- Geometrihjälpare */
 const G = {
-  box: (w, h, d) => new THREE.BoxGeometry(w, h, d),
+  // stora lådor får fasade kanter (fångar ljuset), små detaljer förblir enkla
+  box: (w, h, d) => Math.min(w, h, d) >= 5 ? new RoundedBoxGeometry(w, h, d, 1, Math.min(w, h, d) * 0.1) : new THREE.BoxGeometry(w, h, d),
   /** Avsmalnande låda: fram (−Z) skalas med fx/fy. opt: dy (förskjutning fram), sweep (z += |x|·sweep), ct (kordavsmalning), sy (z += (y+h/2)·sy), bx/by (bakre skalning) */
   tbox(w, h, d, fx = 1, fy = 1, opt = {}) {
+    if (Math.min(w, h, d) >= 5 && !opt.ct && !opt.sy) return G.tboxR(w, h, d, fx, fy, Object.assign({ r: Math.min(w, h, d) * 0.09 }, opt));
     const g = new THREE.BoxGeometry(w, h, d, 1, 1, 1).toNonIndexed();
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
@@ -166,142 +181,246 @@ function greeble(mb, rng, mk, n, x0, x1, y, z0, z1, smin = 1, smax = 4, dir = 1)
 }
 function newInfo(radius) { return { radius, hardpoints: [], cockpit: [0, 1, -1], subs: [], colliders: [], camDist: radius * 2.4, camUp: radius * 0.55, tail: null }; }
 
+/* -------------------------------------------------------------- Mjuka former (skrov, vingar, motorer) */
+/** Fasad/rundad låda med mjuk avsmalning framåt (fx/fy = skalning i nosen, bx/by = bakre skalning). */
+G.tboxR = function (w, h, d, fx = 1, fy = 1, opt = {}) {
+  const r = opt.r != null ? opt.r : Math.min(w, h, d) * 0.12;
+  const g = new RoundedBoxGeometry(w, h, d, 2, r);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const t = (z + d / 2) / d; // 0 = nosen (−Z), 1 = aktern
+    x *= fx + ((opt.bx || 1) - fx) * t; y = y * (fy + ((opt.by || 1) - fy) * t) + (opt.dy || 0) * (1 - t);
+    if (opt.sweep) z += Math.abs(x) * opt.sweep;
+    p.setXYZ(i, x, y, z);
+  }
+  g.computeVertexNormals();
+  return g;
+};
+G.rbox = (w, h, d, r) => new RoundedBoxGeometry(w, h, d, 2, r != null ? r : Math.min(w, h, d) * 0.15);
+/** Rotationsskrov längs Z: prof = [[z, radie], …] från nosen (−Z) bakåt; sx/sy ger elliptiskt tvärsnitt. */
+G.lathe = function (prof, sx = 1, sy = 1, seg = 16) {
+  const pts = prof.map(([z, r]) => new THREE.Vector2(Math.max(0.0001, r), z));
+  const g = new THREE.LatheGeometry(pts, seg);
+  g.rotateX(Math.PI / 2);
+  g.scale(sx, sy, 1);
+  return g;
+};
+/** Vinge/platta i XZ-planet med profil (fasade kanter) och avsmalning mot spetsarna. pts = [[x, z], …]. */
+G.plate = function (pts, thick, opt = {}) {
+  const sh = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+  const bev = opt.bevel != null ? opt.bevel : thick * 0.38;
+  const depth = Math.max(0.002, thick - 2 * bev);
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev * 0.85, bevelSegments: 2, curveSegments: 3 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, -depth / 2, 0);
+  if (opt.taper) {
+    const p = g.attributes.position; let span = 0;
+    for (let i = 0; i < p.count; i++) span = Math.max(span, Math.abs(p.getX(i)));
+    for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) * (1 - opt.taper * Math.abs(p.getX(i)) / span));
+    g.computeVertexNormals();
+  }
+  return g;
+};
+/** Spegla en punktlista (x → −x) till en sluten, symmetrisk kontur. */
+const sym = half => half.concat(half.slice().reverse().map(([x, z]) => [-x, z]));
+/** Platt dekal som pekar uppåt (+Y). */
+G.decal = (r, seg = 20) => { const g = new THREE.CircleGeometry(r, seg); g.rotateX(-Math.PI / 2); return g; };
+/** Motormunstycke: metallring, mörk insida med glödande kärna (pekar bakåt, +Z). */
+function nozzle(mb, x, y, z, r, red = false) {
+  mb.add('metal', G.cylZ(r * 1.06, r * 0.94, r * 0.55, 18, true), [x, y, z]);
+  mb.add('nozzle', G.cylZ(r * 0.9, r * 0.82, r * 0.6, 18, true), [x, y, z + 0.01]);
+  mb.add(red ? 'glowOrange' : 'glowBlue', G.disc(r * 0.86, 18), [x, y, z - r * 0.12]);
+  mb.add(red ? 'glowCoreRed' : 'glowCore', G.disc(r * 0.42, 14), [x, y, z - r * 0.08]);
+}
+
 /* ============================================================== Spelarskepp */
 function buildSvala(trim = 'gold') {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(6);
-  mb.add('hullW', G.tbox(2.2, 1.5, 8, 0.35, 0.45, { dy: -0.15 }));
-  mb.add('hullW', G.coneZ(0.42, 2.2, 8), [0, -0.15, -5.05]);
-  mb.add('glass', G.sph(1, 14, 10), [0, 0.62, -1.6], null, [0.72, 0.55, 1.75]);
-  mb.add(trim, G.box(0.32, 0.1, 5.5), [0, 0.78, 1.4]);
-  mb.add('hullW', G.tbox(10.5, 0.22, 3.4, 1, 1, { ct: 0.45, sweep: 0.2 }), [0, -0.25, 1.0]);
-  mb.pair('grey', () => G.cylZ(0.2, 0.26, 2.4), [5.0, -0.25, 2.0]);
-  mb.pair(trim, () => G.cylZ(0.27, 0.27, 0.5), [5.0, -0.25, 1.4]);
-  mb.pair('blue', () => G.box(2.0, 0.25, 0.45), [3.0, -0.24, 1.95]);
-  mb.pair('grey', () => G.cylZ(0.72, 0.8, 3.8), [1.05, -0.05, 3.7]);
-  mb.pair('dark', () => G.cylZ(0.84, 0.7, 0.6), [1.05, -0.05, 5.8]);
-  mb.pair('glowBlue', () => G.disc(0.62), [1.05, -0.05, 6.12]);
-  mb.pair('hullW', () => G.tbox(0.16, 2.0, 2.4, 1, 1, { sy: 0.7 }), [1.25, 1.1, 3.6], [0, 0, -0.3]);
-  mb.pair(trim, () => G.box(0.18, 0.4, 1.0), [1.45, 1.75, 4.4], [0, 0, -0.3]);
-  mb.pair('dark', () => G.box(0.7, 0.6, 1.8), [1.25, -0.15, -0.4]);
-  mb.pair('dark', () => G.cylZ(0.12, 0.14, 2.6), [2.5, -0.4, -0.7]);
+  const tr = trim === 'gold' ? 'goldGloss' : 'blueGloss';
+  // skrov: avsmalnande rotationskropp med elliptiskt tvärsnitt
+  mb.add('hullFine', G.lathe([[-6.5, 0], [-6.1, 0.18], [-5.1, 0.42], [-3.6, 0.78], [-1.6, 1.02], [1.2, 1.12], [3.4, 1.04], [5.0, 0.86], [5.6, 0.62]], 1.05, 0.74, 18));
+  mb.add('metal', G.coneZ(0.07, 1.0, 6), [0, 0, -6.9]);
+  // cockpit med ram
+  mb.add('glass', G.sph(1, 18, 12, 0), [0, 0.5, -2.0], null, [0.6, 0.5, 1.7]);
+  mb.add('carbon', G.tboxR(1.4, 0.38, 3.9, 0.5, 0.7, { r: 0.12 }), [0, 0.42, -1.6]);
+  mb.add(tr, G.rbox(0.18, 0.08, 3.0, 0.03), [0, 0.86, 1.7]);
+  // luftintag
+  mb.pair('carbon', () => G.tboxR(0.62, 0.62, 2.0, 0.8, 0.8, { r: 0.18 }), [1.12, -0.12, -0.6]);
+  mb.pair('nozzle', () => G.disc(0.24, 10), [1.12, -0.12, -1.62], [0, Math.PI, 0]);
+  // vingar med profil, svept bakåt
+  mb.add('hullFine', G.plate(sym([[0.9, -0.7], [5.15, 2.25], [5.35, 3.45], [0.9, 3.95]]), 0.32, { taper: 0.5 }), [0, -0.28, 0]);
+  // fraktionsfält på vingarna
+  mb.add(tr, G.plate(sym([[2.6, 0.85], [4.55, 2.15], [4.7, 2.65], [2.6, 1.35]]), 0.05, { bevel: 0.015 }), [0, -0.12, 0]);
+  mb.pair('blueGloss', () => G.decal(0.42), [3.25, -0.08, 2.95]);
+  mb.pair('glowCyan', () => G.decal(0.16, 12), [3.25, -0.06, 2.95]);
+  // vingspetskanoner
+  mb.pair('metal', () => G.lathe([[-1.5, 0], [-1.2, 0.1], [-0.9, 0.16], [1.4, 0.2], [1.6, 0.16]], 1, 1, 10), [5.15, -0.28, 1.6]);
+  mb.pair('carbon', () => G.cylZ(0.26, 0.26, 1.6, 10), [5.15, -0.28, 2.6]);
+  // motorgondoler
+  mb.pair('hullFine', () => G.lathe([[1.4, 0.45], [2.2, 0.72], [4.2, 0.8], [5.9, 0.74]], 1, 1, 16), [1.08, -0.06, 0]);
+  mb.pair('carbon', () => G.cylZ(0.81, 0.81, 0.5, 16), [1.08, -0.06, 4.6]);
+  nozzle(mb, 1.08, -0.06, 6.05, 0.7); nozzle(mb, -1.08, -0.06, 6.05, 0.7);
+  // dubbla stjärtfenor, lätt utåtlutade
+  mb.pair('hullFine', () => G.plate([[0, 2.6], [1.75, 4.15], [1.75, 4.85], [0, 5.3]], 0.14, { taper: 0.3 }), [1.18, 0.55, 0], [0, 0, Math.PI / 2 - 0.3]);
+  mb.pair(tr, () => G.plate([[1.15, 3.75], [1.7, 4.15], [1.7, 4.6], [1.15, 4.35]], 0.16, { bevel: 0.03 }), [1.18, 0.55, 0], [0, 0, Math.PI / 2 - 0.3]);
+  // vapenbalkar under vingarna
+  mb.pair('carbon', () => G.tboxR(0.5, 0.4, 2.4, 0.6, 0.6, { r: 0.12 }), [2.5, -0.55, -0.6]);
+  mb.pair('metal', () => G.cylZ(0.09, 0.11, 1.4), [2.5, -0.55, -2.4]);
   mb.build(g);
-  addFlame(g, [1.05, -0.05, 6.1], 0.55, 3.6, 'blue'); addFlame(g, [-1.05, -0.05, 6.1], 0.55, 3.6, 'blue');
-  navLight(g, [5.05, -0.25, 3.6], '#ff3030', 1.2); navLight(g, [-5.05, -0.25, 3.6], '#30ff60', 1.2);
-  info.hardpoints = [[-2.5, -0.4, -2.0], [2.5, -0.4, -2.0]];
-  info.cockpit = [0, 0.78, -1.6];
-  info.wingtips = [[-5.1, -0.25, 3.0], [5.1, -0.25, 3.0]];
-  info.engines = [[-1.05, -0.05, 6.2], [1.05, -0.05, 6.2]];
+  addFlame(g, [1.08, -0.06, 6.0], 0.55, 3.6, 'blue'); addFlame(g, [-1.08, -0.06, 6.0], 0.55, 3.6, 'blue');
+  navLight(g, [5.4, -0.25, 3.6], '#30ff60', 1.2); navLight(g, [-5.4, -0.25, 3.6], '#ff3030', 1.2);
+  navLight(g, [0, 1.0, 4.9], '#ffffff', 0.7);
+  info.hardpoints = [[-2.5, -0.55, -3.1], [2.5, -0.55, -3.1]];
+  info.cockpit = [0, 0.78, -1.9];
+  info.wingtips = [[-5.3, -0.28, 3.0], [5.3, -0.28, 3.0]];
+  info.engines = [[-1.08, -0.06, 6.2], [1.08, -0.06, 6.2]];
   info.camDist = 22; info.camUp = 5;
   return { group: g, info };
 }
 function buildFalk() {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(6);
-  mb.add('hullW', G.tbox(1.6, 1.3, 10, 0.25, 0.35, { dy: -0.1 }), [0, 0, 0.5]);
-  mb.add('hullW', G.coneZ(0.32, 2.8, 8), [0, -0.1, -5.9]);
-  mb.add('glass', G.sph(1, 14, 10), [0, 0.5, -2.0], null, [0.55, 0.48, 1.6]);
-  mb.add('hullW', G.tbox(9.2, 0.18, 5, 1, 1, { ct: 0.75, sweep: 0.5 }), [0, -0.15, 2.6]);
-  mb.add('hullW', G.tbox(3.4, 0.12, 1.2, 1, 1, { ct: 0.5, sweep: 0.4 }), [0, 0, -3.2]);
-  mb.add('grey', G.cylZ(1.0, 1.1, 3.2), [0, 0, 5.3]);
-  mb.add('dark', G.cylZ(1.15, 0.95, 0.6), [0, 0, 7.1]);
-  mb.add('glowBlue', G.disc(0.85), [0, 0, 7.42]);
-  mb.add('hullW', G.tbox(0.15, 2.0, 2.6, 1, 1, { sy: 0.9 }), [0, 1.35, 4.2]);
-  mb.add('gold', G.box(0.26, 0.08, 7), [0, 0.67, 0.5]);
-  mb.pair('gold', () => G.box(1.6, 0.2, 0.35), [3.3, -0.14, 4.3], [0, -0.45, 0]);
-  mb.pair('blue', () => G.box(0.2, 0.9, 1.4), [0.82, 0, 2.5]);
-  mb.pair('dark', () => G.cylZ(0.1, 0.12, 2.2), [0.95, -0.3, -2.6]);
+  mb.add('hullFine', G.lathe([[-7.4, 0], [-6.9, 0.14], [-5.6, 0.36], [-3.2, 0.66], [0, 0.82], [3.0, 0.92], [5.0, 1.1], [6.6, 1.12]], 0.95, 0.8, 18));
+  mb.add('metal', G.coneZ(0.05, 1.2, 6), [0, 0, -7.9]);
+  mb.add('glass', G.sph(1, 18, 12), [0, 0.42, -2.3], null, [0.5, 0.45, 1.65]);
+  mb.add('carbon', G.tboxR(1.05, 0.3, 3.6, 0.45, 0.7, { r: 0.1 }), [0, 0.38, -2.0]);
+  // deltavinge
+  mb.add('hullFine', G.plate(sym([[0.7, -0.4], [4.45, 4.5], [4.6, 5.55], [0.7, 5.6]]), 0.26, { taper: 0.55 }), [0, -0.18, 0]);
+  mb.add('goldGloss', G.plate(sym([[2.2, 2.25], [4.0, 4.25], [4.15, 4.75], [2.2, 2.85]]), 0.05, { bevel: 0.015 }), [0, -0.04, 0]);
+  // canardvingar
+  mb.add('hullFine', G.plate(sym([[0.55, -3.7], [1.95, -2.75], [1.95, -2.35], [0.55, -2.5]]), 0.12, { taper: 0.4 }), [0, -0.05, 0]);
+  // stjärtfena
+  mb.add('hullFine', G.plate([[0, 3.0], [2.2, 5.0], [2.2, 5.7], [0, 6.3]], 0.15, { taper: 0.35 }), [0, 0.6, 0], [0, 0, Math.PI / 2]);
+  mb.add('goldGloss', G.plate([[1.4, 4.55], [2.15, 5.1], [2.15, 5.55], [1.4, 5.15]], 0.17, { bevel: 0.03 }), [0, 0.6, 0], [0, 0, Math.PI / 2]);
+  mb.add('goldGloss', G.rbox(0.2, 0.06, 6.5, 0.02), [0, 0.8, 0.9]);
+  // sidointag och motor
+  mb.pair('carbon', () => G.tboxR(0.5, 0.75, 2.8, 0.7, 0.8, { r: 0.16 }), [0.82, -0.05, 2.3]);
+  mb.pair('blueGloss', () => G.rbox(0.06, 0.5, 1.4, 0.02), [1.08, 0, 2.6]);
+  mb.add('carbon', G.cylZ(1.14, 1.16, 0.8, 18), [0, 0, 6.6]);
+  nozzle(mb, 0, 0, 7.35, 0.95);
+  mb.pair('metal', () => G.cylZ(0.08, 0.1, 2.2), [0.95, -0.32, -2.6]);
   mb.build(g);
   addFlame(g, [0, 0, 7.4], 0.8, 4.8, 'blue');
-  navLight(g, [4.6, -0.15, 5.3], '#ff3030', 1.1); navLight(g, [-4.6, -0.15, 5.3], '#30ff60', 1.1);
+  navLight(g, [4.6, -0.15, 5.3], '#30ff60', 1.1); navLight(g, [-4.6, -0.15, 5.3], '#ff3030', 1.1);
+  navLight(g, [0, 2.75, 5.8], '#ffffff', 0.6);
   info.hardpoints = [[-0.95, -0.35, -3.8], [0.95, -0.35, -3.8]];
-  info.cockpit = [0, 0.65, -2.0];
-  info.wingtips = [[-4.6, -0.15, 5.0], [4.6, -0.15, 5.0]];
+  info.cockpit = [0, 0.65, -2.2];
+  info.wingtips = [[-4.6, -0.18, 5.0], [4.6, -0.18, 5.0]];
   info.engines = [[0, 0, 7.5]];
   info.camDist = 21; info.camUp = 4.8;
   return { group: g, info };
 }
 function buildOrn() {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(7.5);
-  mb.add('hullW', G.tbox(3.4, 2.0, 10, 0.45, 0.5, { dy: -0.2 }));
-  mb.add('hullW', G.coneZ(0.75, 2.4, 8), [0, -0.25, -6.2]);
-  mb.add('glass', G.sph(1, 14, 10), [0, 0.95, -2.2], null, [0.95, 0.6, 1.9]);
-  mb.add('hullW', G.tbox(13.5, 0.42, 3.8, 1, 1, { ct: 0.35, sweep: 0.05 }), [0, -0.2, 1.2]);
-  mb.pair('hullW', () => G.cylZ(1.1, 1.25, 8.5), [3.7, -0.2, 1.9]);
-  mb.pair('dark', () => G.cylZ(1.18, 1.18, 0.5), [3.7, -0.2, -2.45]);
-  mb.pair('dark', () => G.cylZ(1.3, 1.05, 0.7), [3.7, -0.2, 6.4]);
-  mb.pair('glowBlue', () => G.disc(0.95), [3.7, -0.2, 6.78]);
-  mb.pair('grey', () => G.cylZ(0.36, 0.36, 3.2), [5.9, -0.75, 0.6]);
-  mb.pair('red', () => G.coneZ(0.36, 0.9), [5.9, -0.75, -1.45]);
-  mb.pair('blue', () => G.box(3.0, 0.45, 1.3), [2.0, -0.18, 1.5]);
-  mb.pair('gold', () => G.box(0.6, 0.46, 3.0), [6.4, -0.2, 1.6]);
-  mb.pair('hullW', () => G.tbox(0.2, 2.2, 2.6, 1, 1, { sy: 0.8 }), [3.7, 1.4, 4.6]);
-  mb.add('gold', G.box(0.4, 0.1, 6), [0, 1.02, 1.5]);
-  mb.pair('dark', () => G.cylZ(0.16, 0.18, 3.2), [3.7, -0.8, -3.0]);
-  mb.add('dark', G.cylZ(0.18, 0.2, 2.6), [0, -1.1, -4.6]);
+  mb.add('hullFine', G.lathe([[-7.5, 0], [-7.0, 0.3], [-5.8, 0.75], [-3.6, 1.35], [-0.5, 1.62], [3.0, 1.6], [5.4, 1.3], [6.2, 1.0]], 1.12, 0.82, 18), [0, -0.1, 0]);
+  mb.add('glass', G.sph(1, 18, 12), [0, 0.95, -2.5], null, [0.9, 0.58, 1.9]);
+  mb.add('carbon', G.tboxR(2.2, 0.5, 4.6, 0.5, 0.7, { r: 0.18 }), [0, 0.86, -2.0]);
+  mb.add('goldGloss', G.rbox(0.36, 0.08, 5.4, 0.03), [0, 1.36, 2.0]);
+  // kraftiga vingar
+  mb.add('hullFine', G.plate(sym([[1.3, -0.6], [6.9, 0.6], [6.95, 3.1], [1.3, 3.6]]), 0.55, { taper: 0.35 }), [0, -0.25, 0]);
+  mb.add('blueGloss', G.plate(sym([[4.4, 0.35], [6.4, 0.78], [6.45, 1.6], [4.4, 1.3]]), 0.08, { bevel: 0.02 }), [0, 0.0, 0]);
+  mb.pair('goldGloss', () => G.decal(0.5), [5.3, 0.04, 2.4]);
+  // motorgondoler
+  mb.pair('hullFine', () => G.lathe([[-2.7, 0.9], [-2.2, 1.15], [0, 1.3], [4.5, 1.28], [6.6, 1.12]], 1, 1, 18), [3.7, -0.2, 0]);
+  mb.pair('carbon', () => G.cylZ(1.0, 1.0, 0.35, 18, true), [3.7, -0.2, -2.6]);
+  mb.pair('nozzle', () => G.disc(0.95, 16), [3.7, -0.2, -2.5], [0, Math.PI, 0]);
+  mb.pair('metal', () => G.coneZ(0.32, 0.9, 10), [3.7, -0.2, -2.6]);
+  mb.pair('carbon', () => G.cylZ(1.16, 1.16, 0.6, 18), [3.7, -0.2, 5.9]);
+  nozzle(mb, 3.7, -0.2, 6.75, 1.0); nozzle(mb, -3.7, -0.2, 6.75, 1.0);
+  // fenor på gondolerna
+  mb.pair('hullFine', () => G.plate([[0, 3.3], [2.0, 4.9], [2.0, 5.6], [0, 6.0]], 0.2, { taper: 0.3 }), [3.7, 0.95, 0], [0, 0, Math.PI / 2]);
+  mb.pair('redGloss', () => G.plate([[1.3, 4.5], [1.95, 5.0], [1.95, 5.45], [1.3, 5.05]], 0.22, { bevel: 0.04 }), [3.7, 0.95, 0], [0, 0, Math.PI / 2]);
+  // missilkapslar och nosvapen
+  mb.pair('carbon', () => G.lathe([[-1.5, 0], [-1.1, 0.3], [-0.6, 0.38], [1.6, 0.38], [1.8, 0.3]], 1, 1, 10), [5.9, -0.8, 0.6]);
+  mb.pair('redGloss', () => G.coneZ(0.31, 0.6, 10), [5.9, -0.8, -1.2]);
+  mb.add('carbon', G.tboxR(0.8, 0.6, 2.6, 0.6, 0.7, { r: 0.15 }), [0, -1.15, -3.6]);
+  mb.add('metal', G.cylZ(0.18, 0.22, 2.2), [0, -1.15, -5.4]);
+  mb.pair('metal', () => G.cylZ(0.15, 0.18, 2.6), [3.7, -0.8, -3.4]);
   mb.build(g);
   addFlame(g, [3.7, -0.2, 6.75], 0.9, 4.2, 'blue'); addFlame(g, [-3.7, -0.2, 6.75], 0.9, 4.2, 'blue');
-  navLight(g, [6.8, -0.2, 2.8], '#ff3030', 1.3); navLight(g, [-6.8, -0.2, 2.8], '#30ff60', 1.3);
-  info.hardpoints = [[-3.7, -0.8, -4.6], [3.7, -0.8, -4.6], [0, -1.1, -5.9]];
-  info.cockpit = [0, 1.1, -2.2];
-  info.wingtips = [[-6.8, -0.2, 2.6], [6.8, -0.2, 2.6]];
+  navLight(g, [6.95, -0.2, 2.8], '#30ff60', 1.3); navLight(g, [-6.95, -0.2, 2.8], '#ff3030', 1.3);
+  navLight(g, [3.7, 2.95, 5.7], '#ffffff', 0.6); navLight(g, [-3.7, 2.95, 5.7], '#ffffff', 0.6);
+  info.hardpoints = [[-3.7, -0.8, -4.6], [3.7, -0.8, -4.6], [0, -1.15, -6.4]];
+  info.cockpit = [0, 1.1, -2.4];
+  info.wingtips = [[-6.9, -0.25, 2.6], [6.9, -0.25, 2.6]];
   info.engines = [[-3.7, -0.2, 6.9], [3.7, -0.2, 6.9]];
   info.camDist = 26; info.camUp = 6;
   return { group: g, info };
 }
 
-/* ============================================================== Fiendejakt */
+/* ============================================================== Fiendejakt (Järnsvärmen: mörk metall, rött, insektslikt) */
 function buildHugg() {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(5.5);
-  mb.add('hullD', G.ico(1.7, 1), [0, 0, 0.5], null, [1, 0.75, 1.4]);
-  mb.add('glassRed', G.sph(0.65, 12, 8), [0, 0.1, -1.55], null, [1, 0.7, 0.6]);
-  mb.pair('rust', () => G.tbox(0.9, 0.55, 6.5, 0.3, 0.6), [2.1, 0, -1.4], [0, 0.2, 0]);
-  mb.pair('dark', () => G.coneZ(0.28, 1.6, 6), [1.45, 0, -5.3], [0, 0.2, 0]);
-  mb.pair('red', () => G.box(0.95, 0.6, 1.0), [2.3, 0, 0.6], [0, 0.2, 0]);
-  mb.add('dark', G.tbox(0.2, 2.2, 3.0, 1, 1, { sy: 0.9 }), [0, 1.3, 1.6]);
-  mb.add('dark', G.tbox(0.2, 2.2, 3.0, 1, 1, { sy: 0.9 }), [0, -1.3, 1.6], [0, 0, Math.PI]);
-  mb.add('dark', G.cylZ(0.8, 1.0, 2.2), [0, 0, 3.0]);
-  mb.add('glowOrange', G.disc(0.75), [0, 0, 4.12]);
+  // kroppen: kort, bred "skalbagge"
+  mb.add('hullDFine', G.lathe([[-2.6, 0], [-2.2, 0.8], [-1.2, 1.45], [0.6, 1.7], [2.4, 1.5], [3.6, 0.95]], 1.15, 0.72, 16), [0, 0, 0.4]);
+  mb.add('carbonRed', G.lathe([[-1.0, 0.9], [0.2, 1.25], [1.6, 1.2], [2.6, 0.8]], 1.0, 0.62, 14), [0, 0.32, 0.4]);
+  mb.add('glassRed', G.sph(0.6, 14, 10), [0, 0.18, -1.95], null, [1.15, 0.6, 0.7]);
+  // framåtriktade "käkar" med kanoner
+  mb.pair('carbon', () => G.plate([[0.9, 1.2], [2.9, -0.4], [1.95, -4.9], [1.35, -4.6], [1.6, -0.6], [0.8, 0.4]], 0.5, { taper: 0.2 }), [0, 0, 0]);
+  mb.pair('redGloss', () => G.plate([[1.7, -1.2], [2.55, -0.55], [2.0, -3.2], [1.75, -3.0]], 0.54, { bevel: 0.05 }), [0, 0, 0]);
+  mb.pair('metal', () => G.cylZ(0.13, 0.18, 1.8, 8), [1.65, 0, -5.4]);
+  // vingar bakåt, nedåtböjda
+  mb.pair('hullDFine', () => G.plate([[0.8, 0.6], [4.0, 2.0], [4.3, 3.4], [0.8, 2.8]], 0.28, { taper: 0.5 }), [0, -0.15, 0], [0, 0, -0.18]);
+  mb.pair('glowRed', () => G.rbox(0.12, 0.06, 1.2, 0.02), [3.4, -0.62, 2.45], [0, 0, -0.18]);
+  // fenor upp och ner
+  mb.add('carbon', G.plate([[0, 0.8], [2.0, 2.4], [2.0, 3.0], [0, 3.6]], 0.16, { taper: 0.3 }), [0, 0.9, 0], [0, 0, Math.PI / 2]);
+  mb.add('carbon', G.plate([[0, 0.8], [1.6, 2.4], [1.6, 3.0], [0, 3.6]], 0.16, { taper: 0.3 }), [0, -0.9, 0], [0, 0, -Math.PI / 2]);
+  mb.add('carbon', G.cylZ(0.85, 1.0, 1.3, 16), [0, 0, 3.6]);
+  nozzle(mb, 0, 0, 4.15, 0.78, true);
   mb.build(g);
   addFlame(g, [0, 0, 4.1], 0.7, 3.2, 'orange');
-  info.hardpoints = [[-1.5, 0, -4.4], [1.5, 0, -4.4]];
+  navLight(g, [3.9, -0.7, 3.0], '#ff3030', 1.0, true); navLight(g, [-3.9, -0.7, 3.0], '#ff3030', 1.0, true);
+  info.hardpoints = [[-1.65, 0, -6.2], [1.65, 0, -6.2]];
   info.engines = [[0, 0, 4.2]];
   return { group: g, info };
 }
 function buildSpjut() {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(5);
-  mb.add('hullD', G.tbox(1.3, 1.1, 10, 0.2, 0.2));
-  mb.add('red', G.coneZ(0.26, 3, 6), [0, 0, -6.5]);
-  mb.add('glassRed', G.sph(0.4, 10, 8), [0, 0.42, -2.2], null, [1, 0.8, 2]);
+  mb.add('hullDFine', G.lathe([[-8.0, 0], [-7.0, 0.16], [-5.0, 0.42], [-2.0, 0.66], [2.0, 0.72], [4.6, 0.7], [5.4, 0.6]], 1, 0.9, 14));
+  mb.add('redGloss', G.lathe([[-8.0, 0], [-7.0, 0.165], [-6.0, 0.3], [-5.6, 0.34]], 1.02, 0.92, 14));
+  mb.add('glassRed', G.sph(0.42, 12, 8), [0, 0.42, -2.6], null, [0.9, 0.7, 2.2]);
   for (let k = 0; k < 4; k++) {
-    const fin = G.tbox(0.14, 2.8, 3.6, 1, 1, { sy: 0.75 }); fin.translate(0, 1.9, 0);
-    mb.add(k % 2 ? 'rust' : 'hullD', fin, [0, 0, 3.0], [0, 0, Math.PI / 4 + k * Math.PI / 2]);
+    const fin = G.plate([[0, 0.8], [2.6, 3.5], [2.6, 4.4], [0, 5.2]], 0.15, { taper: 0.45 });
+    mb.add(k % 2 ? 'carbonRed' : 'hullDFine', fin, [0, 0, 0], [0, 0, Math.PI / 4 + k * Math.PI / 2 + Math.PI / 2]);
   }
-  mb.pair('red', () => G.cylZ(0.18, 0.18, 2.6), [0.95, -0.55, 0]);
-  mb.add('dark', G.cylZ(0.6, 0.75, 2), [0, 0, 5.6]);
-  mb.add('glowOrange', G.disc(0.58), [0, 0, 6.62]);
+  for (let k = 0; k < 4; k++) { const a = Math.PI / 4 + k * Math.PI / 2; mb.add('glowRed', G.sph(0.12, 6, 4), [Math.cos(a) * 3.65, Math.sin(a) * 3.65, 4.2]); }
+  mb.pair('carbon', () => G.lathe([[-1.4, 0], [-1.0, 0.18], [1.4, 0.2]], 1, 1, 8), [0.85, -0.5, -0.2]);
+  mb.add('carbon', G.cylZ(0.66, 0.78, 1.4, 14), [0, 0, 5.8]);
+  nozzle(mb, 0, 0, 6.55, 0.6, true);
   mb.build(g);
   addFlame(g, [0, 0, 6.6], 0.55, 4.2, 'orange');
-  info.hardpoints = [[-0.7, -0.2, -4.4], [0.7, -0.2, -4.4]];
+  info.hardpoints = [[-0.7, -0.2, -4.6], [0.7, -0.2, -4.6]];
   info.engines = [[0, 0, 6.7]];
   return { group: g, info };
 }
 function buildTordon() {
   const g = new THREE.Group(), mb = new MB(), info = newInfo(9);
-  mb.add('hullD', G.tbox(4.6, 3.0, 12, 0.55, 0.55, { dy: 0.2 }));
-  mb.add('glassRed', G.sph(1, 12, 8), [0, 1.0, -5.4], null, [1.2, 0.75, 1.2]);
-  mb.add('red', G.box(2.4, 0.8, 7), [0, -1.7, 0]);
-  mb.add('dark', G.cylZ(0.5, 0.5, 6), [-0.6, -2.0, 0]).add('dark', G.cylZ(0.5, 0.5, 6), [0.6, -2.0, 0]);
-  mb.add('rust', G.tbox(12, 0.5, 4, 1, 1, { ct: 0.45, sweep: 0.12 }), [0, 0, 1.2]);
-  mb.pair('hullD', () => G.cylZ(1.1, 1.25, 4.4), [1.7, 0, 6.6]);
-  mb.pair('glowOrange', () => G.disc(1.0), [1.7, 0, 8.85]);
-  mb.add('dark', G.hemi(0.9), [0, 1.5, 4.4]);
-  mb.add('grey', G.cylZ(0.15, 0.15, 1.6), [0, 2.0, 5.4]);
-  mb.pair('dark', () => G.tbox(0.25, 2.6, 2.4, 1, 1, { sy: 0.6 }), [5.6, 1.0, 2.6]);
-  greeble(mb, makeRng(3), 'grey', 10, -1.8, 1.8, 1.5, -2, 4, 0.3, 1.1);
+  mb.add('hullDFine', G.tboxR(4.6, 3.0, 12, 0.55, 0.6, { dy: 0.2, r: 0.7 }));
+  mb.add('carbonRed', G.tboxR(3.2, 0.6, 9, 0.6, 1, { r: 0.25 }), [0, 1.55, 0.6]);
+  mb.add('glassRed', G.sph(1, 14, 10), [0, 0.98, -5.3], null, [0.95, 0.5, 0.95]);
+  // torpedrum
+  mb.add('carbon', G.rbox(2.6, 0.9, 7.2, 0.3), [0, -1.75, 0]);
+  mb.add('metal', G.lathe([[-3.2, 0], [-2.6, 0.42], [2.8, 0.5]], 1, 1, 10), [-0.62, -2.15, 0]);
+  mb.add('metal', G.lathe([[-3.2, 0], [-2.6, 0.42], [2.8, 0.5]], 1, 1, 10), [0.62, -2.15, 0]);
+  mb.add('redGloss', G.rbox(2.7, 0.2, 1.0, 0.08), [0, -1.3, -2.5]);
+  // vingar
+  mb.add('hullDFine', G.plate(sym([[2.0, -0.6], [6.1, 1.7], [6.2, 3.1], [2.0, 3.4]]), 0.5, { taper: 0.45 }), [0, 0, 0]);
+  mb.pair('redGloss', () => G.plate([[4.6, 0.95], [6.0, 1.75], [6.05, 2.4], [4.6, 1.75]], 0.54, { bevel: 0.05 }), [0, 0, 0]);
+  mb.pair('carbon', () => G.plate([[0, 0.8], [2.4, 2.2], [2.4, 3.0], [0, 3.4]], 0.24, { taper: 0.3 }), [5.6, 0.1, 0], [0, 0, Math.PI / 2]);
+  // motorer
+  mb.pair('hullDFine', () => G.lathe([[4.2, 0.9], [5.0, 1.2], [8.0, 1.25], [8.8, 1.1]], 1, 1, 16), [1.7, 0, 0]);
+  nozzle(mb, 1.7, 0, 8.85, 1.0, true); nozzle(mb, -1.7, 0, 8.85, 1.0, true);
+  // akterkanon
+  mb.add('carbon', G.hemi(0.9, 14, 8), [0, 1.85, 4.4]);
+  mb.add('metal', G.cylZ(0.15, 0.15, 1.6), [0, 2.3, 5.4]);
+  mb.pair('glowRed', () => G.rbox(0.1, 0.1, 4.5, 0.03), [2.32, 0.4, -0.5]);
+  greeble(mb, makeRng(3), 'carbon', 10, -1.4, 1.4, 1.85, -2.5, 3.5, 0.3, 1.0);
   mb.build(g);
   addFlame(g, [1.7, 0, 8.8], 0.9, 3.6, 'orange'); addFlame(g, [-1.7, 0, 8.8], 0.9, 3.6, 'orange');
+  navLight(g, [6.2, 0, 2.6], '#ff3030', 1.4, true); navLight(g, [-6.2, 0, 2.6], '#ff3030', 1.4, true);
   info.hardpoints = [[-1.4, -0.6, -6.2], [1.4, -0.6, -6.2]];
   info.engines = [[-1.7, 0, 9], [1.7, 0, 9]];
-  info.tail = [0, 2.0, 6.0];
+  info.tail = [0, 2.3, 6.0];
   return { group: g, info };
 }
 
@@ -368,6 +487,8 @@ function buildFrakt() {
     mb.add('glowBlue', G.disc(1.8), [p[0], p[1], 40.35]);
   }
   mb.add('blue', G.box(11.2, 1.2, 14.2), [0, -2.2, -33]);
+  mb.pair('glowCyan', () => G.rbox(0.25, 0.3, 50, 0.1), [1.7, 1.6, 0]);
+  mb.add('goldGloss', G.rbox(11.4, 1.0, 2, 0.3), [0, 4.2, -27]);
   mb.build(g);
   for (const p of [[-3.6, -1.8], [3.6, -1.8], [0, 2.8]]) addFlame(g, [p[0], p[1], 40.3], 1.7, 9, 'blue');
   navLight(g, [5.6, 3, -36], '#ff3030', 3); navLight(g, [-5.6, 3, -36], '#30ff60', 3); navLight(g, [0, 6, 37], '#ffffff', 3);
@@ -385,6 +506,8 @@ function buildFarja() {
   mb.pair('glowBlue', () => G.disc(1.3), [4.2, 0.6, 13.55]);
   mb.add('hullW', G.tbox(0.4, 4, 5, 1, 1, { sy: 0.8 }), [0, 4, 10]);
   mb.add('blue', G.box(0.45, 1.2, 3), [0, 5.2, 11.5]);
+  mb.pair('glowCyan', () => G.rbox(0.15, 0.25, 16, 0.06), [4.0, 0.4, 0]);
+  mb.add('blueGloss', G.tboxR(8.2, 1.2, 10, 0.4, 0.6, { r: 0.4 }), [0, 1.5, -6]);
   mb.build(g);
   addFlame(g, [4.2, 0.6, 13.5], 1.2, 6, 'blue'); addFlame(g, [-4.2, 0.6, 13.5], 1.2, 6, 'blue');
   navLight(g, [9, -1, 8], '#ff3030', 2); navLight(g, [-9, -1, 8], '#30ff60', 2);
@@ -403,6 +526,10 @@ function buildVaktare() {
   mb.add('hullWPlain', G.box(36, 20, 20), [0, 0, 80]);
   for (const p of [[-10, -5], [10, -5], [-10, 5], [10, 5]]) { mb.add('dark', G.cylZ(4, 4.8, 6), [p[0], p[1], 92]); mb.add('glowBlue', G.disc(3.8), [p[0], p[1], 95.1]); }
   greeble(mb, rng, 'grey', 40, -10, 10, 9, -50, 60, 1, 4);
+  mb.pair('blueGloss', () => G.rbox(0.8, 5, 90, 0.3), [15.6, 2, -10]);
+  mb.pair('glowCyan', () => G.rbox(0.4, 0.5, 120, 0.15), [15.9, -5, 10]);
+  mb.add('goldGloss', G.rbox(18, 1.2, 2, 0.4), [0, 21.4, 12]);
+  mb.pair('glowCyan', () => G.rbox(0.3, 0.4, 36, 0.1), [8.2, 18.5, 32]);
   mb.build(g);
   for (const p of [[-10, -5], [10, -5], [-10, 5], [10, 5]]) addFlame(g, [p[0], p[1], 95], 3.6, 22, 'blue');
   addTurret(g, info, 'laser', 0, [-9, 9, -30]); addTurret(g, info, 'laser', 0, [9, 9, -30]);
@@ -458,6 +585,11 @@ function buildBastion() {
   mb.add('red', G.box(16.4, 2, 20), [0, -1, -6]);
   mb.pair('rust', () => G.tbox(10, 1.2, 12, 1, 1, { ct: 0.5, sweep: 0.4 }), [11, -2, 14]);
   greeble(mb, rng, 'dark', 26, -6, 6, 5, -24, 22, 0.6, 2.4);
+  // detaljer: röda fält, glödande ljuslister och ryggås
+  mb.pair('redGloss', () => G.rbox(0.4, 1.4, 30, 0.15), [8.05, 1.5, -2]);
+  mb.pair('glowRed', () => G.rbox(0.2, 0.25, 34, 0.08), [8.1, -2.4, 0]);
+  mb.add('hullDFine', G.tboxR(3, 2.4, 30, 0.5, 0.6, { r: 0.6 }), [0, 5.6, -10]);
+  mb.add('glowOrange', G.rbox(10.4, 0.25, 0.3, 0.1), [0, 9.8, 6.6]);
   mb.build(g);
   subNode(g, info, 'Motorer', 'engine', [0, 0, 32], 10, 380, n => {
     const m = new MB(); m.add('dark', G.box(18, 12, 10));
@@ -483,6 +615,10 @@ function buildKlyvare() {
   mb.add('rust', G.box(30.6, 4, 40), [0, -6, 20]);
   greeble(mb, rng, 'dark', 50, -13, 13, 9, -30, 52, 1, 4);
   greeble(mb, rng, 'dark', 30, -13, 13, -9, -30, 52, 1, 3, -1);
+  mb.pair('redGloss', () => G.rbox(0.5, 3, 44, 0.2), [15.1, 2, 10]);
+  mb.pair('glowRed', () => G.rbox(0.3, 0.35, 70, 0.1), [15.15, -3.5, 12]);
+  mb.pair('glowRed', () => G.rbox(0.3, 0.35, 40, 0.1), [17.25, 0, -55]);
+  mb.add('hullDFine', G.tboxR(6, 4, 60, 0.4, 0.7, { r: 1.2 }), [0, 10, -8]);
   mb.build(g);
   subNode(g, info, 'Sköldgenerator', 'shield', [0, 30, 36], 9, 420, n => {
     new MB().add('grey', G.cylY(3, 5, 8), [0, -4, 0]).add('shieldGenRed', G.sph(7, 16, 12), [0, 3, 0]).build(n);
@@ -513,6 +649,8 @@ function buildFangskepp() {
     mb.add('glowGold', G.box(18.2, 1, 6), [0, 1.5, -30 + i * 12]);
   }
   greeble(mb, rng, 'grey', 30, -8, 8, 4.5, -36, 40, 1, 3);
+  mb.pair('glowRed', () => G.rbox(0.3, 0.4, 70, 0.1), [9.2, -3.5, -2]);
+  mb.add('redGloss', G.tboxR(14.4, 3, 10, 0.5, 0.6, { r: 0.8 }), [0, 4, -46]);
   mb.build(g);
   for (const sx of [-1, 1]) subNode(g, info, sx < 0 ? 'Vänster motor' : 'Höger motor', 'engine', [sx * 13, 0, 46], 9, 420, n => {
     const m = new MB(); m.add('dark', G.cylZ(6, 7, 22)).add('grey', G.box(10, 2, 8), [-sx * 6, 0, 0]);
@@ -539,6 +677,10 @@ function buildDomare() {
   greeble(mb, rng, 'dark', 120, -26, 26, 17, -120, 180, 2, 9);
   greeble(mb, rng, 'dark', 70, -28, 28, -17, -100, 180, 2, 8, -1);
   greeble(mb, rng, 'grey', 40, -11, 11, 34, -60, 150, 1, 5);
+  mb.pair('redGloss', () => G.rbox(1.2, 6, 170, 0.5), [31, 6, 40]);
+  mb.pair('glowRed', () => G.rbox(0.6, 0.8, 240, 0.2), [33, -8, 30]);
+  mb.pair('glowOrange', () => G.rbox(0.5, 0.6, 150, 0.2), [13.3, 30, 40]);
+  mb.add('glowOrange', G.rbox(34.4, 0.8, 0.6, 0.2), [0, 76, 100.8]);
   mb.build(g);
   for (const sx of [-1, 1]) subNode(g, info, sx < 0 ? 'Sköldgenerator (babord)' : 'Sköldgenerator (styrbord)', 'shield', [sx * 34, 26, 50], 14, 700, n => {
     new MB().add('grey', G.cylY(5, 8, 14), [0, -6, 0]).add('shieldGenRed', G.sph(12, 18, 12), [0, 6, 0]).add('dark', G.torus(13, 1.5, 6, 24), [0, 6, 0], [Math.PI / 2, 0, 0]).build(n);

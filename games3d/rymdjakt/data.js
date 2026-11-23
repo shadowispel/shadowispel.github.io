@@ -20,9 +20,10 @@ export const PRIMARY = {
 
 /* ---------------------------------------------------------------- Sekundärvapen */
 export const SECONDARY = {
-  homing:  { id: 'homing',  name: 'Hökmissil',     desc: 'Målsökande missil. Håll målet i siktet för att låsa.', dmg: 70,  speed: 300, turn: 2.6, life: 7, lockTime: 1.1, lockRange: 1500, ammo: 6, price: 0, unlock: 0, blast: 25, capMult: 1 },
-  swarm:   { id: 'swarm',   name: 'Svärmraketer',  desc: 'Fyra lätta raketer per salva som söker närmaste mål. Ingen låsning krävs.', dmg: 26, speed: 340, turn: 1.6, life: 4, lockTime: 0, lockRange: 1100, ammo: 5, salvo: 4, price: 1400, unlock: 4, blast: 14, capMult: 1 },
-  torpedo: { id: 'torpedo', name: 'Tungtorped',    desc: 'Långsam men enormt kraftfull mot kryssare, stationer och delsystem.', dmg: 240, speed: 170, turn: 0.9, life: 12, lockTime: 2.0, lockRange: 2200, ammo: 3, price: 2200, unlock: 7, blast: 70, capMult: 2.2 }
+  // Oändliga missiler: magasinet rymmer alltid 2 och laddas om en i taget (reload = sekunder per missil).
+  homing:  { id: 'homing',  name: 'Hökmissil',     desc: 'Målsökande missil. Håll målet i siktet för att låsa – fungerar på allt från jaktplan och delsystem till asteroider och fiendens missiler.', dmg: 60,  speed: 300, turn: 2.6, life: 7, lockTime: 1.1, lockRange: 1500, reload: 3.6, price: 0, unlock: 0, blast: 25, capMult: 1 },
+  swarm:   { id: 'swarm',   name: 'Svärmraketer',  desc: 'Fyra lätta raketer per salva som söker målet framför dig. Ingen låsning krävs.', dmg: 22, speed: 340, turn: 1.6, life: 4, lockTime: 0, lockRange: 1100, reload: 4.4, salvo: 4, price: 1400, unlock: 4, blast: 14, capMult: 1 },
+  torpedo: { id: 'torpedo', name: 'Tungtorped',    desc: 'Långsam men enormt kraftfull mot kryssare, stationer och delsystem. Lång omladdning.', dmg: 210, speed: 170, turn: 0.9, life: 12, lockTime: 2.0, lockRange: 2200, reload: 9, price: 2200, unlock: 7, blast: 70, capMult: 1.9 }
 };
 
 /* ---------------------------------------------------------------- Spelarskepp */
@@ -31,21 +32,21 @@ export const PLAYER_SHIPS = {
     id: 'svala', name: 'Svala', role: 'Allroundjakt', model: 'svala',
     desc: 'Nordstjärneflottans arbetshäst. Balanserad fart, smidighet och tålighet.',
     hull: 100, shield: 100, shieldRegen: 10, speed: 118, boost: 205, accel: 80, energyRegen: 14,
-    turn: { pitch: 1.95, yaw: 1.55, roll: 3.0 }, radius: 5.5, heatMult: 1, dmgMult: 1, ammoMult: 1, flares: 6,
+    turn: { pitch: 1.95, yaw: 1.55, roll: 3.0 }, radius: 5.5, heatMult: 1, dmgMult: 1, reloadMult: 1, flares: 6,
     price: 0, unlock: 0
   },
   falk: {
     id: 'falk', name: 'Falk', role: 'Snabbjakt', model: 'falk',
-    desc: 'Snabbast i flottan och mycket smidig, men tunt skrov. Kyler vapnen effektivt.',
+    desc: 'Snabbast i flottan och mycket smidig, men tunt skrov och lite långsammare missilomladdning. Kyler vapnen effektivt.',
     hull: 72, shield: 80, shieldRegen: 12, speed: 140, boost: 250, accel: 105, energyRegen: 18,
-    turn: { pitch: 2.35, yaw: 1.9, roll: 3.6 }, radius: 5, heatMult: 0.75, dmgMult: 0.95, ammoMult: 0.8, flares: 5,
+    turn: { pitch: 2.35, yaw: 1.9, roll: 3.6 }, radius: 5, heatMult: 0.75, dmgMult: 0.95, reloadMult: 1.1, flares: 5,
     price: 3000, unlock: 3
   },
   orn: {
     id: 'orn', name: 'Örn', role: 'Tung attackjakt', model: 'orn',
-    desc: 'Tungt bepansrad med större vapenlast och kraftigare lasrar. Trögare i svängarna.',
+    desc: 'Tungt bepansrad med kraftigare lasrar och snabbare missilomladdning. Trögare i svängarna.',
     hull: 165, shield: 150, shieldRegen: 9, speed: 98, boost: 165, accel: 60, energyRegen: 11,
-    turn: { pitch: 1.55, yaw: 1.2, roll: 2.4 }, radius: 7, heatMult: 1.1, dmgMult: 1.3, ammoMult: 1.6, flares: 8,
+    turn: { pitch: 1.55, yaw: 1.2, roll: 2.4 }, radius: 7, heatMult: 1.1, dmgMult: 1.3, reloadMult: 0.85, flares: 8,
     price: 4800, unlock: 6
   }
 };
@@ -56,10 +57,12 @@ export const UPGRADES = [
   { id: 'skold',  name: 'Sköld',      desc: '+15 % sköldkapacitet och laddning per nivå.' },
   { id: 'skrov',  name: 'Skrov',      desc: '+15 % skrovstyrka per nivå.' },
   { id: 'vapen',  name: 'Vapen',      desc: '+10 % laserskada och 10 % mindre värme per nivå.' },
-  { id: 'robot',  name: 'Vapenlast',  desc: '+1 salva sekundärvapen och +1 motåtgärd per nivå.' }
+  { id: 'robot',  name: 'Laddsystem', desc: '8 % snabbare missilomladdning och +1 motåtgärd per nivå. Magasinet rymmer alltid två missiler.' }
 ];
 export const UPGRADE_COST = [400, 900, 1600, 2600];
 export const MAX_UPG = 4;
+/** Antal missiler i magasinet (samma för alla skepp). */
+export const MISSILE_MAG = 2;
 
 /* ---------------------------------------------------------------- Fiender och övriga skepp (AI) */
 // ai: fighter | interceptor | bomber | capital | station | freighter | mine | drone | none
@@ -154,7 +157,8 @@ export function playerStats(save, shipId) {
     shield: Math.round(base.shield * (1 + 0.15 * (u.skold || 0))), shieldRegen: base.shieldRegen * (1 + 0.15 * (u.skold || 0)),
     hull: Math.round(base.hull * (1 + 0.15 * (u.skrov || 0))),
     dmgMult: base.dmgMult * (1 + 0.1 * (u.vapen || 0)), heatMult: base.heatMult * (1 - 0.1 * (u.vapen || 0)),
-    ammo: Math.round(sec.ammo * base.ammoMult) + (u.robot || 0),
+    magazine: MISSILE_MAG,
+    reload: Math.round(sec.reload * (base.reloadMult || 1) * (1 - 0.08 * (u.robot || 0)) * 100) / 100,
     flares: base.flares + (u.robot || 0),
     primary: prim, secondary: sec
   });

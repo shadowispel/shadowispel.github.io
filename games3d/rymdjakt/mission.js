@@ -188,7 +188,7 @@ export class MissionRun {
   music(name) { if (this.curMusic === name) return; this.curMusic = name; const t = MUSIC[name] || name; this.g.audio.music(t); }
   tip(html) { this.g.hud.tip(html); }
   /** Välj tangenttext efter senaste styrsätt. */
-  keys(kbd, pad, touch) { const pc = this.g.pc; if (this.g.touchOn && touch) return touch; if (pc.lastInput === 'pad' && pad) return pad; return kbd; }
+  keys(kbd, pad, touch, stick) { const pc = this.g.pc; if (this.g.touchOn && touch) return touch; if (stick && (pc.lastInput === 'stick' || (this.g.stick && this.g.stick.hasStick && pc.lastInput !== 'pad'))) return stick; if ((pc.lastInput === 'pad' || pc.lastInput === 'stick') && pad) return pad; return kbd; }
 
   /* ---------------------------------------------------------------- skepp */
   spawn(type, o = {}) { return this.W.spawn(type, o); }

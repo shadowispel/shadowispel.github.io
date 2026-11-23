@@ -170,11 +170,18 @@ export class Missiles {
   fire(o) {
     const def = o.def;
     const mesh = this._mesh(o.team, !!def.torpedo || def.id === 'torpedo');
+    const torp = !!def.torpedo || def.id === 'torpedo';
     const m = {
+      uid: (this.uidN = (this.uidN || 0) + 1),
       mesh, def, team: o.team, owner: o.owner, target: o.target || null, sub: o.sub || null,
       pos: o.pos.clone(), dir: o.dir.clone().normalize(), speed: Math.max(60, o.baseVel.dot(o.dir) + 30),
-      life: 0, alive: true, dmg: def.dmg * (o.dmgMult || 1), smoke: 0, guided: !!o.target, arm: 0.15, wobble: o.wobble || 0
+      life: 0, alive: true, dmg: def.dmg * (o.dmgMult || 1), smoke: 0, guided: !!o.target, arm: 0.15, wobble: o.wobble || 0,
+      // målbar: spelaren kan låsa på och skjuta ner fiendens missiler och torpeder
+      isProxy: true, isMissile: true, dead: false, targetable: true, kind: torp ? 'torpedo' : 'missile',
+      name: torp ? 'Torped' : (o.team === 1 ? 'Fientlig missil' : 'Missil'), vel: new THREE.Vector3(),
+      hitR: torp ? 5 : 3, radius: torp ? 5 : 3, boundR: torp ? 5 : 3, subs: [], isLarge: false, hull: 1, maxHull: 1, shield: 0, maxShield: 0, points: 0
     };
+    m.vel.copy(m.dir).multiplyScalar(m.speed);
     mesh.position.copy(m.pos);
     mesh.quaternion.setFromUnitVectors(_v.set(0, 0, -1), m.dir);
     const self = m;
@@ -187,13 +194,14 @@ export class Missiles {
     const t = m.target;
     if (!t) return null;
     if (t.isFlare) return t.alive ? out.copy(t.pos) : null;
-    if (t.dead) return null;
+    if (t.dead || t.alive === false) return null;
     if (m.sub && m.sub.alive) return out.copy(m.sub.w);
     return out.copy(t.pos);
   }
   update(dt, world) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const m = this.list[i];
+      if (!m || !m.alive) continue; // kan ha sprängts av en annan explosion under samma uppdatering
       m.life += dt; m.arm -= dt;
       const def = m.def;
       m.speed = Math.min(def.speed, m.speed + def.speed * 1.6 * dt);
@@ -210,20 +218,21 @@ export class Missiles {
           else { _v3.crossVectors(m.dir, _v2); if (_v3.lengthSq() < 1e-10) _v3.set(0, 1, 0); _v3.normalize(); m.dir.applyAxisAngle(_v3, maxT).normalize(); }
         }
         // närhetständning
-        const hitR = m.target.isFlare ? 6 : (m.sub && m.sub.alive ? m.sub.r + 2 : (m.target.hitR || 5) + 2);
+        const hitR = m.target.isFlare ? 6 : (m.sub && m.sub.alive ? m.sub.r + 2 : (m.target.isMissile ? m.target.hitR + def.blast * 0.5 : (m.target.hitR || 5) + 2));
         if (m.arm <= 0 && d < hitR + m.speed * dt) { this._explode(m, world, m.target.isFlare ? null : m.target, m.sub); continue; }
-      } else if (m.guided && m.target && m.target.isFlare && !m.target.alive) { m.guided = false; }
+      } else if (m.guided && m.target && (m.target.isFlare || m.target.isProxy)) { m.guided = false; }
       if (m.wobble) { _v3.set(Math.sin(m.life * 13 + m.wobble), Math.cos(m.life * 11 + m.wobble * 2), 0).multiplyScalar(0.012); m.dir.add(_v3).normalize(); }
       const step = m.speed * dt;
       _p0.copy(m.pos);
       m.pos.addScaledVector(m.dir, step);
+      m.vel.copy(m.dir).multiplyScalar(m.speed);
       // kollision med skepp längs vägen
       if (m.arm <= 0) {
         const hit = world.segmentHitShips(_p0, m.pos, m.team, 1.5);
         if (hit) { m.pos.copy(hit.point); this._explode(m, world, hit.ship, hit.sub); continue; }
         if (world.asteroids) {
           const h = world.asteroids.hitSegment(_p0, m.pos);
-          if (h) { m.pos.lerpVectors(_p0, m.pos, h.t); this._explode(m, world, null, null); continue; }
+          if (h) { m.pos.lerpVectors(_p0, m.pos, h.t); this._explode(m, world, world.asteroids.target(h.i), null); continue; }
         }
       }
       if (m.life > def.life) { this._explode(m, world, null, null, true); continue; }
@@ -239,7 +248,8 @@ export class Missiles {
     }
   }
   _explode(m, world, ship, sub, fizzle = false) {
-    m.alive = false;
+    if (!m.alive) return;
+    m.alive = false; m.dead = true;
     const def = m.def;
     world.blast(m.pos, fizzle ? def.blast * 0.5 : def.blast, fizzle ? 0 : m.dmg, m.team, m.owner, ship, sub, def.capMult || 1, def);
     this.fx.explode(m.pos, (def.id === 'torpedo' || def.torpedo) ? 9 : 3.2, null, { debris: 0 });
@@ -247,8 +257,19 @@ export class Missiles {
     this._release(m);
   }
   _release(m) {
+    m.alive = false; m.dead = true;
     const i = this.list.indexOf(m); if (i >= 0) this.list.splice(i, 1);
     m.mesh.visible = false; this.pool.push(m.mesh);
+  }
+  /** Spränger (utan skada) en missil som skjutits ner. */
+  shootDown(m, world) { if (m && m.alive) this._explode(m, world, null, null, true); }
+  /** Explosion: fientliga missiler/torpeder inom radien skjuts ner. */
+  blastKill(pos, radius, team, world, except = null) {
+    for (const m of this.list.slice()) {
+      if (!m.alive || m === except || m.team === team) continue;
+      const r = radius + m.hitR;
+      if (m.pos.distanceToSquared(pos) < r * r) { this.shootDown(m, world); world.emit('missileDown', m); }
+    }
   }
   /** Avleda missiler som jagar `ship` mot en flare. */
   decoy(ship, flare, chance) {

@@ -29,7 +29,7 @@ export const MISSIONS = [
       'Välkommen till Nordstjärneflottan, pilot. Du har anmält dig frivilligt till den flotta som vaktar Vegagränsen – och nu ska du lära dig flyga på riktigt.',
       'Det här är en lugn övningsflygning runt stationen Polstjärnan. Vi går igenom styrning, boost, laser, missiler och motåtgärder i din egen takt.'
     ],
-    preview: ['Flyg genom ringarna', 'Använd boosten', 'Skjut ner övningsdrönare', 'Lås och avfyra en missil', 'Fäll motåtgärder', 'Återvänd till Polstjärnan'],
+    preview: ['Flyg genom ringarna', 'Använd boosten', 'Skjut ner övningsdrönare', 'Lås och avfyra en missil', 'Skjut en missil utan låsning', 'Fäll motåtgärder', 'Återvänd till Polstjärnan'],
     start: { pos: [0, 0, 0], look: [0, 0, -100] },
     bounds: { center: [0, 0, -1500], radius: 4500 },
     async run(m, g) {
@@ -38,7 +38,8 @@ export const MISSIONS = [
       await m.wait(1.2);
       await m.say('lind', 'Välkommen till Nordstjärneflottan, Stjärna Ett. Jag är kommendör Lind. Innan du får flyga skarpt går vi igenom grunderna.');
       m.tip(m.keys('<b>Klicka i bilden</b> för att styra med musen – den fungerar som en mjuk styrspak. <kbd>W</kbd>/<kbd>S</kbd> ändrar gasen.',
-        '<b>Vänster spak</b> styr nosen, <b>höger spak</b> upp/ner ändrar gasen.', 'Dra med fingret på <b>vänster halva</b> av skärmen för att styra. Gasen sköts automatiskt.'));
+        '<b>Vänster spak</b> styr nosen, <b>höger spak</b> upp/ner ändrar gasen.', 'Dra med fingret på <b>vänster halva</b> av skärmen för att styra. Gasen sköts automatiskt.',
+        '<b>Flygspaken</b> tippar och rollar, vrid spaken (eller använd pedalerna) för att gira. <b>Gasreglaget</b> sätter farten direkt. Knapparna ställer du in under Inställningar → Ställ in kontroller.'));
       m.obj('rings', 'Flyg genom ringarna', { progress: '0/5' });
       const pts = [V(0, 0, -420), V(170, 50, -820), V(450, 90, -1100), V(780, 40, -1330), V(1000, -30, -1700)];
       for (let i = 0; i < pts.length; i++) {
@@ -51,7 +52,7 @@ export const MISSIONS = [
         if (i === 1) { m.radio('lind', 'Bra! Rolla med ' + (g.settings.get('adMode') === 'roll' ? 'A och D' : 'Q och E') + ' så går svängarna lättare – luta in i svängen och dra nosen uppåt.'); m.tip(m.keys('Rolla med ' + rollKeys(g) + '. Inställningen för A/D finns under Inställningar.', 'Rolla med <b>höger spak</b> åt sidorna eller <b>LB/RB</b>.', null)); }
       }
       m.navOff('ring'); m.done('rings');
-      m.tip(m.keys('Håll <kbd>Skift</kbd> för att boosta. Boosten drar energi – den gula mätaren.', 'Håll <b>A</b> för att boosta.', 'Håll in <b>Boost</b>-knappen.'));
+      m.tip(m.keys('Håll <kbd>Skift</kbd> för att boosta. Boosten drar energi – den gula mätaren.', 'Håll <b>A</b> för att boosta.', 'Håll in <b>Boost</b>-knappen.', 'Håll boostknappen (' + g.stick.label('boost') + ') för att boosta.'));
       await m.say('lind', 'Snyggt flugit. Prova boosten nu – den ger rejäl fart men tömmer energin.');
       m.obj('boost', 'Boosta i tre sekunder');
       await m.hold(() => m.P.boosting, 3, f => m.progress('boost', Math.round(Math.min(1, f) * 100) + ' %'));
@@ -59,7 +60,7 @@ export const MISSIONS = [
       await m.say('lind', 'Dags för skjutövning. Ingenjör Ek har ställt ut tre drönare framför dig.');
       const d1 = [];
       for (let i = 0; i < 3; i++) d1.push(m.spawn('drone', { team: 1, pos: m.rel(520, (i - 1) * 90, (i % 2) * 40 - 20), ai: { mode: 'static' }, throttle: 0 }));
-      m.tip(m.keys('Tryck <kbd>R</kbd> för att välja närmaste mål. Skjut med <kbd>vänster musknapp</kbd> eller <kbd>Mellanslag</kbd>.', 'Tryck <b>RB</b> för närmaste mål och skjut med <b>RT</b>.', 'Tryck <b>Mål</b> och håll in <b>Skjut</b>.'));
+      m.tip(m.keys('Tryck <kbd>R</kbd> för att välja målet närmast siktet. Skjut med <kbd>vänster musknapp</kbd> eller <kbd>Mellanslag</kbd>.', 'Tryck <b>RB</b> för närmaste mål och skjut med <b>RT</b>.', 'Tryck <b>Mål</b> och håll in <b>Skjut</b>.', 'Välj målet närmast siktet (' + g.stick.label('tnear') + ') och skjut med avtryckaren (' + g.stick.label('fire') + ').'));
       m.obj('d1', 'Skjut ner övningsdrönarna', { progress: '0/3' });
       await m.killAll(d1, 'd1'); m.done('d1');
       await m.say('ek', 'Fint skjutet! Nu rör de sig. Sikta på den gula ringen framför målet – där möts skotten och drönaren.');
@@ -68,18 +69,27 @@ export const MISSIONS = [
       m.tip('Den gula <b>förhandsringen</b> visar var du ska sikta på rörliga mål. Låt lasrarna svalna om värmebågen runt siktet blir röd.');
       m.obj('d2', 'Skjut ner de rörliga drönarna', { progress: '0/3' });
       await m.killAll(d2, 'd2'); m.done('d2');
-      await m.say('lind', 'Missiler nu. Håll målet framför nosen tills siktet låser – sedan avfyrar du.');
-      m.P.missiles = Math.max(m.P.missiles, 2);
+      await m.say('lind', 'Missiler nu. Håll målet framför nosen tills siktet låser – sedan avfyrar du. Du har två missiler i magasinet och de laddas om av sig själva, en i taget.');
+      m.P.mag = m.P.magMax;
       const d3 = m.spawn('drone', { team: 1, pos: m.rel(700, 0, 60), ai: { mode: 'wander', range: 200, speedMult: 0.7 }, throttle: 1, hpMult: 2 });
       g.pc.setTarget(d3);
-      if (m.P.secondary.lockTime > 0) m.tip(m.keys('Håll målet i siktet tills det står <b>LÅST</b>. Avfyra med <kbd>höger musknapp</kbd> eller <kbd>C</kbd>.', 'Lås målet och avfyra med <b>LT</b>.', 'Lås målet och tryck på <b>Missil</b>.'));
-      else m.tip(m.keys('Avfyra svärmraketer med <kbd>höger musknapp</kbd> eller <kbd>C</kbd> – de söker själva upp målet.', 'Avfyra med <b>LT</b>.', 'Tryck på <b>Missil</b>.'));
+      if (m.P.secondary.lockTime > 0) m.tip(m.keys('Håll målet i siktet tills det står <b>LÅST</b>. Avfyra med <kbd>höger musknapp</kbd> eller <kbd>C</kbd>. Laddningsikonerna nere till höger (och under siktet) visar magasinet.', 'Lås målet och avfyra med <b>LT</b>. Ikonerna under siktet visar magasinet.', 'Lås målet och tryck på <b>Missil</b>.', 'Lås målet och avfyra med missilknappen (' + g.stick.label('missile') + ').'));
+      else m.tip(m.keys('Avfyra svärmraketer med <kbd>höger musknapp</kbd> eller <kbd>C</kbd> – de söker själva upp målet.', 'Avfyra med <b>LT</b>.', 'Tryck på <b>Missil</b>.', 'Avfyra med missilknappen (' + g.stick.label('missile') + ').'));
       m.obj('d3', 'Träffa drönaren med en missil');
-      await m.until(() => d3.dead || (m.P.missiles <= 0 && m.W.missiles.list.length === 0));
-      if (!d3.dead) { m.P.missiles = 2; await m.say('ek', 'Slut på missiler? Jag laddar om dig. Försök igen!'); await m.until(() => d3.dead); }
+      let missHint = false;
+      await m.until(() => { if (!missHint && m.W.stats.missiles >= 2 && m.P.mag === 0 && !d3.dead) { missHint = true; m.radio('ek', 'Bom? Ingen fara – missilerna laddas om automatiskt. Vänta på låsningen innan du skjuter.', 3); } return d3.dead; });
       m.done('d3');
+      // skjut på allt: en missil utan låsning mot ett föremål
+      await m.say('ek', 'Missilerna går att skjuta på nästan allt – föremål, asteroider, minor, kanontorn och till och med fiendens missiler. Utan låsning flyger de rakt fram. Prova på containern framför dig!');
+      const box = m.spawn('container', { team: 1, pos: m.rel(520, -20, 0), throttle: 0, hpMult: 1 });
+      box.name = 'Övningscontainer';
+      g.pc.setTarget(box);
+      m.tip(m.keys('Rikta nosen mot containern och avfyra (<kbd>höger musknapp</kbd>/<kbd>C</kbd>) – med eller utan låsning. <kbd>R</kbd> väljer det mål siktet pekar på, <kbd>T</kbd> växlar mellan alla synliga mål.', 'Rikta nosen mot containern och avfyra med <b>LT</b>. <b>RB</b> väljer målet närmast siktet, <b>Y</b> växlar mål.', 'Rikta mot containern och tryck på <b>Missil</b>.', 'Rikta nosen mot containern och avfyra (' + g.stick.label('missile') + '). Mål närmast siktet: ' + g.stick.label('tnear') + '.'));
+      m.obj('box', 'Förstör containern med en missil');
+      await m.until(() => box.dead);
+      m.done('box');
       await m.say('dator', 'Varning: simulerad målsökande missil närmar sig. Fäll motåtgärder!');
-      m.tip(m.keys('Tryck <kbd>F</kbd> för att fälla motåtgärder när missilvarningen tjuter.', 'Tryck <b>X</b> för motåtgärder.', 'Tryck på <b>Fackla</b>.'));
+      m.tip(m.keys('Tryck <kbd>F</kbd> för att fälla motåtgärder när missilvarningen tjuter.', 'Tryck <b>X</b> för motåtgärder.', 'Tryck på <b>Fackla</b>.', 'Fäll motåtgärder (' + g.stick.label('flares') + ') när missilvarningen tjuter. Du kan också skjuta ner missilen med en egen missil!'));
       m.obj('flare', 'Fäll motåtgärder mot missilen');
       let flared = false;
       m.W.on('flare', () => { flared = true; });
@@ -93,7 +103,7 @@ export const MISSIONS = [
         await m.say('ek', 'Aj, den träffade! Bara en övningsladdning. Vi tar en till – tryck på motåtgärder när varningen tjuter.');
       }
       m.done('flare'); m.tip(null);
-      m.P.missiles = g.playerStats().ammo; m.P.flares = m.P.maxFlares;
+      m.P.mag = m.P.magMax; m.P.flares = m.P.maxFlares;
       await m.say('lind', 'Två saker till: V växlar mellan jakt- och cockpitvy. Med 1, 2 och 3 ger du order till dina vingmän – anfall mitt mål, skydda mig och fri jakt.');
       m.tip(m.keys('<kbd>V</kbd> byter kameravy. <kbd>1</kbd> anfall mitt mål · <kbd>2</kbd> skydda mig · <kbd>3</kbd> fri jakt. <kbd>G</kbd> väljer delsystem på stora skepp.', '<b>Select</b> byter kameravy. Styrkorset ger order till vingmännen.', null));
       m.later(10, () => m.tip(null));
@@ -138,7 +148,7 @@ export const MISSIONS = [
       const sc = m.group([['hugg', 3]], m.rel(1000, 200, 0));
       m.hush();
       await m.say('lind', 'Kontakt! Järnsvärmen – för första gången på tolv år. Stjärna Ett, Varg: bekämpa dem!');
-      m.tip(m.keys('<kbd>R</kbd> väljer närmaste fiende, <kbd>T</kbd> bläddrar. Röda markeringar är fiender.', '<b>RB</b> väljer närmaste fiende, <b>Y</b> bläddrar.', 'Tryck <b>Mål</b> för att välja närmaste fiende.'));
+      m.tip(m.keys('<kbd>R</kbd> väljer målet närmast siktet (annars närmaste fiende), <kbd>T</kbd> bläddrar mellan alla synliga mål. Röda markeringar är fiender.', '<b>RB</b> väljer närmaste fiende, <b>Y</b> bläddrar.', 'Tryck <b>Mål</b> för att välja närmaste fiende.'));
       m.later(8, () => m.tip(null));
       m.obj('k1', 'Förstör spaningsjaktplanen', { progress: '0/' + sc.length });
       await m.killAll(sc, 'k1'); m.done('k1');
@@ -782,7 +792,7 @@ export const SURVIVAL = {
       g.sfx.play('objective');
       const P = m.P;
       P.shield = P.maxShield; P.hull = Math.min(P.maxHull, P.hull + P.maxHull * 0.3);
-      P.missiles = Math.min(g.playerStats().ammo, P.missiles + 2); P.flares = Math.min(P.maxFlares, P.flares + 2);
+      P.mag = P.magMax; P.flares = Math.min(P.maxFlares, P.flares + 2);
       m.radio('dator', 'Sköld återställd, skrov delvis lagat, ammunition påfylld. Nästa våg om sex sekunder.', 3);
       await m.wait(6);
     }

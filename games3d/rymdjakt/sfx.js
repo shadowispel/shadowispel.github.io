@@ -56,6 +56,7 @@ export class Sfx {
         case 'scrape': N({ dur: 0.3, vol: 0.22, freq: 700, to: 200 }); T({ freq: 90, to: 50, dur: 0.25, vol: 0.12, type: 'sawtooth' }); break;
         case 'overheat': T({ freq: 320, to: 140, dur: 0.35, vol: 0.08, type: 'square' }); N({ dur: 0.4, vol: 0.08, freq: 5000, type: 'highpass' }); break;
         case 'boostOn': N({ dur: 0.5, vol: 0.12, freq: 300, to: 2400, type: 'bandpass' }); break;
+        case 'reload': T({ freq: 660, to: 990, dur: 0.06, vol: 0.03, type: 'triangle' }); T({ freq: 1320, dur: 0.05, vol: 0.022, type: 'triangle', delay: 0.06 }); break;
         case 'empty': T({ freq: 200, dur: 0.08, vol: 0.06, type: 'square' }); break;
         case 'objective': [523, 659, 784, 1047].forEach((f, i) => T({ freq: f, dur: 0.12, vol: 0.07, type: 'triangle', delay: i * 0.07 })); break;
         case 'failObj': [400, 300, 200].forEach((f, i) => T({ freq: f, dur: 0.18, vol: 0.08, type: 'sawtooth', delay: i * 0.12 })); break;
