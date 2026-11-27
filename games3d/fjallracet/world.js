@@ -7,7 +7,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { makeRng } from '../../engine/kit.js';
 import * as TX from './textures.js';
-import { colorize, merge, treeSpruce, treeBirch, treePine, rockGeo, cottageGeo, turbineTower, turbineRotor, spectatorBody, spectatorHead } from './props.js';
+import { colorize, merge, treeSpruce, treeBirch, treePine, rockGeo, cottageGeo, turbineTower, turbineRotor } from './props.js';
+import { Crowd, crowdStyle, MAX_SPOTS } from './people.js';
 import { buildThemeScenery, buildLampPosts } from './scenery.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -76,20 +77,6 @@ function makeSky(th) {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), mat);
   mesh.frustumCulled = false; mesh.renderOrder = -10;
   return { mesh, mat, sunDir };
-}
-
-/** Åskådarmaterial som hoppar i vertexshadern (gemensam tid/uppspelthet). */
-function cheerMaterial(base, uniforms) {
-  const m = new THREE.MeshStandardMaterial(base);
-  m.onBeforeCompile = (sh) => {
-    sh.uniforms.uTime = uniforms.uTime; sh.uniforms.uCheer = uniforms.uCheer;
-    sh.vertexShader = 'uniform float uTime; uniform float uCheer;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
-      #ifdef USE_INSTANCING
-      float ph = float(gl_InstanceID) * 1.731;
-      transformed.y += abs(sin(uTime * (5.0 + mod(ph, 3.0)) + ph)) * (0.08 + 0.3 * uCheer);
-      #endif`);
-  };
-  return m;
 }
 
 /* ------------------------------------------------------------------ Instanser i chunkar */
@@ -797,44 +784,58 @@ export class World {
 
   _spectators(dens) {
     const tr = this.track, rng = this.rng;
-    const bodyG = spectatorBody(), headG = spectatorHead();
-    const bodyM = cheerMaterial({ vertexColors: true, roughness: 0.8 }, this.cheer), headM = cheerMaterial({ vertexColors: true, roughness: 0.7 }, this.cheer);
-    this.disp.push(bodyG, headG, bodyM, headM);
     const spots = [];
     // läktare vid start/mål + grupper i skarpa kurvor
     spots.push({ s: tr.L - 60, len: 110, side: tr.openL[0] ? 1 : -1, n: 150, stand: true });
     for (let i = 0; i < tr.N; i += 4) {
       if (Math.abs(tr.k[i]) > 1 / 55 && !tr.tunnel[i] && !tr.bridge[i] && rng() < 0.08) spots.push({ s: i * tr.ds, len: 26, side: tr.k[i] < 0 ? -1 : 1, n: 22, stand: false });
     }
-    const pos = [];
+    const people = [], groups = [], cents = [];
+    const outerD = tr.limit + (tr.theme.barrier === 'snow' ? 5.5 : 2.6);
+    const idxOf = (s) => Math.floor(((s % tr.L) + tr.L) % tr.L / tr.ds) % tr.N;
+    const facing = (i, side) => Math.atan2(-tr.R[i * 3] * side, -tr.R[i * 3 + 2] * side);
     for (const sp of spots) {
-      const outerD = tr.limit + (tr.theme.barrier === 'snow' ? 5.5 : 2.6);
-      if (sp.side < 0 ? tr.openL[Math.floor(sp.s / tr.ds) % tr.N] : tr.openR[Math.floor(sp.s / tr.ds) % tr.N]) continue;
+      if (cents.length >= MAX_SPOTS - 1) break;
+      if (sp.side < 0 ? tr.openL[idxOf(sp.s)] : tr.openR[idxOf(sp.s)]) continue;
       const n = Math.round(sp.n * Math.max(0.5, dens));
+      // läktaren delas i fyra delgrupper som reagerar var för sig när bilarna passerar
+      const sub = sp.stand ? 4 : 1, base = cents.length;
+      for (let k = 0; k < sub; k++) {
+        const c = tr.pointAt(sp.s - sp.len / 2 + (k + 0.5) * sp.len / sub, sp.side * (outerD + 3), 0, new THREE.Vector3());
+        cents.push({ x: c.x, z: c.z });
+      }
+      const lists = []; for (let k = 0; k < sub; k++) lists.push([]);
       for (let k = 0; k < n; k++) {
-        const s = sp.s + (rng() - 0.5) * sp.len;
+        const u = rng(), s = sp.s + (u - 0.5) * sp.len;
         const row = sp.stand ? Math.floor(rng() * 6) : Math.floor(rng() * 3);
-        const d = sp.side * (outerD + 0.5 + row * (sp.stand ? 1.0 : 0.8) + rng() * 0.3);
+        const d = sp.side * (outerD + (sp.stand ? 0.45 : 0.5) + row * (sp.stand ? 1.0 : 0.8) + rng() * (sp.stand ? 0.15 : 0.3));
         const v = tr.pointAt(s, d, 0, new THREE.Vector3());
         const y = sp.stand ? v.y + row * 0.55 + 0.3 : Math.max(this.heightAt(v.x, v.z), v.y - 0.2);
-        const i = Math.floor(((s % tr.L) + tr.L) % tr.L / tr.ds) % tr.N;
-        pos.push([v.x, y, v.z, Math.atan2(-tr.R[i * 3] * sp.side, -tr.R[i * 3 + 2] * sp.side)]);
+        const j = Math.min(sub - 1, Math.floor(u * sub));
+        lists[j].push(people.length);
+        people.push({ x: v.x, y, z: v.z, rot: facing(idxOf(s), sp.side), spot: base + j, kind: 'fan' });
       }
+      groups.push(...lists);
       if (sp.stand) this._grandstand(sp);
     }
-    if (!pos.length) return;
-    const ib = new THREE.InstancedMesh(bodyG, bodyM, pos.length), ih = new THREE.InstancedMesh(headG, headM, pos.length);
-    const shirt = [0xc8261e, 0x1f4fbf, 0xffcc33, 0xf4f4f4, 0x2e8b3a, 0xff7a1a, 0x8a6fd1, 0x222222, 0x39d5ff];
-    const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3();
-    pos.forEach((p, n) => {
-      qq.setFromAxisAngle(UP, p[3] + (rng() - 0.5) * 0.6);
-      const s = 0.9 + rng() * 0.2;
-      m4.compose(pv.set(p[0], p[1], p[2]), qq, one.set(s, s, s));
-      ib.setMatrixAt(n, m4); ih.setMatrixAt(n, m4);
-      ib.setColorAt(n, new THREE.Color(shirt[(rng() * shirt.length) | 0]));
-      ih.setColorAt(n, new THREE.Color(1, 1, 1).multiplyScalar(0.75 + rng() * 0.3));
-    });
-    [ib, ih].forEach(m => { m.computeBoundingSphere(); m.castShadow = this.q.shadows; this.group.add(m); this.disp.push(m); });
+    // funktionärer med flaggor vid start/mål
+    const mside = spots[0].side * -1;
+    for (const side of [mside, -mside]) {
+      if (cents.length >= MAX_SPOTS) break;
+      if (side < 0 ? tr.openL[idxOf(10)] : tr.openR[idxOf(10)]) continue;
+      const list = [], si = cents.length;
+      const c = tr.pointAt(10, side * (outerD + 1), 0, new THREE.Vector3()); cents.push({ x: c.x, z: c.z });
+      for (const s of side === mside ? [6, 14] : [10]) {
+        const v = tr.pointAt(s, side * (outerD + 0.9), 0, new THREE.Vector3());
+        list.push(people.length);
+        people.push({ x: v.x, y: Math.max(this.heightAt(v.x, v.z), v.y - 0.2), z: v.z, rot: facing(idxOf(s), side), spot: si, kind: 'marshal' });
+      }
+      groups.push(list);
+    }
+    if (!people.length) return;
+    const crowd = this.crowd = new Crowd(people, cents, groups, { rng, style: crowdStyle(this.th, tr.def), night: this.th.night, shadows: this.q.shadows,
+      nearDist: this.view <= 0.6 ? 0 : this.view <= 0.8 ? 35 : 60 });
+    this.group.add(crowd.group); this.disp.push(crowd);
   }
   _grandstand(sp) {
     const tr = this.track;
@@ -1019,6 +1020,7 @@ export class World {
     this.sky.mesh.position.copy(cam.position);
     this.sky.mat.uniforms.time.value = t;
     this.cheer.uTime.value = t;
+    if (this.crowd) this.crowd.update(dt, t, this.cheer.uCheer.value, cam, this.crowdCars);
     if (this.water) { this.waterTex.offset.set(t * 0.012, t * 0.008); }
     this.animated.forEach(fn => fn(dt, t));
     if (this.track.roadUniforms) this.track.roadUniforms.uTime.value = t;

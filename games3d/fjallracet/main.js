@@ -68,7 +68,58 @@ if (!(save.v >= 2)) {
   save.parts = []; save.perf = {}; save.career = {}; save.daily = { day: '', done: [] }; save.found = [];
   save.cupRun = null; save.v = 2;
 }
-const persist = () => Spelhallen.store.set(SAVE, save);
+/* --- sparfil v3: varje bil har en egen, permanent uppsättning (save.perf[bil] + save.looks[bil]).
+ * Hittade delar (save.parts) är upplåsningar som kan sitta på alla bilar samtidigt.
+ * Tidigare kunde en annan flik (t.ex. en andra flik för online eller en gammal flik mitt i ett lopp) skriva
+ * över sparfilen med sin gamla kopia – då "försvann" monterade delar. Nu synkas flikarna (storage-händelse)
+ * och persist() slår ihop med det som redan ligger sparat om någon annan hunnit skriva. --- */
+function normalizeSave(s) {
+  if (!s.looks || typeof s.looks !== 'object') s.looks = {};
+  if (!s.perf || typeof s.perf !== 'object') s.perf = {};
+  if (!Array.isArray(s.parts)) s.parts = [];
+  if (!Array.isArray(s.owned)) s.owned = ['viggen', 'algen'];
+  const parts = new Set(s.parts.filter(k => typeof k === 'string'));
+  // allt som sitter monterat räknas som ägt – ingen ska kunna förlora en del vid migreringen
+  for (const id of Object.keys(s.perf)) {
+    const pf = s.perf[id]; if (!pf || typeof pf !== 'object') { s.perf[id] = {}; continue; }
+    for (const cat of Object.keys(pf)) { const info = typeof pf[cat] === 'string' && partInfo(pf[cat]); if (info && info.kind === 'perf' && info.cat === cat) parts.add(pf[cat]); else delete pf[cat]; }
+  }
+  const LF = { finish: 'finish', rims: 'rims', spoiler: 'spoiler', kit: 'kit', decal: 'decal', tint: 'tint' };
+  for (const id of Object.keys(s.looks)) {
+    const lk = s.looks[id]; if (!lk || typeof lk !== 'object') { delete s.looks[id]; continue; }
+    for (const cat in LF) { const v = lk[LF[cat]]; if (v != null && partInfo(`l:${cat}:${v}`)) parts.add(`l:${cat}:${v}`); }
+    if (lk.neon != null && lk.neon !== false) { const k = 'l:neon:0x' + (lk.neon >>> 0).toString(16).padStart(6, '0'); if (partInfo(k)) parts.add(k); }
+  }
+  s.parts = [...parts];
+  if (!(s.v >= 3)) s.v = 3;
+  s.rev = s.rev | 0;
+  return s;
+}
+normalizeSave(save);
+/** Slår ihop en nyare sparfil från en annan flik med vår (upplåsningar läggs ihop, bilar som saknas hos oss hämtas). */
+function mergeDisk(disk) {
+  const uni = (a, b) => [...new Set([...(a || []), ...(b || [])])];
+  save.parts = uni(save.parts, disk.parts); save.owned = uni(save.owned, disk.owned); save.found = uni(save.found, disk.found);
+  for (const id of Object.keys(disk.looks || {})) if (!save.looks[id]) save.looks[id] = disk.looks[id];
+  for (const id of Object.keys(disk.perf || {})) if (!save.perf[id] || !Object.keys(save.perf[id]).length) save.perf[id] = disk.perf[id];
+  for (const id of Object.keys(disk.career || {})) save.career[id] = Math.max(save.career[id] || 0, disk.career[id]);
+  for (const k of Object.keys(disk.best || {})) if (!(save.best[k] <= disk.best[k])) save.best[k] = disk.best[k];
+}
+function persist() {
+  const disk = Spelhallen.store.get(SAVE, null);
+  if (disk && typeof disk === 'object' && (disk.rev | 0) > (save.rev | 0)) mergeDisk(normalizeSave(disk));
+  save.rev = Math.max(save.rev | 0, disk ? disk.rev | 0 : 0) + 1;
+  Spelhallen.store.set(SAVE, save);
+}
+/** En annan flik har sparat: ta in den nya sparfilen (samma objekt, så alla referenser lever kvar). */
+addEventListener('storage', (e) => {
+  if (e.key !== 'spelhallen:' + SAVE || !e.newValue) return;
+  let disk; try { disk = normalizeSave(JSON.parse(e.newValue)); } catch (err) { return; }
+  if ((disk.rev | 0) <= (save.rev | 0)) return;
+  for (const k of Object.keys(save)) if (!(k in disk)) delete save[k];
+  Object.assign(save, disk);
+  try { onSaveSynced(); } catch (err) { /* skärmarna kanske inte finns än */ }
+});
 const carSpec = (id) => CARS.find(c => c.id === id) || CARS[0];
 const owns = (id) => save.owned.includes(id);
 const carUnlocked = (c) => owns(c.id);
@@ -514,7 +565,7 @@ function partBtn(key, on, locked) {
 function renderGarage() {
   const id = gar.car, spec = carSpec(id), lk = lookOf(id), pf = perfOf(id);
   let h = `<div class="fj-wallet"><span>💰 ${fmtKr(save.kr)}</span><span>🧩 ${save.parts.length} delar</span><span>🎁 ${crateCount()} lådor</span></div>`;
-  h += `<div class="fj-sec"><label>Dina bilar</label>${carCards(save.owned, id)}</div>`;
+  h += `<div class="fj-sec"><label>Dina bilar</label>${carCards(save.owned, id)}<p class="fj-muted" style="margin:6px 0 0;font-size:.78rem">Hittade delar kan sitta på alla dina bilar samtidigt. Varje bil sparar sin egen uppsättning – den ligger kvar när du byter bil.</p></div>`;
   h += `<div class="fj-seg fj-tabs" data-tab="1"><button data-t="perf" class="${gar.tab === 'perf' ? 'on' : ''}">🔧 Prestanda</button><button data-t="look" class="${gar.tab === 'look' ? 'on' : ''}">🎨 Utseende</button></div>`;
   if (gar.tab === 'perf') {
     for (const c of PERF) {
@@ -535,11 +586,19 @@ function renderGarage() {
     h += `<div class="fj-sec"><label>Dekalfärg</label><div class="fj-swatches">${[0xffffff, 0x111111, 0xffcc33, 0xff3b30, 0x39d5ff, 0x4ade80, 0xff7ad0, 0xf06b12].map(c => `<button class="${(lk.decalColor ?? 0xffffff) === c ? 'on' : ''}" data-dcol="${c}" style="background:${css(c)}"></button>`).join('')}</div></div>`;
     h += lookRow('neon', lk.neon != null ? '0x' + lk.neon.toString(16).padStart(6, '0') : '', 'Inget');
     h += lookRow('tint', lk.tint && lk.tint !== 'clear' ? lk.tint : '', 'Ljus');
+    const others = save.owned.filter(o => o !== id);
+    if (others.length) h += `<div class="fj-sec"><label>📋 Kopiera utseende från annan bil <span class="fj-muted">(lack, delar, dekaler – inte skylten)</span></label><div class="fj-parts">${others.map(o => `<button class="fj-part" data-copy="${o}" style="--r:${css(lookOf(o).color)}"><b>${esc(carSpec(o).name)}</b><small>Kopiera</small></button>`).join('')}</div></div>`;
     h += `<div class="fj-sec fj-row2"><label>Startnummer <input type="number" id="gNum" min="0" max="99" value="${lk.number || 0}"></label><label>Registreringsskylt <input type="text" id="gPlate" maxlength="7" value="${esc(lk.plate || '')}"></label></div>`;
   }
   $('garageBody').innerHTML = h;
   showroom.setCar(id, lk);
   $('garageInfo').innerHTML = carHead(spec) + statBars(spec, applyParts(spec, pf, 'asfalt')) + `<p class="fj-desc">${esc(spec.desc)}</p><p class="fj-note2">Dra i bilden för att vrida bilen. Staplarna visar standard (grå) och med dina delar (grönt = bättre, rött = sämre). Däckens effekt beror på underlaget.</p>`;
+}
+/** Anropas när en annan flik har sparat – rita om det som visar sparfilen. */
+function onSaveSynced() {
+  const open = (id) => !$(id).classList.contains('hidden');
+  if (open('garage')) { if (!owns(gar.car)) gar.car = save.owned[0]; renderGarage(); }
+  else if (open('menu')) updateMenu();
 }
 function setLook(patch) {
   const lk = lookOf(gar.car); Object.assign(lk, patch); persist(); renderGarage();
@@ -566,6 +625,13 @@ $('garageBody').addEventListener('click', e => {
     const cat = b.dataset.look.split(':')[0];
     const reset = { finish: { finish: 'gloss' }, rims: { rims: 'std' }, spoiler: { spoiler: 'default' }, kit: { kit: 'none' }, decal: { decal: 'none' }, neon: { neon: null }, tint: { tint: 'clear' } }[cat];
     audio.play('click'); return setLook(reset);
+  }
+  if (b.dataset.copy) {
+    const src = lookOf(b.dataset.copy), cp = {};
+    for (const k of ['color', 'finish', 'rims', 'rimColor', 'spoiler', 'kit', 'decal', 'decalColor', 'number', 'neon', 'tint']) cp[k] = src[k] === undefined ? undefined : src[k];
+    const lk = lookOf(gar.car); for (const k of Object.keys(cp)) { if (cp[k] === undefined) delete lk[k]; else lk[k] = cp[k]; }
+    audio.play('pickup', { vol: 0.5 }); toast('Utseendet kopierat från ' + carSpec(b.dataset.copy).name);
+    persist(); return renderGarage();
   }
   if (b.dataset.col) { audio.play('click'); return setLook({ color: +b.dataset.col }); }
   if (b.dataset.dcol) { audio.play('click'); return setLook({ decalColor: +b.dataset.dcol }); }
@@ -1852,6 +1918,7 @@ const loop = new Loop({
       updateCamera(frameDt);
       r.world.update(paused ? 0 : frameDt, camera, r.player.root.position, r.player.vel);
       r.world.cheer.uCheer.value = r.state === 'countdown' ? 0.6 : 0.25 + (r.state === 'finished' ? 0.75 : 0);
+      r.world.crowdCars = r.cars;
       r.particles.setScale(R.size.h); r.sparks.setScale(R.size.h);
       const sp = settings.get('speedFx') ? clamp((r.player.speed * 3.6 - 120) / 110, 0, 1) : 0;
       r.hurt = Math.max(0, r.hurt - frameDt * 1.5);
