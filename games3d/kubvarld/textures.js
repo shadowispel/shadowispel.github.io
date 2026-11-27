@@ -189,7 +189,7 @@ const TIER_COL = [['#c9995a', '#8a6132'], ['#a3a6ae', '#6c6f78'], ['#eef0f2', '#
 // Nordisk palett
 const GRASS = P(['#3b6440', '#487246', '#56824b', '#669252', '#78a35b']);
 const SOIL = P(['#4e3526', '#5f412d', '#6f4d35', '#7e5a3e']);
-const GRANITE = P(['#666973', '#737680', '#80838d', '#8d909a', '#9a9da6']);
+const GRANITE = P(['#69696c', '#757578', '#818184', '#8d8d90', '#99999c']); // neutral grå sten (ingen beige/rosa ton som kan förväxlas med malm)
 
 /* ---------- ritfunktioner per ruta ---------- */
 const draw = {
@@ -214,9 +214,9 @@ const draw = {
   },
   stone(p) {
     ramp(p, field(p, 0.4, 0.35, 0.25), GRANITE, 0.12);
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const r = p.r(); if (r < 0.05) p.set(x, y, hex('#b0928a')); else if (r < 0.085) p.set(x, y, hex('#4e505a')); else if (r < 0.1) p.set(x, y, hex('#c2c5cc')); }
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const r = p.r(); if (r < 0.04) p.set(x, y, hex('#5c5c60')); else if (r < 0.075) p.set(x, y, hex('#4c4c50')); else if (r < 0.095) p.set(x, y, hex('#b4b4b8')); }
     // en mjuk spricka
-    let x = p.r() * S | 0, y = p.r() * 8 | 0; for (let i = 0; i < 6; i++) { p.set(x, y, hex('#555862')); p.set(x + 1, y, hex('#a2a5ae')); y++; x += p.r() < 0.4 ? 1 : p.r() < 0.3 ? -1 : 0; }
+    let x = p.r() * S | 0, y = p.r() * 8 | 0; for (let i = 0; i < 6; i++) { p.set(x, y, hex('#555558')); p.set(x + 1, y, hex('#a5a5a8')); y++; x += p.r() < 0.4 ? 1 : p.r() < 0.3 ? -1 : 0; }
     bevel(p, 0.05);
   },
   cobble(p) { stones(p, [GRANITE, P(['#6f6a6c', '#7e787a', '#8d8789', '#9c9698', '#aaa4a5']), P(['#626a72', '#6f7780', '#7c848d', '#89919a', '#969ea7'])], hex('#3f4047'), 8); bevel(p, 0.08); },

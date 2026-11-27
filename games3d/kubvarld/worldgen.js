@@ -145,9 +145,9 @@ export function createGen(seed, ver = 1) {
         const i = (y << 8) | (lz << 4) | lx;
         const cur = data[i];
         if (cur === B.water || cur === B.bedrock) continue;
-        const depthF = y > h - 6 ? 0.45 : 1; // färre öppningar nära ytan
+        const depthF = y > h - 6 ? 1.05 : 1; // grottor får gärna mynna ut i dagen (öppna grottor)
         const a = sampleCave(caveA, lx, y, lz);
-        let carve = a < 0.0075 * depthF * (y < 20 ? 1.4 : 1);
+        let carve = a < 0.0092 * depthF * (y < 20 ? 1.4 : 1);
         if (!carve && y < 42 && y > 8) { const cb = sampleCave(caveB, lx, y, lz); carve = cb > 0.58 - (42 - y) * 0.002; }
         if (carve) {
           data[i] = 0;
