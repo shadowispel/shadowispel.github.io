@@ -23,6 +23,7 @@ import * as TX from './textures.js';
 import { engineVoice } from './sound.js';
 import { makeNet, makeLobby, buildStart, packCar, pushSample, stepRemote, INTERP, lookFromNet } from './online.js';
 import { backgroundTicker, emoteBar } from '../../engine/net.js';
+import { createCrateStage } from './crate3d.js';
 
 const ID = 'fjallracet';
 Spelhallen.init(ID);
@@ -217,6 +218,10 @@ const showroom = (() => {
   };
 })();
 showroom.resize(R.size.w, R.size.h);
+/* Lådöppning i 3D (egen scen, samma renderare) */
+const crateFx = createCrateStage({ renderer, settings, audio, env: showroom.scene.environment, root, size: R.size,
+  buildCar: (id, look) => buildCarModel(carSpec(id), look || lookOf(id), { quality: 'high' }), disposeCar: disposeCarModel });
+R.onResize((w, h) => crateFx.resize(w, h));
 
 /* ------------------------------------------------------------------ Pekkontroller */
 const touch = { stick: { x: 0 } };
@@ -615,33 +620,81 @@ function renderCrates() {
 }
 $('cratesBody').addEventListener('click', e => { const b = e.target.closest('button[data-open]'); if (b) openCrateAnim(b.dataset.open); });
 $('cratesBack').addEventListener('click', () => { audio.play('click'); toMenu(); });
-function openCrateAnim(type) {
-  const i = save.crates.indexOf(type); if (i < 0) return;
+const LOOK_FIELD = { finish: 'finish', rims: 'rims', spoiler: 'spoiler', kit: 'kit', decal: 'decal', tint: 'tint' };
+/** Stats-förändring om delen monteras på nuvarande bil. */
+function partStatHtml(info) {
+  const id = save.car, spec = carSpec(id), pf = perfOf(id);
+  if (info.kind !== 'perf') return `<p class="fj-c3note">Utseende – fungerar på alla dina bilar. Bil: <b>${esc(spec.name)}</b></p>`;
+  const cur = pf[info.cat], with_ = Object.assign({}, pf, { [info.cat]: info.key });
+  const row = (label, a, b, fmt) => { const d = b - a; return Math.abs(d) < 0.005 ? '' : `<div class="fj-c3d"><span>${label}</span><small>${fmt(a)} → <b class="${d > 0 ? 'up' : 'dn'}">${fmt(b)}</b></small></div>`; };
+  let h = '';
+  const pb = perfIndex(applyParts(spec, pf, 'asfalt')), pa = perfIndex(applyParts(spec, with_, 'asfalt'));
+  h += `<div class="fj-c3pi">${esc(spec.name)}: <b class="pc pc-${piClass(pb)}">${piClass(pb)} ${pb}</b> → <b class="pc pc-${piClass(pa)}">${piClass(pa)} ${pa}</b>${cur === info.key ? ' <em>(monterad)</em>' : ''}</div>`;
+  if (info.cat === 'dack') {
+    for (const sf of ['asfalt', 'grus', 'snö', 'is']) h += row('Grepp på ' + SURFACE_NAME[sf].toLowerCase(), applyParts(spec, pf, sf).grip, applyParts(spec, with_, sf).grip, v => v.toFixed(1));
+  } else {
+    const a = applyParts(spec, pf, 'asfalt'), b = applyParts(spec, with_, 'asfalt');
+    for (const [label, f, , , fmt] of STATS) {
+      const va = f(a), vb = f(b); if (Math.abs(vb - va) < 0.005) continue;
+      const better = label === 'Vikt' ? vb < va : vb > va;
+      h += `<div class="fj-c3d"><span>${label}</span><small>${fmt(a)} → <b class="${better ? 'up' : 'dn'}">${fmt(b)}</b></small></div>`;
+    }
+    if (a.nitroMul !== b.nitroMul) h += row('Nitro', a.nitroMul * 100, b.nitroMul * 100, v => Math.round(v) + ' %');
+  }
+  return h;
+}
+function partMounted(info) {
+  if (info.kind === 'perf') return perfOf(save.car)[info.cat] === info.key;
+  const lk = lookOf(save.car);
+  if (info.cat === 'neon') return lk.neon === parseInt(info.id, 16);
+  return String(lk[LOOK_FIELD[info.cat]]) === String(info.id);
+}
+function mountPart(info) {
+  if (info.kind === 'perf') perfOf(save.car)[info.cat] = info.key;
+  else if (info.cat === 'neon') lookOf(save.car).neon = parseInt(info.id, 16);
+  else lookOf(save.car)[LOOK_FIELD[info.cat]] = info.id;
+  persist(); showroom.setCar(save.car, lookOf(save.car));
+  return true;
+}
+/** Bygger data för 3D-öppningen av en låda (res från openCrate). */
+function crateData(type, res, dupKr) {
+  const c = CRATES[type];
+  const best = Math.max(...res.items.map(x => x.info.rar));
+  const items = res.items.map(it => {
+    const info = it.info, r = RARITIES[info.rar];
+    return { kind: info.kind, cat: info.cat, id: info.id, tire: info.tire, rar: info.rar, color: r.color, rarName: r.name, name: info.name,
+      sub: info.kind === 'perf' ? 'Prestanda' : 'Utseende · ' + info.catName, isNew: !it.dup, dupText: it.dup ? `Dubblett → +${fmtKr(r.sell)}` : '',
+      statHtml: partStatHtml(info), canMount: true, mountLabel: `Montera nu`,
+      isMounted: () => partMounted(info), mount: () => mountPart(info) };
+  });
+  if (res.car) items.push({ kind: 'car', carId: res.car, look: lookOf(res.car), rar: 4, color: RARITIES[4].color, rarName: RARITIES[4].name, name: carSpec(res.car).name, sub: 'Ny bil', isNew: true,
+    statHtml: statBars(carSpec(res.car)), canMount: true, mountLabel: 'Kör den nu', isMounted: () => save.car === res.car, mount: () => { save.car = res.car; persist(); return true; } });
+  items.push({ kind: 'coins', rar: 0, color: '#ffcc33', rarName: 'Kronor', name: `+${fmtKr(res.coins + dupKr)}`, sub: '',
+    statHtml: `<p class="fj-c3note">${fmtKr(res.coins)} i lådan${dupKr ? ` · ${fmtKr(dupKr)} för dubbletter` : ''}. Saldo: <b>${fmtKr(save.kr)}</b></p>` });
+  return {
+    type, name: c.name, color: c.color, best, bestColor: RARITIES[best].color, items, carColor: lookOf(save.car).color ?? 0xb0281f,
+    krText: `+${fmtKr(res.coins)} i lådan${dupKr ? ` · +${fmtKr(dupKr)} för dubbletter` : ''} · saldo ${fmtKr(save.kr)}`,
+    nextLabel: () => { const t = nextCrateType(type); if (!t) return ''; const n = save.crates.filter(x => x === t).length; return `Öppna nästa (${CRATES[t].name}, ${n} kvar)`; },
+    next: () => { const t = nextCrateType(type); return t ? rollCrate(t) : null; },
+    onClose: () => { screen('crates'); renderCrates(); }
+  };
+}
+function nextCrateType(type) { return save.crates.includes(type) ? type : save.crates[0] || null; }
+/** Tar en låda ur förrådet, slumpar innehållet och sparar. */
+function rollCrate(type) {
+  const i = save.crates.indexOf(type); if (i < 0) return null;
   save.crates.splice(i, 1);
   const res = openCrate(type, save.parts);
   let dupKr = 0;
   for (const it of res.items) { if (it.dup) dupKr += RARITIES[it.info.rar].sell; else save.parts.push(it.key); }
   addKr(res.coins + dupKr); persist();
-  const c = CRATES[type];
-  const ov = document.createElement('div'); ov.className = 'fj-crateov';
-  ov.innerHTML = `<div class="fj-bigcrate" style="--c:${c.color}"><div class="lid"></div><div class="box"></div><div class="glow"></div></div><h2>${c.name}</h2><div class="fj-loot"></div><p class="fj-lootkr"></p><button class="btn primary hidden">Fortsätt</button>`;
-  root.appendChild(ov);
+  return crateData(type, res, dupKr);
+}
+function openCrateAnim(type) {
+  const d = rollCrate(type); if (!d) return;
+  screen(null);
   audio.play('select');
-  const best = Math.max(...res.items.map(x => x.info.rar));
-  ov.querySelector('.fj-bigcrate').style.setProperty('--g', RARITIES[best].color);
-  setTimeout(() => { ov.classList.add('open'); audio.play(best >= 3 ? 'levelup' : 'power'); }, 1300);
-  const loot = ov.querySelector('.fj-loot');
-  res.items.forEach((it, k) => setTimeout(() => {
-    const r = RARITIES[it.info.rar];
-    const d = document.createElement('div'); d.className = 'fj-lootcard'; d.style.setProperty('--r', r.color);
-    d.innerHTML = `<i>${it.info.icon}</i><b>${esc(it.info.name)}</b><small>${r.name} · ${it.info.kind === 'perf' ? 'Prestanda' : 'Utseende'}</small>${it.dup ? `<em>Dubblett → +${fmtKr(r.sell)}</em>` : '<em class="new">NY!</em>'}`;
-    loot.appendChild(d); audio.play(it.info.rar >= 3 ? 'coin' : 'pickup', { vol: 0.6 });
-  }, 1700 + k * 450));
-  setTimeout(() => {
-    ov.querySelector('.fj-lootkr').textContent = `+${fmtKr(res.coins)} i lådan${dupKr ? ` · +${fmtKr(dupKr)} för dubbletter` : ''}`;
-    const b = ov.querySelector('button'); b.classList.remove('hidden'); b.focus();
-    b.addEventListener('click', () => { ov.remove(); audio.play('click'); renderCrates(); });
-  }, 1900 + res.items.length * 450);
+  crateFx.open(d);
 }
 
 $('mPlay').addEventListener('click', () => { audio.play('select'); quickPlay(); });
@@ -1805,6 +1858,8 @@ const loop = new Loop({
       r.speedFx.set(r.world.time, sp, r.player.nitroOn ? 1 : 0, R.size.w / R.size.h, r.hurt);
       drawHudCanvases();
       if (composer) composer.render(); else renderer.render(scene, camera);
+    } else if (crateFx.active) {
+      crateFx.render(Math.min(0.05, frameDt));
     } else {
       showroom.render(Math.min(0.05, frameDt));
     }
@@ -1828,7 +1883,9 @@ fpsMeter(root, loop, settings);
   // felsökningskrok – bara med ?debug i adressen (annars går det att fuska via konsolen)
   if (/[?&]debug\b/.test(location.search)) {
     window.__fj = { get race() { return race; }, startEvent, findEvent, openCareer, grantRewards, get net() { return net; }, get lobby() { return lobby; }, bgStep, save, settings, loop, startRace, toMenu, scene, renderer, camera, AIDriver, input, hud, startCup, showResults, endRace,
-      get composer() { return composer; },
+      get composer() { return composer; }, crateFx, openCrateAnim, crateData,
+      /** Testlåda med valda delnycklar (sparar inget utom ev. montering). */
+      crateDemo(type, keys, coins = 500, car = null) { const res = { items: keys.map(k => ({ key: k, info: partInfo(k), dup: save.parts.includes(k) })), coins, car }; screen(null); crateFx.open(crateData(type, res, 0)); },
       step(n) { for (let k = 0; k < n && race && !race.ended; k++) { raceUpdate(1 / 60); input.endFrame(); } },
       frames(n) { for (let k = 0; k < n; k++) loop.render(1, 1 / 30); } };
     window.__ok = true;
