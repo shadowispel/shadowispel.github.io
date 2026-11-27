@@ -38,7 +38,7 @@ function speckle(g, w, h, n, rng, colors, size = 1.5) {
 export function asphaltTex(kind = 'normal') {
   return canvasTex('asphalt:' + kind, 256, 512, (g, w, h) => {
     const rng = makeRng(11);
-    const base = { normal: '#3b3d42', wet: '#26282d', light: '#55575c', city: '#2e3035' }[kind] || '#3b3d42';
+    const base = { normal: '#3b3d42', wet: '#26282d', light: '#55575c', city: '#2e3035', neo: '#1c1d24', airfield: '#5d5f63' }[kind] || '#3b3d42';
     g.fillStyle = base; g.fillRect(0, 0, w, h);
     speckle(g, w, h, 9000, rng, ['rgba(255,255,255,0.06)', 'rgba(0,0,0,0.12)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0.06)'], 1.6);
     // slitage i spåren
@@ -52,13 +52,29 @@ export function asphaltTex(kind = 'normal') {
       g.fillStyle = 'rgba(0,0,0,0.12)';
       g.fillRect(rng() * w * 0.8, rng() * h, 20 + rng() * 50, 14 + rng() * 40);
     }
-    // kantlinjer
-    g.fillStyle = kind === 'city' ? '#d8d8d0' : '#ecece4';
-    g.fillRect(w * 0.025, 0, w * 0.022, h);
-    g.fillRect(w * 0.953, 0, w * 0.022, h);
-    // mittlinje streckad
-    g.fillStyle = kind === 'city' ? '#e6c14a' : '#efefe6';
-    for (let y = 0; y < h; y += 128) g.fillRect(w * 0.492, y + 10, w * 0.016, 70);
+    if (kind === 'airfield') {
+      // betongplattor med fogar, gul mittlinje och vita kantlinjer
+      g.strokeStyle = 'rgba(20,20,20,0.35)'; g.lineWidth = 2;
+      for (let y = 0; y < h; y += 64) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+      for (const u of [0.25, 0.5, 0.75]) { g.beginPath(); g.moveTo(u * w, 0); g.lineTo(u * w, h); g.stroke(); }
+      for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(20,20,20,0.18)'; g.fillRect(rng() * w * 0.4 + w * 0.3, rng() * h, 30 + rng() * 40, 4 + rng() * 6); }
+      g.fillStyle = '#e8e8e0'; g.fillRect(w * 0.02, 0, w * 0.025, h); g.fillRect(w * 0.955, 0, w * 0.025, h);
+      g.fillStyle = '#e8b830'; g.fillRect(w * 0.49, 0, w * 0.02, h);
+    } else if (kind === 'neo') {
+      // mörk våt asfalt med kalla streckade körfältslinjer – kanterna ritas av vägens ljuslister
+      g.fillStyle = 'rgba(190,225,255,0.85)';
+      for (let y = 0; y < h; y += 128) { g.fillRect(w * 0.245, y + 20, w * 0.012, 56); g.fillRect(w * 0.743, y + 20, w * 0.012, 56); }
+      g.fillStyle = 'rgba(255,255,255,0.9)';
+      for (let y = 0; y < h; y += 64) g.fillRect(w * 0.494, y + 8, w * 0.012, 36);
+    } else {
+      // kantlinjer
+      g.fillStyle = kind === 'city' ? '#d8d8d0' : '#ecece4';
+      g.fillRect(w * 0.025, 0, w * 0.022, h);
+      g.fillRect(w * 0.953, 0, w * 0.022, h);
+      // mittlinje streckad
+      g.fillStyle = kind === 'city' ? '#e6c14a' : '#efefe6';
+      for (let y = 0; y < h; y += 128) g.fillRect(w * 0.492, y + 10, w * 0.016, 70);
+    }
     // slitna linjer
     speckle(g, w, h, 1500, rng, ['rgba(60,60,60,0.5)'], 2);
   });
@@ -88,6 +104,8 @@ export function groundTex(kind) {
       snow: ['#eef3f8', '#dfe7f0', '#ffffff', '#cfd9e6'],
       ice: ['#9fc3dc', '#b9d6ea', '#8ab2cf', '#cfe4f2'],
       pave: ['#5c5e63', '#4f5156', '#67696e', '#45474b'],
+      moss: ['#4e6a34', '#5a7a3a', '#3e5a2a', '#6a7a40', '#7a6a4a'],
+      limestone: ['#cfc8b8', '#bdb6a6', '#ddd6c6', '#aaa494', '#8a9a68'],
       detail: ['#d8d8d8', '#bdbdbd', '#efefef', '#a8a8a8']
     }[kind] || ['#888', '#777', '#999'];
     g.fillStyle = pal[0]; g.fillRect(0, 0, w, h);
@@ -269,4 +287,104 @@ export function flagTex() {
     const cols = ['#ffcc33', '#1f4fbf', '#c8261e', '#f4f4f4', '#2e8b3a'];
     for (let i = 0; i < 16; i++) { g.fillStyle = cols[i % cols.length]; g.beginPath(); g.moveTo(i * 16, 0); g.lineTo(i * 16 + 16, 0); g.lineTo(i * 16 + 8, h); g.closePath(); g.fill(); }
   });
+}
+
+/** Grusväg: u tvärs (0..1), v längs. Hjulspår, stenar och gräsrand i mitten. */
+export function gravelRoadTex() {
+  return canvasTex('road:gravel', 256, 512, (g, w, h) => {
+    const rng = makeRng(41);
+    g.fillStyle = '#8a7660'; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 14000, rng, ['#9a8670', '#76644f', '#a8957c', '#6a5846', '#b8a68c', '#5a4a3a'], 2.4);
+    for (const u of [0.28, 0.72]) {
+      const gr = g.createLinearGradient(u * w - 26, 0, u * w + 26, 0);
+      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.5, 'rgba(50,35,20,0.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(u * w - 26, 0, 52, h);
+    }
+    // lös sten i kanterna och mitten
+    for (let i = 0; i < 900; i++) { const u = rng() < 0.5 ? rng() * 0.12 : rng() < 0.5 ? 0.88 + rng() * 0.12 : 0.46 + rng() * 0.08; g.fillStyle = ['#a89880', '#6a5a48', '#c0b098'][(rng() * 3) | 0]; g.fillRect(u * w, rng() * h, 2 + rng() * 3, 2 + rng() * 3); }
+    for (let i = 0; i < 18; i++) { g.fillStyle = 'rgba(40,28,16,0.18)'; g.beginPath(); g.ellipse(rng() * w, rng() * h, 8 + rng() * 16, 5 + rng() * 10, rng() * 3, 0, 7); g.fill(); }
+  });
+}
+/** Packad snöväg med spår och isfläckar. */
+export function snowRoadTex() {
+  return canvasTex('road:snow', 256, 512, (g, w, h) => {
+    const rng = makeRng(43);
+    g.fillStyle = '#dfe6ee'; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 9000, rng, ['#eef3f8', '#cfd8e2', '#ffffff', '#c4ceda'], 2);
+    for (const u of [0.27, 0.36, 0.64, 0.73]) {
+      const gr = g.createLinearGradient(u * w - 12, 0, u * w + 12, 0);
+      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.5, 'rgba(120,140,165,0.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(u * w - 12, 0, 24, h);
+    }
+    for (let i = 0; i < 10; i++) { g.fillStyle = 'rgba(150,185,215,0.25)'; g.beginPath(); g.ellipse(w * (0.2 + rng() * 0.6), rng() * h, 10 + rng() * 22, 20 + rng() * 40, 0, 0, 7); g.fill(); }
+    // plogkanter
+    g.fillStyle = 'rgba(255,255,255,0.8)'; g.fillRect(0, 0, w * 0.04, h); g.fillRect(w * 0.96, 0, w * 0.04, h);
+  });
+}
+/** Grovhetskarta med vattenpölar (linjär, för våt asfalt). Ljusare = grövre. */
+export function puddleTex() {
+  return canvasTex('puddles', 256, 512, (g, w, h) => {
+    const rng = makeRng(45);
+    g.fillStyle = 'rgb(150,150,150)'; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 5000, rng, ['rgb(170,170,170)', 'rgb(130,130,130)'], 2);
+    for (let i = 0; i < 26; i++) {
+      const x = rng() * w, y = rng() * h, rx = 10 + rng() * 34, ry = 20 + rng() * 60;
+      const gr = g.createRadialGradient(x, y, 0, x, y, Math.max(rx, ry));
+      gr.addColorStop(0, 'rgb(25,25,25)'); gr.addColorStop(0.7, 'rgb(40,40,40)'); gr.addColorStop(1, 'rgba(150,150,150,0)');
+      g.fillStyle = gr; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, 7); g.fill();
+    }
+  }, { linear: true });
+}
+/** Korrugerad plåt (container, hangar) – gråskala som färgas av vertex-/instansfärg. */
+export function corrugatedTex() {
+  return canvasTex('corrugated', 128, 128, (g, w, h) => {
+    for (let x = 0; x < w; x++) { const v = 200 + Math.sin(x / w * Math.PI * 2 * 16) * 40; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, 0, 1, h); }
+    const rng = makeRng(47);
+    speckle(g, w, h, 900, rng, ['rgba(60,40,20,0.15)', 'rgba(255,255,255,0.08)'], 2);
+    const gr = g.createLinearGradient(0, h * 0.75, 0, h); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(80,50,30,0.35)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  });
+}
+/** Fasad för framtidsstaden: mörk glas/metall med ljusa fönsterband. Returnerar { map, emissive }. */
+export function neoFacadeTex() {
+  const key = 'neofacade';
+  if (cache.has(key)) return cache.get(key);
+  const W = 256, H = 512, rows = 16;
+  const mk = (emis) => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+    const rng = makeRng(61);
+    g.fillStyle = emis ? '#000' : '#1a1d28'; g.fillRect(0, 0, W, H);
+    for (let y = 0; y < rows; y++) {
+      const py = y * H / rows;
+      const lit = rng();
+      if (!emis) { g.fillStyle = '#262a38'; g.fillRect(0, py, W, 6); g.fillStyle = '#0c0e16'; g.fillRect(0, py + 8, W, H / rows - 12); }
+      // fönsterband: delvis tända, varma eller kalla
+      for (let x = 0; x < 16; x++) {
+        const on = rng() < (lit < 0.3 ? 0.9 : 0.35);
+        if (!on) continue;
+        const col = ['#bfe6ff', '#ffe0a8', '#9ad8ff', '#ffffff', '#ffc8f0'][(rng() * 5) | 0];
+        g.fillStyle = emis ? col : '#8a9ab0';
+        g.fillRect(x * W / 16 + 1, py + 10, W / 16 - 2, H / rows - 16);
+      }
+    }
+    if (emis) { g.globalAlpha = 0.9; g.fillStyle = '#ffffff'; for (let y = 0; y < rows; y += 4) g.fillRect(0, y * H / rows + 2, W, 2); g.globalAlpha = 1; }
+    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = maxAniso; return t;
+  };
+  const res = { map: mk(false), emissive: mk(true) };
+  cache.set(key, res);
+  return res;
+}
+/** Hologram/skylt med text (vit på svart – färgas i shadern). */
+export function holoTex(text, sub = '') {
+  return canvasTex('holo:' + text + sub, 512, 192, (g, w, h) => {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#fff'; g.lineWidth = 6; g.strokeRect(10, 10, w - 20, h - 20);
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `900 ${sub ? 86 : 104}px Rubik, system-ui, sans-serif`; g.fillText(text, w / 2, sub ? h * 0.42 : h / 2 + 4);
+    if (sub) { g.font = '700 34px Rubik, system-ui, sans-serif'; g.fillText(sub, w / 2, h * 0.8); }
+  }, { linear: true });
+}
+/** Randig tältduk / markis. */
+export function stripeTex(a = '#d02a2a', b = '#f2efe6') {
+  return canvasTex('stripe:' + a + b, 64, 64, (g, w, h) => { for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? a : b; g.fillRect(i * 8, 0, 8, h); } });
 }

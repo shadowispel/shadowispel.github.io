@@ -1,9 +1,10 @@
 /**
- * Fjällracet – bilmodeller (byggda av former) och arkadfysik.
+ * Fjällracet – arkadfysik för bilarna (modellerna byggs i carmodel.js).
  */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Track } from './track.js';
+import { buildCarModel, disposeCarModel } from './carmodel.js';
+export { buildCarModel, disposeCarModel }; // modellerna finns i carmodel.js
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -11,210 +12,15 @@ const wrap = (a) => { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI)
 const UP = new THREE.Vector3(0, 1, 0);
 export const G = 15;
 
-/* ------------------------------------------------------------------ Modeller */
-const SHAPES = {
-  // L längd, W bredd, wb hjulbas, wo hjulförskjutning, r hjulradie, by botten, fy front, hy huv, belt, dy bakdäck, ry tak,
-  // ws vindrutebas x, rf takfront x, rr tak bak x, rb bakruta bas x, spoiler, extra
-  hatch: { L: 4.0, W: 1.82, wb: 2.5, wo: 0.05, r: 0.33, by: 0.24, fy: 0.72, hy: 0.86, belt: 0.95, dy: 0.98, ry: 1.43, ws: 0.72, rf: 0.0, rr: -1.45, rb: -1.95, spoiler: 'lip' },
-  wagon: { L: 4.6, W: 1.86, wb: 2.8, wo: 0.0, r: 0.34, by: 0.25, fy: 0.74, hy: 0.88, belt: 0.98, dy: 1.0, ry: 1.46, ws: 0.95, rf: 0.2, rr: -2.05, rb: -2.24, spoiler: null, rack: true },
-  rally: { L: 4.1, W: 1.86, wb: 2.55, wo: 0.05, r: 0.34, by: 0.3, fy: 0.78, hy: 0.9, belt: 0.98, dy: 1.0, ry: 1.46, ws: 0.72, rf: 0.0, rr: -1.4, rb: -1.95, spoiler: 'wing', scoop: true, lights: true, flaps: true },
-  coupe: { L: 4.2, W: 1.84, wb: 2.5, wo: 0.0, r: 0.33, by: 0.2, fy: 0.62, hy: 0.74, belt: 0.86, dy: 0.9, ry: 1.25, ws: 0.55, rf: -0.25, rr: -1.2, rb: -1.85, spoiler: 'duck' },
-  gt: { L: 4.65, W: 1.92, wb: 2.75, wo: -0.1, r: 0.36, by: 0.22, fy: 0.72, hy: 0.84, belt: 0.92, dy: 0.95, ry: 1.3, ws: 0.3, rf: -0.45, rr: -1.45, rb: -2.0, spoiler: 'duck', scoop: true, stripes: true },
-  super: { L: 4.45, W: 1.98, wb: 2.65, wo: 0.0, r: 0.35, by: 0.16, fy: 0.5, hy: 0.62, belt: 0.78, dy: 0.86, ry: 1.13, ws: 0.65, rf: -0.15, rr: -1.05, rb: -1.95, spoiler: 'wing', stripes: true, side: true }
-};
-
-const matCache = {};
-function sharedMats(q) {
-  if (matCache.glass) return matCache;
-  matCache.glass = new THREE.MeshStandardMaterial({ color: 0x1c2a38, metalness: 0.85, roughness: 0.06, envMapIntensity: 1.8 });
-  matCache.trim = new THREE.MeshStandardMaterial({ color: 0x15161a, roughness: 0.6, metalness: 0.2 });
-  matCache.chrome = new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.18, metalness: 1.0 });
-  matCache.tire = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.92 });
-  matCache.rim = new THREE.MeshStandardMaterial({ color: 0xb8bec4, roughness: 0.3, metalness: 0.9 });
-  matCache.head = new THREE.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xfff0d0, emissiveIntensity: 1.2 });
-  matCache.stripe = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.35, metalness: 0.2 });
-  matCache.stripeDark = new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.35, metalness: 0.2 });
-  matCache.flame = new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
-  matCache.ghost = new THREE.MeshStandardMaterial({ color: 0x7fd6ff, transparent: true, opacity: 0.32, depthWrite: false, emissive: 0x2a6a8a, emissiveIntensity: 0.6 });
-  matCache.cone = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
-  return matCache;
-}
-const geoCache = {};
-
-function bodyShape(s) {
-  const sh = new THREE.Shape();
-  const hl = s.L / 2, R = s.r + 0.1;
-  const xr = -s.wb / 2 + s.wo, xf = s.wb / 2 + s.wo;
-  sh.moveTo(-hl, s.by + 0.08);
-  sh.lineTo(xr - R, s.by);
-  sh.absarc(xr, s.by, R, Math.PI, 0, true);
-  sh.lineTo(xf - R, s.by);
-  sh.absarc(xf, s.by, R, Math.PI, 0, true);
-  sh.lineTo(hl - 0.05, s.by + 0.02);
-  sh.quadraticCurveTo(hl + 0.03, s.by + 0.06, hl + 0.02, s.fy - 0.1);
-  sh.quadraticCurveTo(hl, s.fy + 0.05, hl - 0.3, s.hy);
-  sh.lineTo(s.ws, s.belt);
-  sh.lineTo(s.rb + 0.25, s.belt);
-  sh.lineTo(s.rb + 0.05, s.dy);
-  sh.quadraticCurveTo(-hl - 0.02, s.dy, -hl, s.dy - 0.22);
-  sh.lineTo(-hl, s.by + 0.08);
-  return sh;
-}
-function cabinShape(s) {
-  const sh = new THREE.Shape();
-  sh.moveTo(s.rb + 0.18, s.belt - 0.02);
-  sh.lineTo(s.rr, s.ry);
-  sh.lineTo(s.rf, s.ry);
-  sh.lineTo(s.ws + 0.05, s.belt - 0.02);
-  sh.lineTo(s.rb + 0.18, s.belt - 0.02);
-  return sh;
-}
-function extrude(shape, width, bevel) {
-  const depth = Math.max(0.05, width - bevel * 2);
-  const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 3, curveSegments: 10, steps: 1 });
-  g.translate(0, 0, -depth / 2);
-  g.rotateY(-Math.PI / 2); // shape-x → +z (framåt)
-  return g;
-}
-const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
-
-function buildGeos(shapeId) {
-  if (geoCache[shapeId]) return geoCache[shapeId];
-  const s = SHAPES[shapeId];
-  const hl = s.L / 2;
-  const sm = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-  const body = extrude(bodyShape(s), s.W, 0.1);
-  { // rundade sidor och smalare nos/akter sett uppifrån
-    const p = body.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i), z = p.getZ(i);
-      const k = 1 - 0.07 * sm(s.belt - 0.3, s.belt + 0.05, y) - 0.07 * sm(hl - 0.6, hl + 0.1, Math.abs(z)) * sm(s.by, s.belt, y);
-      p.setX(i, p.getX(i) * k);
-    }
-    body.computeVertexNormals();
-  }
-  const cab = extrude(cabinShape(s), s.W - 0.22, 0.12);
-  { // tumblehome: smalare upptill
-    const p = cab.attributes.position;
-    for (let i = 0; i < p.count; i++) { const t = clamp((p.getY(i) - s.belt) / (s.ry - s.belt), 0, 1); p.setX(i, p.getX(i) * (1 - 0.2 * t)); }
-    cab.computeVertexNormals();
-  }
-  const paint = [body];
-  const glass = [cab];
-  const trim = [];
-  // tak i lackfärg
-  const roof = new THREE.BoxGeometry((s.W - 0.22) * 0.8 - 0.02, 0.07, Math.abs(s.rf - s.rr) - 0.1); roof.translate(0, s.ry + 0.1, (s.rf + s.rr) / 2); paint.push(roof);
-
-  // speglar
-  for (const sx of [-1, 1]) paint.push(box(0.22, 0.12, 0.14, sx * (s.W / 2 + 0.06), s.belt + 0.08, s.ws - 0.1));
-  // B-stolpe (delar sidorutorna)
-  const bz = lerp(s.rr, s.ws, 0.52), bh = s.ry - s.belt;
-  for (const sx of [-1, 1]) { const g = new THREE.BoxGeometry(0.06, bh, 0.12); g.rotateZ(sx * -0.19); g.translate(sx * ((s.W - 0.22) / 2 - 0.02 - bh * 0.09), s.belt + bh / 2, bz); paint.push(g); }
-  // stötfångare / grill
-  trim.push(box(s.W - 0.16, 0.2, 0.14, 0, s.by + 0.1, hl + 0.05));
-  trim.push(box(s.W * 0.5, 0.16, 0.06, 0, s.fy - 0.2, hl + 0.09));
-  trim.push(box(s.W - 0.16, 0.18, 0.14, 0, s.by + 0.1, -hl - 0.05));
-  // sidokjolar
-  for (const sx of [-1, 1]) trim.push(box(0.08, 0.1, s.wb - 0.8, sx * (s.W / 2 - 0.02), s.by + 0.05, s.wo));
-  // avgasrör
-  const chrome = [box(0.52, 0.12, 0.03, 0, s.by + 0.33, -hl - 0.1)];
-  // dörrhandtag
-  for (const sx of [-1, 1]) chrome.push(box(0.03, 0.04, 0.16, sx * (s.W / 2 - 0.005), s.belt - 0.1, bz + 0.25));
-  for (const sx of [-0.45, 0.45]) { const c = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8); c.rotateX(Math.PI / 2); c.translate(sx, s.by + 0.06, -hl - 0.12); chrome.push(c); }
-  // spoilers
-  if (s.spoiler === 'wing') {
-    trim.push(box(s.W - 0.1, 0.05, 0.38, 0, s.dy + 0.36, -hl + 0.3));
-    for (const sx of [-1, 1]) trim.push(box(0.06, 0.36, 0.2, sx * (s.W / 2 - 0.35), s.dy + 0.18, -hl + 0.3));
-    for (const sx of [-1, 1]) trim.push(box(0.04, 0.16, 0.42, sx * (s.W / 2 - 0.05), s.dy + 0.4, -hl + 0.3));
-  } else if (s.spoiler === 'duck') {
-    const g = new THREE.BoxGeometry(s.W - 0.2, 0.06, 0.3); g.rotateX(0.25); g.translate(0, s.dy + 0.04, -hl + 0.2); paint.push(g);
-  } else if (s.spoiler === 'lip') {
-    trim.push(box(s.W - 0.5, 0.05, 0.25, 0, s.ry + 0.08, s.rr - 0.12));
-  }
-  if (s.rack) { for (const sx of [-1, 1]) trim.push(box(0.05, 0.06, Math.abs(s.rf - s.rr) - 0.3, sx * (s.W / 2 - 0.32), s.ry + 0.15, (s.rf + s.rr) / 2)); }
-  if (s.scoop) trim.push(box(0.5, 0.1, 0.6, 0, s.hy + 0.06, (s.ws + hl) / 2 - 0.1));
-  if (s.flaps) for (const sx of [-1, 1]) trim.push(box(0.3, 0.3, 0.02, sx * (s.W / 2 - 0.25), s.by + 0.05, -s.wb / 2 + s.wo - s.r - 0.15));
-  if (s.side) for (const sx of [-1, 1]) trim.push(box(0.06, 0.22, 0.9, sx * (s.W / 2 + 0.01), s.by + 0.36, -0.3));
-  const stripes = [];
-  if (s.stripes) {
-    for (const sx of [-0.22, 0.22]) {
-      stripes.push(box(0.2, 0.02, hl - s.ws, sx, lerp(s.hy, s.belt, 0.5) + 0.07, (s.ws + hl) / 2));
-      stripes.push(box(0.2, 0.02, Math.abs(s.rf - s.rr) - 0.15, sx, s.ry + 0.115, (s.rf + s.rr) / 2));
-    }
-  }
-  // lampor
-  const head = [], tail = [];
-  for (const sx of [-1, 1]) {
-    head.push(box(0.44, 0.13, 0.08, sx * (s.W / 2 - 0.34), s.fy - 0.08, hl + 0.07));
-    tail.push(box(0.42, 0.14, 0.06, sx * (s.W / 2 - 0.32), s.dy - 0.18, -hl - 0.08));
-  }
-  if (s.lights) for (const sx of [-0.45, -0.15, 0.15, 0.45]) { const c = new THREE.CylinderGeometry(0.1, 0.1, 0.08, 10); c.rotateX(Math.PI / 2); c.translate(sx, s.ry + 0.2, s.rf - 0.05); head.push(c); }
-  const m = (arr) => arr.length ? mergeGeometries(arr.map(g => g.index ? g.toNonIndexed() : g)) : null;
-  // hjul (däck + fälg)
-  const tire = new THREE.CylinderGeometry(s.r, s.r, 0.26, 20, 1); tire.rotateZ(Math.PI / 2);
-  const rim = new THREE.CylinderGeometry(s.r * 0.62, s.r * 0.62, 0.27, 12, 1); rim.rotateZ(Math.PI / 2);
-  const spokes = [];
-  for (let k = 0; k < 5; k++) { const b = new THREE.BoxGeometry(0.03, s.r * 1.1, 0.07); b.rotateX(k * Math.PI * 2 / 5); b.translate(0.13, 0, 0); spokes.push(b); }
-  const rimAll = mergeGeometries([rim.toNonIndexed(), ...spokes.map(b => b.toNonIndexed())]);
-  const wheel = mergeGeometries([tire.toNonIndexed(), rimAll], true);
-  const res = { s, paint: m(paint), glass: m(glass), trim: m(trim), chrome: m(chrome), stripes: m(stripes), head: m(head), tail: m(tail), wheel };
-  geoCache[shapeId] = res;
-  return res;
-}
-
-/** Bygger en bilmodell. opts: { ghost, physical } */
-export function buildCarModel(spec, color, opts = {}) {
-  const M = sharedMats();
-  const geos = buildGeos(spec.shape);
-  const s = geos.s;
-  const root = new THREE.Group();
-  const body = new THREE.Group(); root.add(body);
-  let paintMat;
-  if (opts.ghost) paintMat = M.ghost;
-  else if (opts.physical) paintMat = new THREE.MeshPhysicalMaterial({ color, metalness: 0.45, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 });
-  else paintMat = new THREE.MeshStandardMaterial({ color, metalness: 0.45, roughness: 0.32 });
-  const tailMat = opts.ghost ? M.ghost : new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff1a10, emissiveIntensity: 0.35 });
-  const add = (g, mat, cast = true) => { if (!g) return null; const mm = new THREE.Mesh(g, opts.ghost ? M.ghost : mat); mm.castShadow = cast && !opts.ghost; mm.receiveShadow = !opts.ghost; body.add(mm); return mm; };
-  add(geos.paint, paintMat);
-  add(geos.glass, M.glass);
-  add(geos.trim, M.trim);
-  add(geos.chrome, M.chrome, false);
-  const lum = new THREE.Color(color); const dark = (lum.r * 0.3 + lum.g * 0.59 + lum.b * 0.11) > 0.55;
-  add(geos.stripes, dark ? M.stripeDark : M.stripe, false);
-  add(geos.head, M.head, false);
-  add(geos.tail, tailMat, false);
-  const wheels = [];
-  const hw = s.W / 2 - 0.16;
-  for (const [sx, sz, front] of [[-1, 1, true], [1, 1, true], [-1, -1, false], [1, -1, false]]) {
-    const pivot = new THREE.Group();
-    pivot.position.set(sx * hw, s.r, sz * s.wb / 2 + s.wo);
-    const w = new THREE.Mesh(geos.wheel, opts.ghost ? M.ghost : [M.tire, M.rim]);
-    if (sx < 0) w.rotation.y = Math.PI; // fälgen utåt
-    w.castShadow = !opts.ghost;
-    const spin = new THREE.Group(); spin.add(w);
-    pivot.add(spin); root.add(pivot);
-    wheels.push({ pivot, spin, front, side: sx, baseY: s.r, z: sz * s.wb / 2 + s.wo, x: sx * hw });
-  }
-  // avgasflammor
-  const flames = [];
-  if (!opts.ghost) {
-    if (!geoCache.flame) { const g = new THREE.ConeGeometry(0.1, 0.7, 8, 1, true); g.rotateX(-Math.PI / 2); g.translate(0, 0, -0.35); geoCache.flame = g; }
-    for (const sx of [-0.45, 0.45]) {
-      const f = new THREE.Mesh(geoCache.flame, M.flame); f.position.set(sx, s.by + 0.06, -s.L / 2 - 0.28); f.visible = false; body.add(f); flames.push(f);
-    }
-  }
-  return { root, body, wheels, flames, paintMat, tailMat, shape: s, ownMats: opts.ghost ? [] : [paintMat, tailMat] };
-}
-
-export function disposeCarModel(model) { model.ownMats.forEach(m => m.dispose()); if (model.cone) model.cone.geometry.dispose(); if (model.label) { model.label.material.map.dispose(); model.label.material.dispose(); } }
-
 /* ------------------------------------------------------------------ Fysik */
 const _F = new THREE.Vector3(), _R = new THREE.Vector3(), _U = new THREE.Vector3(), _m = new THREE.Matrix4(), _v = new THREE.Vector3();
 
 export class Car {
+  /** look: lackfärg (tal) eller look-objekt, se carmodel.js. */
   constructor(spec, color, opts = {}) {
     this.spec = spec; this.color = color;
     this.model = buildCarModel(spec, color, opts);
+    this.camDist = undefined; // sätts av main.js varje bildruta (detaljnivå)
     this.root = this.model.root;
     this.pos = new THREE.Vector3(); this.vel = new THREE.Vector3();
     this.prevPos = new THREE.Vector3(); this.quat = new THREE.Quaternion(); this.prevQuat = new THREE.Quaternion();
@@ -290,7 +96,7 @@ export class Car {
       }
       if (this.nitroOn) {
         if (vf < top) a += 8;
-        if (this.freeBoost > 0) this.freeBoost -= dt; else this.nitro = Math.max(0, this.nitro - dt * 0.28);
+        if (this.freeBoost > 0) this.freeBoost -= dt; else this.nitro = Math.max(0, this.nitro - dt * 0.28 / (sp.nitroMul || 1));
       }
       if (c.brake > 0) {
         if (vf > 0.5) a -= sp.brake * c.brake;
@@ -351,7 +157,7 @@ export class Car {
         if (Math.abs(slip) > 1.3) { this.drift = false; vf *= 0.55; vl *= 0.5; }
         if (sAbs > 13 && this.drift) {
           const k = clamp(Math.abs(slip) / 0.35, 0.3, 1.4);
-          this.nitro = Math.min(1, this.nitro + dt * 0.085 * k);
+          this.nitro = Math.min(1, this.nitro + dt * 0.085 * k * (sp.nitroMul || 1));
           this.driftCombo += sAbs * Math.abs(slip) * dt * 6;
         }
       }
@@ -489,13 +295,14 @@ export class Car {
       if (w.front) w.pivot.rotation.y = steerVis;
       w.pivot.position.y = w.baseY + (this.grounded ? 0 : -0.08);
     }
-    if (m.tailMat !== sharedMats().ghost) m.tailMat.emissiveIntensity = (this.ctl.brake > 0.1 && this.vf > 0.5) || this.ctl.hand ? 2.6 : 0.35;
+    if (!m.isGhost) m.tailMat.emissiveIntensity = (this.ctl.brake > 0.1 && this.vf > 0.5) || this.ctl.hand ? 2.6 : 0.35;
     const fl = this.nitroOn;
     for (const f of m.flames) {
       f.visible = fl;
       if (fl) { const s = 0.8 + Math.random() * 0.6; f.scale.set(s, s, 0.8 + Math.random() * 0.9); }
     }
     if (m.label) m.label.visible = this.showLabel;
+    if (m.updateLod) m.updateLod(this.camDist);
     const ghostBlink = this.ghostT > 0 ? (Math.floor(time * 12) % 2 === 0) : true;
     this.root.visible = ghostBlink;
   }

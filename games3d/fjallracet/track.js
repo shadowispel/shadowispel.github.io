@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildLayout } from './data.js';
+import { buildLayout } from './trackdata.js';
 import { THEMES } from './themes.js';
 import * as TX from './textures.js';
 
@@ -44,7 +44,7 @@ export class Track {
     pts.forEach((p, i) => { P[i * 3] = p.x; P[i * 3 + 1] = p.y; P[i * 3 + 2] = p.z; });
 
     // flaggor
-    this.bridge = new Uint8Array(N); this.tunnel = new Uint8Array(N);
+    this.bridge = new Uint8Array(N); this.tunnel = new Uint8Array(N); this.bridgeKind = new Uint8Array(N); // 1 hängbro, 2 lång bro
     this.openL = new Uint8Array(N); this.openR = new Uint8Array(N);
     this.tags = lay.tags;
     const rangeIdx = (t, padM = 0) => [Math.round(t.from * N - padM / ds), Math.round(t.to * N + padM / ds)];
@@ -53,7 +53,7 @@ export class Track {
       const [a, b] = rangeIdx(t);
       for (let i = a; i <= b; i++) {
         const j = ((i % N) + N) % N;
-        if (t.bridge) this.bridge[j] = 1;
+        if (t.bridge) { this.bridge[j] = 1; this.bridgeKind[j] = t.suspension ? 1 : t.long ? 2 : 0; }
         if (t.tunnel) this.tunnel[j] = 1;
         if (t.open === 'L' || t.open === 'B') this.openL[j] = 1;
         if (t.open === 'R' || t.open === 'B') this.openR[j] = 1;
@@ -72,7 +72,14 @@ export class Track {
           ys[j] += dy;
         }
       }
-      if (t.lift) {
+      if (t.lift && t.long) {
+        // lång bro: valvformad profil – högst i mitten (segelfri höjd), låg vid landfästena
+        for (let i = a; i <= b; i++) {
+          const j = ((i % N) + N) % N, u = (i - a) / Math.max(1, b - a);
+          ys[j] += 1.5 + (t.lift - 1.5) * Math.pow(Math.sin(u * Math.PI), 0.8);
+        }
+        for (let k = 1; k < 40; k++) { const f = 1.5 * (1 - k / 40); ys[((a - k) % N + N) % N] += f; ys[(b + k) % N] += f; }
+      } else if (t.lift) {
         const ramp = 85 / ds;
         for (let i = Math.floor(a - ramp); i <= Math.ceil(b + ramp); i++) {
           const j = ((i % N) + N) % N;
@@ -238,6 +245,13 @@ export class Track {
     }
     this.lineV = V;
     this.lineK = kl;
+    // varning 0..1: hur mycket farten måste sänkas inom ca 110 m framåt
+    const warn = new Float32Array(N), look = Math.round(110 / this.ds);
+    for (let i = 0; i < N; i++) {
+      let m = V[i]; for (let k = 1; k <= look; k += 2) m = Math.min(m, V[(i + k) % N]);
+      warn[i] = clamp((Math.min(V[i], 70) - m) / 22, 0, 1);
+    }
+    this.warn = circSmooth(warn, 4, 1);
   }
 
   /* ---------- meshbygge ---------- */
@@ -250,17 +264,30 @@ export class Track {
 
     // --- väg ---
     let roadMat;
+    const PO = { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 };
     if (th.road === 'ice') {
       const t = TX.groundTex('ice');
-      roadMat = mat(new THREE.MeshStandardMaterial({ map: t, color: 0xdcecff, roughness: 0.18, metalness: 0.15, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+      roadMat = mat(new THREE.MeshStandardMaterial(Object.assign({ map: t, color: 0xdcecff, roughness: 0.18, metalness: 0.15 }, PO)));
       this._roadUScale = 2 * this.half / 10;
+    } else if (th.road === 'gravel') {
+      roadMat = mat(new THREE.MeshStandardMaterial(Object.assign({ map: TX.gravelRoadTex(), roughness: 0.97 }, PO)));
+    } else if (th.road === 'snow') {
+      roadMat = mat(new THREE.MeshStandardMaterial(Object.assign({ map: TX.snowRoadTex(), roughness: 0.62, metalness: 0.02, envMapIntensity: 0.6 }, PO)));
+    } else if (th.road === 'wet' || th.road === 'neo') {
+      // våt asfalt: låg grovhet + pölar (grovhetskarta) så att ljus och neon speglas
+      const neo = th.road === 'neo';
+      roadMat = mat(new THREE.MeshStandardMaterial(Object.assign({ map: TX.asphaltTex(th.road), roughnessMap: TX.puddleTex(), roughness: neo ? 0.5 : 0.55, metalness: neo ? 0.3 : 0.15, envMapIntensity: neo ? 1.25 : 0.9 }, PO)));
     } else {
-      roadMat = mat(new THREE.MeshStandardMaterial({ map: TX.asphaltTex(th.road === 'wet' ? 'wet' : th.road), roughness: th.road === 'wet' ? 0.3 : 0.88, metalness: th.road === 'wet' ? 0.15 : 0.0, envMapIntensity: th.road === 'wet' ? 0.6 : 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+      roadMat = mat(new THREE.MeshStandardMaterial(Object.assign({ map: TX.asphaltTex(th.road), roughness: th.road === 'airfield' ? 0.85 : 0.88 }, PO)));
     }
+    this.roadUniforms = { uTime: { value: 0 } };
+    if (th.lamps || th.edgeGlow) this._roadShader(roadMat);
     const h = this.half, lim = this.limit;
     const roadCols = [];
     for (let c = 0; c <= 4; c++) { const d = -h + c * h / 2; roadCols.push({ d, h: 0, u: th.road === 'ice' ? (d + h) / 10 : (d + h) / (2 * h) }); }
-    const road = new THREE.Mesh(this.ribbon(all, roadCols, th.road === 'ice' ? 10 : 16), roadMat);
+    const roadGeo = this.ribbon(all, roadCols, th.road === 'ice' ? 10 : 16);
+    if (th.lamps || th.edgeGlow) this._trackAttrs(roadGeo, all, roadCols);
+    const road = new THREE.Mesh(roadGeo, roadMat);
     road.receiveShadow = true; road.name = 'road';
     group.add(road);
     this.roadMesh = road;
@@ -278,7 +305,7 @@ export class Track {
 
     // --- kantstenar (curbs) i kurvor ---
     const curbMat = mat(new THREE.MeshStandardMaterial({ map: TX.curbTex(), roughness: 0.7 }));
-    if (th.road !== 'ice' && th.tunnel !== 'city') {
+    if (th.road !== 'ice' && th.road !== 'gravel' && th.road !== 'snow' && th.tunnel !== 'city') {
       const curbOn = new Uint8Array(N);
       for (let i = 0; i < N; i++) if (Math.abs(this.k[i]) > 1 / 95 && !this.bridge[i] && !this.tunnel[i]) for (let k2 = -6; k2 <= 6; k2++) curbOn[(i + k2 + N) % N] = 1;
       const runs = this.runs(i => curbOn[i]).filter(r => r.v === 1);
@@ -312,6 +339,71 @@ export class Track {
     return group;
   }
   dispose() { (this._disp || []).forEach(d => d.dispose && d.dispose()); this._disp = []; }
+
+  /** Gatlampornas placering (delas av vägens shader och world.js): var 'sp' meter, växelvis höger/vänster. */
+  lampLayout() {
+    const th = this.theme.lamps; if (!th) return null;
+    if (this._lamps) return this._lamps;
+    const n = Math.max(2, 2 * Math.round(this.L / (2 * th.spacing)));
+    const sp = this.L / n, off = sp * 0.5, D = this.limit - 1.2;
+    const list = []; for (let k = 0; k < n; k++) list.push({ s: off + k * sp, side: k % 2 ? -1 : 1 });
+    return (this._lamps = { sp, off, D, list, n });
+  }
+  /** Lägger till attributen trk = (s, d) och warn på vägbandet. */
+  _trackAttrs(geo, idx, cols) {
+    const C = cols.length, Rn = idx.length;
+    const trk = new Float32Array(Rn * C * 2), wr = new Float32Array(Rn * C);
+    for (let r = 0; r < Rn; r++) for (let c = 0; c < C; c++) {
+      const o = r * C + c; trk[o * 2] = r * this.ds; trk[o * 2 + 1] = cols[c].d; wr[o] = this.warn[idx[r]];
+    }
+    geo.setAttribute('trk', new THREE.BufferAttribute(trk, 2));
+    geo.setAttribute('warn', new THREE.BufferAttribute(wr, 1));
+  }
+  /** Ljuslager i vägens shader: ljuspölar från gatlamporna (periodiskt längs banan) och pulserande kantlister. */
+  _roadShader(m) {
+    const th = this.theme, U = this.roadUniforms, L = th.lamps, lay = this.lampLayout();
+    const defs = [];
+    if (L) {
+      defs.push('#define ROAD_LAMPS');
+      Object.assign(U, { uLampSp: { value: lay.sp }, uLampOff: { value: lay.off }, uLampD: { value: lay.D }, uLampR: { value: L.radius }, uLampStr: { value: L.strength }, uLampCol: { value: new THREE.Vector3(...L.color) } });
+    }
+    if (th.edgeGlow) {
+      defs.push('#define ROAD_EDGE');
+      Object.assign(U, { uHalf: { value: this.half }, uEdge1: { value: new THREE.Vector3(...th.edgeGlow) }, uEdge2: { value: new THREE.Vector3(...(th.edgeGlow2 || th.edgeGlow)) } });
+    }
+    m.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = 'attribute vec2 trk; attribute float warn; varying vec2 vTrk; varying float vWarn;\n' +
+        sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vTrk = trk; vWarn = warn;');
+      sh.fragmentShader = defs.join('\n') + `
+        varying vec2 vTrk; varying float vWarn; uniform float uTime;
+        #ifdef ROAD_LAMPS
+        uniform float uLampSp, uLampOff, uLampD, uLampR, uLampStr; uniform vec3 uLampCol;
+        #endif
+        #ifdef ROAD_EDGE
+        uniform float uHalf; uniform vec3 uEdge1, uEdge2;
+        #endif
+        ` + sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          float s = vTrk.x, d = vTrk.y;
+          #ifdef ROAD_LAMPS
+          float P2 = uLampSp * 2.0, sl = mod(s - uLampOff, P2);
+          float dR = d - uLampD, dL = d + uLampD, ir = 1.0 / (uLampR * uLampR);
+          float a0 = sl, a1 = sl - uLampSp, a2 = sl - P2;
+          float l = exp(-(a0 * a0 * 0.55 + dR * dR) * ir) + exp(-(a1 * a1 * 0.55 + dL * dL) * ir) + exp(-(a2 * a2 * 0.55 + dR * dR) * ir);
+          totalEmissiveRadiance += diffuseColor.rgb * uLampCol * (l * uLampStr);
+          #endif
+          #ifdef ROAD_EDGE
+          float ad = abs(d);
+          float e = smoothstep(uHalf - 0.62, uHalf - 0.48, ad) * (1.0 - smoothstep(uHalf - 0.3, uHalf - 0.16, ad));
+          float pulse = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(s * 0.22 - uTime * (5.0 + vWarn * 9.0)), 2.0);
+          vec3 ec = mix(d > 0.0 ? uEdge1 : uEdge2, vec3(1.0, 0.42, 0.08), smoothstep(0.15, 0.6, vWarn));
+          totalEmissiveRadiance += ec * e * pulse * 2.6;
+          #endif
+        }`);
+    };
+    m.customProgramCacheKey = () => 'road:' + defs.join(',');
+  }
 
   /** Delar upp banan i sammanhängande körningar där fn(i) har samma värde. Returnerar [{v, idx:[...]}] */
   runs(fn) {
@@ -383,6 +475,10 @@ export class Track {
     const concMat = mat(new THREE.MeshStandardMaterial({ map: TX.concreteTex(), roughness: 0.85 }));
     const rockMat = mat(new THREE.MeshStandardMaterial({ map: TX.rockTex(), color: 0xc89a8a, roughness: 0.95 }));
     const snowMat = mat(new THREE.MeshStandardMaterial({ map: TX.groundTex('snow'), roughness: 0.9 }));
+    const bankMat = th.barrier === 'bank' ? mat(new THREE.MeshStandardMaterial({ map: TX.groundTex(th.shoulder === 'moss' ? 'moss' : 'gravel'), color: th.bankColor || 0x8a7a60, roughness: 1 })) : null;
+    const glowMat = th.barrier === 'neon' ? mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(...(th.edgeGlow || [0.2, 0.8, 1])).multiplyScalar(2.2) })) : null;
+    const glowMat2 = th.barrier === 'neon' ? mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(...(th.edgeGlow2 || th.edgeGlow || [1, 0.3, 0.7])).multiplyScalar(2.2) })) : null;
+    const steelMat = mat(new THREE.MeshStandardMaterial({ color: 0x4a5560, metalness: 0.6, roughness: 0.4 }));
     const postGeo = new THREE.BoxGeometry(0.14, 1, 0.14); postGeo.translate(0, 0.5, 0);
     this._disp.push(postGeo);
     const posts = []; // {i, side, h, kind}
@@ -411,9 +507,26 @@ export class Track {
             const m = new THREE.Mesh(g, woodMat); m.castShadow = true; m.receiveShadow = true; group.add(m);
           }
           for (let k = 0; k < r.idx.length; k += 2) posts.push({ i: r.idx[k], side, kind: 'wpost' });
-        } else if (t === 'concrete' || t === 'bridge') {
+        } else if (t === 'bridge' && (th.bridge === 'steel' || th.bridge === 'suspension')) {
+          // stålräcke på bro: låg betongkant + två rör
+          const g = this.sideProfile(r.idx, side, lim, [[-0.05, -0.02], [-0.05, 0.35], [0.4, 0.35], [0.4, -0.02]], 4);
+          const m = new THREE.Mesh(g, concMat); m.receiveShadow = true; group.add(m);
+          for (const y of [0.75, 1.15]) { const gr = this.sideProfile(r.idx, side, lim, [[0, y], [0, y + 0.12], [0.08, y + 0.12], [0.08, y]], 4); const mr = new THREE.Mesh(gr, glowMat && side > 0 ? glowMat : glowMat2 && side < 0 ? glowMat2 : steelMat); group.add(mr); }
+          for (let k = 0; k < r.idx.length; k += 2) posts.push({ i: r.idx[k], side, kind: 'post' });
+        } else if (t === 'concrete' || t === 'bridge' || t === 'neon') {
           const g = this.sideProfile(r.idx, side, lim, [[0, -0.05], [0, 0.32], [0.18, 0.95], [0.18, 1.0], [0.5, 1.0], [0.5, 0.95], [0.55, -0.05]], 6);
           const m = new THREE.Mesh(g, concMat); m.castShadow = true; m.receiveShadow = true; group.add(m);
+          if (t === 'neon') {
+            // ljuslist ovanpå och en tunn list mot vägen
+            const g2 = this.sideProfile(r.idx, side, lim, [[0.2, 1.0], [0.2, 1.07], [0.48, 1.07], [0.48, 1.0]], 4);
+            group.add(new THREE.Mesh(g2, side > 0 ? glowMat : glowMat2));
+            const g3 = this.sideProfile(r.idx, side, lim, [[-0.01, 0.5], [-0.01, 0.56], [0.02, 0.56]], 4);
+            group.add(new THREE.Mesh(g3, side > 0 ? glowMat : glowMat2));
+          }
+        } else if (t === 'bank') {
+          // jordvall med mossa/grus (rallysträcka, gruva)
+          const g = this.sideProfile(r.idx, side, lim, [[-0.4, -0.08], [0.1, 0.45], [0.7, 0.95], [1.5, 1.1], [2.4, 0.8], [3.4, -0.2]], 5);
+          const m = new THREE.Mesh(g, bankMat); m.receiveShadow = true; m.castShadow = true; group.add(m);
         } else if (t === 'stone') {
           const g = this.sideProfile(r.idx, side, lim, [[0, -0.1], [0, 0.72], [0.12, 0.85], [0.75, 0.85], [0.85, 0.7], [0.85, -0.1]], 5);
           const m = new THREE.Mesh(g, rockMat); m.castShadow = true; m.receiveShadow = true; group.add(m);
@@ -538,6 +651,14 @@ export class Track {
       });
       im.computeBoundingSphere();
       group.add(im); this._disp.push(im);
+      if (th.edgeGlow) {
+        // ljuslister längs tunnelväggarna
+        for (const side of [-1, 1]) for (const y of [0.9, 5.7]) {
+          const g = this.ribbon(idx, side > 0 ? [{ d: W - 0.02, h: y, u: 0 }, { d: W - 0.02, h: y + 0.16, u: 1 }] : [{ d: -W + 0.02, h: y + 0.16, u: 1 }, { d: -W + 0.02, h: y, u: 0 }], 4);
+          const gm = this._tunGlow || (this._tunGlow = [mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(...th.edgeGlow).multiplyScalar(2.4), side: THREE.DoubleSide })), mat(new THREE.MeshBasicMaterial({ color: new THREE.Color(...(th.edgeGlow2 || th.edgeGlow)).multiplyScalar(2.4), side: THREE.DoubleSide }))]);
+          group.add(new THREE.Mesh(g, gm[side > 0 ? 0 : 1]));
+        }
+      }
     }
   }
 
@@ -546,37 +667,54 @@ export class Track {
     const runs = this.runs(i => this.bridge[i]).filter(r => r.v === 1);
     if (!runs.length) return;
     const concMat = mat(new THREE.MeshStandardMaterial({ map: TX.concreteTex(), color: 0xb8b4ac, roughness: 0.85 }));
-    const steelMat = mat(new THREE.MeshStandardMaterial({ color: th.bridge === 'arch' ? 0xc8312a : 0x6f7a84, metalness: 0.5, roughness: 0.45 }));
+    const steelCol = th.bridge === 'arch' ? 0xc8312a : th.bridge === 'suspension' ? 0xc0402a : 0x6f7a84;
+    const steelMat = mat(new THREE.MeshStandardMaterial({ color: steelCol, metalness: 0.5, roughness: 0.45 }));
+    const cableMat = mat(new THREE.MeshStandardMaterial({ color: 0xd8d8d0, metalness: 0.7, roughness: 0.35 }));
     const pillarGeo = new THREE.BoxGeometry(1, 1, 1); pillarGeo.translate(0, -0.5, 0); this._disp.push(pillarGeo);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), basis = new THREE.Matrix4(), pp = new THREE.Vector3(), sc = new THREE.Vector3();
     const pillars = [];
     const ground = th.water != null ? this.minY + th.water - 3 : null;
+    const P = this.P, R = this.R, T = this.T;
+    const at = (i, d, h, out) => out.set(P[i * 3] + R[i * 3] * d, P[i * 3 + 1] + R[i * 3 + 1] * d + h, P[i * 3 + 2] + R[i * 3 + 2] * d);
     for (const r of runs) {
-      const idx = r.idx;
+      const idx = r.idx, n = idx.length;
+      const kind = this.bridgeKind[idx[Math.floor(n / 2)]];
       const deck = this.ribbon(idx, [{ d: -lim - 0.6, h: 0, u: 0 }, { d: -lim - 0.6, h: -1.6, u: 0.3 }, { d: lim + 0.6, h: -1.6, u: 2.5 }, { d: lim + 0.6, h: 0, u: 2.8 }], 8);
       const dm = new THREE.Mesh(deck, concMat); dm.castShadow = true; dm.receiveShadow = true; group.add(dm);
-      const P = this.P, lim2 = (this.limit * 1.7 + 3) ** 2;
+      if (th.bridge === 'steel' || kind === 1) {
+        // lådbalk i stål under däcket
+        const gb = this.ribbon(idx, [{ d: -lim * 0.7, h: -1.6, u: 0 }, { d: -lim * 0.55, h: -3.2, u: 0.4 }, { d: lim * 0.55, h: -3.2, u: 1.6 }, { d: lim * 0.7, h: -1.6, u: 2 }], 8);
+        group.add(new THREE.Mesh(gb, steelMat));
+      }
+      const lim2 = (this.limit * 1.7 + 3) ** 2;
       const clear = (i) => { for (let j = 0; j < this.N; j += 2) { if (this.bridge[j] || P[i * 3 + 1] - P[j * 3 + 1] < 3) continue; const dx = P[j * 3] - P[i * 3], dz = P[j * 3 + 2] - P[i * 3 + 2]; if (dx * dx + dz * dz < lim2) return false; } return true; };
-      for (let k = 8; k < idx.length - 6; k += 14) if (clear(idx[k])) pillars.push(idx[k]);
-      if (th.bridge === 'arch' && idx.length > 30) {
+      if (kind === 1 && n > 40) {
+        this._suspension(group, idx, steelMat, cableMat, concMat, ground);
+        // bara pelare på tillfarterna (utanför pylonerna)
+        const p1 = Math.round(n * 0.2), p2 = Math.round(n * 0.8);
+        for (let k = 6; k < n - 4; k += 10) if ((k < p1 - 8 || k > p2 + 8) && clear(idx[k])) pillars.push(idx[k]);
+      } else {
+        const step = kind === 2 ? 9 : 14;
+        for (let k = 8; k < n - 6; k += step) if (clear(idx[k])) pillars.push(idx[k]);
+      }
+      if (th.bridge === 'arch' && n > 30) {
         // bågar med hängare på båda sidor
-        const n = idx.length; const a0 = 2, a1 = n - 3;
+        const a0 = 2, a1 = n - 3;
         for (const side of [-1, 1]) {
           const pts = [];
           for (let k = a0; k <= a1; k += 2) {
             const i = idx[k], f = (k - a0) / (a1 - a0);
             const y = Math.sin(f * Math.PI) * Math.min(22, (a1 - a0) * this.ds * 0.16);
-            pts.push(new THREE.Vector3(this.P[i * 3] + this.R[i * 3] * side * (lim + 0.9), this.P[i * 3 + 1] + y + 0.6, this.P[i * 3 + 2] + this.R[i * 3 + 2] * side * (lim + 0.9)));
+            pts.push(at(i, side * (lim + 0.9), y + 0.6, new THREE.Vector3()));
           }
           const curve = new THREE.CatmullRomCurve3(pts);
           const tg = new THREE.TubeGeometry(curve, pts.length * 2, 0.45, 8, false);
           const tm = new THREE.Mesh(tg, steelMat); tm.castShadow = true; group.add(tm);
-          // hängare
           const hg = [];
           for (let k = a0 + 4; k < a1 - 2; k += 4) {
             const i = idx[k], f = (k - a0) / (a1 - a0);
             const y = Math.sin(f * Math.PI) * Math.min(22, (a1 - a0) * this.ds * 0.16);
-            const c = new THREE.CylinderGeometry(0.06, 0.06, y, 4); c.translate(this.P[i * 3] + this.R[i * 3] * side * (lim + 0.9), this.P[i * 3 + 1] + y / 2 + 0.6, this.P[i * 3 + 2] + this.R[i * 3 + 2] * side * (lim + 0.9));
+            const c = new THREE.CylinderGeometry(0.06, 0.06, y, 4); at(i, side * (lim + 0.9), y / 2 + 0.6, pp); c.translate(pp.x, pp.y, pp.z);
             hg.push(c);
           }
           if (hg.length) { const mg = mergeGeometries(hg); hg.forEach(g => g.dispose()); group.add(new THREE.Mesh(mg, steelMat)); }
@@ -586,17 +724,77 @@ export class Track {
     if (pillars.length) {
       const im = new THREE.InstancedMesh(pillarGeo, concMat, pillars.length);
       pillars.forEach((i, n) => {
-        const y = this.P[i * 3 + 1] - 1.5;
+        const y = P[i * 3 + 1] - 1.5;
         const bottom = ground != null ? ground : y - 40;
-        pp.set(this.P[i * 3], y, this.P[i * 3 + 2]);
-        basis.makeBasis(new THREE.Vector3(this.R[i * 3], 0, this.R[i * 3 + 2]).normalize(), UP, new THREE.Vector3(this.T[i * 3], 0, this.T[i * 3 + 2]).normalize());
+        pp.set(P[i * 3], y, P[i * 3 + 2]);
+        basis.makeBasis(new THREE.Vector3(R[i * 3], 0, R[i * 3 + 2]).normalize(), UP, new THREE.Vector3(T[i * 3], 0, T[i * 3 + 2]).normalize());
         q.setFromRotationMatrix(basis);
-        sc.set(this.limit * 1.2, Math.max(2, y - bottom), 2.4);
+        sc.set(this.limit * (this.bridgeKind[i] === 2 ? 0.9 : 1.2), Math.max(2, y - bottom), this.bridgeKind[i] === 2 ? 1.6 : 2.4);
         m4.compose(pp, q, sc); im.setMatrixAt(n, m4);
       });
       im.castShadow = true; im.receiveShadow = true; im.computeBoundingSphere();
       group.add(im); this._disp.push(im);
     }
+  }
+
+  /** Hängbro: två pyloner, bärkablar (kedjelinjer) och hängare. Tydligt landmärke. */
+  _suspension(group, idx, steelMat, cableMat, concMat, ground) {
+    const n = idx.length, lim = this.limit, P = this.P, R = this.R, Nm = this.Nm, T = this.T;
+    const p1 = Math.round(n * 0.2), p2 = Math.round(n * 0.8);
+    const deckY = (k) => P[idx[k] * 3 + 1];
+    const topH = 46, sag = 4.5, D = lim + 1.8;
+    const tops = [deckY(p1) + topH, deckY(p2) + topH];
+    // kabelhöjd (världs-y) vid band-index k
+    const cableY = (k) => {
+      if (k <= p1) { const f = k / p1; return deckY(0) + 1.5 + (tops[0] - deckY(0) - 1.5) * Math.pow(f, 1.5); }
+      if (k >= p2) { const f = (n - 1 - k) / (n - 1 - p2); return deckY(n - 1) + 1.5 + (tops[1] - deckY(n - 1) - 1.5) * Math.pow(f, 1.5); }
+      const f = (k - p1) / (p2 - p1), base = tops[0] + (tops[1] - tops[0]) * f, low = (deckY(Math.round((p1 + p2) / 2)) + sag);
+      const dip = 4 * f * (1 - f);
+      return base + (low - (tops[0] + tops[1]) / 2) * dip;
+    };
+    const v = new THREE.Vector3();
+    const geos = [], cgeos = [];
+    for (const side of [-1, 1]) {
+      const pts = [];
+      for (let k = 0; k < n; k += 2) { const i = idx[k]; pts.push(new THREE.Vector3(P[i * 3] + R[i * 3] * side * D, cableY(k), P[i * 3 + 2] + R[i * 3 + 2] * side * D)); }
+      const i = idx[n - 1]; pts.push(new THREE.Vector3(P[i * 3] + R[i * 3] * side * D, cableY(n - 1), P[i * 3 + 2] + R[i * 3 + 2] * side * D));
+      cgeos.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 3, 0.42, 6, false));
+      for (let k = 3; k < n - 3; k += 3) {
+        if (Math.abs(k - p1) < 2 || Math.abs(k - p2) < 2) continue;
+        const ii = idx[k], y0 = P[ii * 3 + 1] + 0.2, y1 = cableY(k);
+        if (y1 - y0 < 1.2) continue;
+        const c = new THREE.CylinderGeometry(0.07, 0.07, y1 - y0, 4);
+        c.translate(P[ii * 3] + R[ii * 3] * side * D, (y0 + y1) / 2, P[ii * 3 + 2] + R[ii * 3 + 2] * side * D);
+        cgeos.push(c);
+      }
+    }
+    // pyloner: två ben per pylon, tvärbalkar, fundament ner till vattnet
+    const bottom = ground != null ? ground : this.minY - 30;
+    for (const [pk, top] of [[p1, tops[0]], [p2, tops[1]]]) {
+      const i = idx[pk];
+      const yaw = Math.atan2(T[i * 3], T[i * 3 + 2]);
+      for (const side of [-1, 1]) {
+        const x = P[i * 3] + R[i * 3] * side * D, z = P[i * 3 + 2] + R[i * 3 + 2] * side * D;
+        const h = top + 2 - bottom;
+        const g = new THREE.BoxGeometry(2.6, h, 3.4); g.translate(0, h / 2, 0); g.rotateY(yaw); g.translate(x, bottom, z);
+        geos.push(g);
+      }
+      for (const yy of [top - 1, top - 16, P[i * 3 + 1] - 4.5]) {
+        const g = new THREE.BoxGeometry(2 * D + 2.6, 2.4, 2.6); g.rotateY(yaw); g.translate(P[i * 3], yy, P[i * 3 + 2]);
+        geos.push(g);
+      }
+      const f = new THREE.BoxGeometry(2 * D + 10, 6, 12); f.rotateY(yaw); f.translate(P[i * 3], bottom + 3, P[i * 3 + 2]);
+      const fm = new THREE.Mesh(f, concMat); fm.receiveShadow = true; group.add(fm); this._disp.push(f);
+      // varningsljus på toppen
+      const lm = this._beaconMat || (this._beaconMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff3020).multiplyScalar(3) }));
+      this._disp.push(lm);
+      for (const side of [-1, 1]) { const b = new THREE.Mesh(this._beaconGeo || (this._beaconGeo = new THREE.SphereGeometry(0.5, 8, 6)), lm); b.position.set(P[i * 3] + R[i * 3] * side * D, top + 2.6, P[i * 3 + 2] + R[i * 3 + 2] * side * D); group.add(b); }
+      this._disp.push(this._beaconGeo);
+    }
+    const pyl = mergeGeometries(geos.map(g => g.toNonIndexed())); geos.forEach(g => g.dispose());
+    const pm = new THREE.Mesh(pyl, steelMat); pm.castShadow = true; pm.receiveShadow = true; group.add(pm);
+    const cab = mergeGeometries(cgeos.map(g => { const ng = g.index ? g.toNonIndexed() : g; ng.deleteAttribute('uv'); return ng; })); cgeos.forEach(g => g.dispose());
+    const cm = new THREE.Mesh(cab, cableMat); cm.castShadow = true; group.add(cm);
   }
 
   _buildGantry(group, mat) {
@@ -650,7 +848,7 @@ export class Track {
       list.push({ i, side, right: k < 0 });
     }
     if (!list.length) return;
-    const texMat = mat(new THREE.MeshStandardMaterial({ map: TX.chevronTex(), roughness: 0.6, emissive: 0xffffff, emissiveMap: TX.chevronTex(), emissiveIntensity: this.theme.night ? 0.6 : 0.05 }));
+    const texMat = mat(new THREE.MeshStandardMaterial({ map: TX.chevronTex(), roughness: 0.6, emissive: 0xffffff, emissiveMap: TX.chevronTex(), emissiveIntensity: this.theme.night ? (this.theme.edgeGlow ? 1.4 : 0.6) : 0.05 }));
     for (const dir of [true, false]) {
       const items = list.filter(c => c.right === dir);
       if (!items.length) continue;
@@ -662,7 +860,7 @@ export class Track {
       const im = new THREE.InstancedMesh(merged, [texMat, this._postMat || (this._postMat = mat(new THREE.MeshStandardMaterial({ color: 0x555a60 })))], items.length);
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), basis = new THREE.Matrix4(), pp = new THREE.Vector3();
       items.forEach((c, n) => {
-        const i = c.i, d = c.side * (this.limit + (this.theme.barrier === 'snow' ? 4.2 : 1.6));
+        const i = c.i, d = c.side * (this.limit + (this.theme.barrier === 'snow' ? 4.2 : this.theme.barrier === 'bank' ? 2.6 : 1.6));
         pp.set(this.P[i * 3] + this.R[i * 3] * d, this.P[i * 3 + 1] + this.R[i * 3 + 1] * d, this.P[i * 3 + 2] + this.R[i * 3 + 2] * d);
         // vänd mot inkommande förare
         const tx = -this.T[i * 3], tz = -this.T[i * 3 + 2];

@@ -5,8 +5,9 @@
 import * as THREE from 'three';
 import { createNet, createLobby, V } from '../../engine/net.js';
 import { CARS, COLORS, TRACKS, AI_DRIVERS, DIFFICULTY, trackName } from './data.js';
+import { FINISHES, RIMS, SPOILERS, KITS, DECALS, TINTS } from './carmodel.js';
 
-export const NET_VERSION = '1';
+export const NET_VERSION = '2';
 const CAR_IDS = CARS.map(c => c.id);
 const TRACK_IDS = TRACKS.map(t => t.id);
 const isKey = V.str(48, /^[A-Za-z0-9_-]+$/);
@@ -15,9 +16,21 @@ const isKey = V.str(48, /^[A-Za-z0-9_-]+$/);
 export const CS_N = 18;
 const CS = V.nums(CS_N, -1e6, 1e6);
 
-export const META = V.obj({ car: V.oneOf(CAR_IDS), col: V.int(0, COLORS.length - 1) });
+const ids = (a) => a.map(x => x.id);
+/** Utseende i nätverket (kompakt): färg, lackyta, fälg, spoiler, kit, dekal, dekalfärg, nummer, neon, ruta. */
+export const LOOKV = V.obj({ c: V.int(0, 0xffffff), f: V.oneOf(ids(FINISHES)), r: V.oneOf(ids(RIMS)), s: V.oneOf(['default'].concat(ids(SPOILERS))), k: V.oneOf(ids(KITS)),
+  d: V.oneOf(ids(DECALS)), dc: V.int(0, 0xffffff), n: V.int(0, 99), ne: V.opt(V.int(0, 0xffffff)), t: V.oneOf(ids(TINTS)), p: V.opt(V.str(8, /^[A-ZÅÄÖ0-9 ]*$/)) });
+export function packLook(lk) {
+  return { c: lk.color | 0, f: lk.finish || 'gloss', r: lk.rims || 'std', s: lk.spoiler || 'default', k: lk.kit || 'none', d: lk.decal || 'none', dc: (lk.decalColor ?? 0xffffff) | 0, n: lk.number | 0, ne: lk.neon == null ? null : lk.neon | 0, t: lk.tint || 'clear', p: (lk.plate || '').slice(0, 8) };
+}
+export function lookFromNet(g) {
+  const l = g.lk;
+  if (!l) return { color: g.col };
+  return { color: l.c, finish: l.f, rims: l.r, spoiler: l.s, kit: l.k, decal: l.d, decalColor: l.dc, number: l.n, neon: l.ne == null ? null : l.ne, tint: l.t, plate: l.p || undefined };
+}
+export const META = V.obj({ car: V.oneOf(CAR_IDS), col: V.int(0, 0xffffff), lk: V.opt(LOOKV) });
 export const ROOM = V.obj({ track: V.oneOf(TRACK_IDS), laps: V.int(1, 5), fill: V.oneOf([0, 4, 6, 8]), diff: V.oneOf(Object.keys(DIFFICULTY)) });
-const GRID = V.arr(V.obj({ id: isKey, n: V.str(40), car: V.oneOf(CAR_IDS), col: V.int(0, COLORS.length - 1), sk: V.opt(V.num(0.5, 1.2)), ag: V.opt(V.num(0, 1.5)) }), 8, 1);
+const GRID = V.arr(V.obj({ id: isKey, n: V.str(40), car: V.oneOf(CAR_IDS), col: V.int(0, 0xffffff), lk: V.opt(LOOKV), sk: V.opt(V.num(0.5, 1.2)), ag: V.opt(V.num(0, 1.5)) }), 8, 1);
 export const START = V.obj({ track: V.oneOf(TRACK_IDS), laps: V.int(1, 5), diff: V.oneOf(Object.keys(DIFFICULTY)), seed: V.int(0, 2 ** 31), grid: GRID });
 
 export function makeNet() {
@@ -111,27 +124,24 @@ export function makeLobby(net, h) {
     onBack: h.onBack,
     onStart: h.onStartPressed,
     autoStart: { fullMs: 4000, readyMs: 4000, fillMs: 25000 },
-    dotColor: p => p.meta ? h.css(COLORS[p.meta.col].hex) : '#888',
+    dotColor: p => p.meta ? h.css(p.meta.col) : '#888',
     playerExtra: p => p.meta ? (CARS.find(c => c.id === p.meta.car) || {}).name || '' : '',
     renderMine(el) {
       const s = h.save;
-      const mine = () => net.me.meta || { car: s.car, col: s.color };
+      const meta = (id) => { const lk = h.lookOf(id); return { car: id, col: lk.color | 0, lk: packLook(lk) }; };
       const draw = () => {
-        const m = mine();
-        el.innerHTML = `<div class="nl-h">Din bil</div>
-          <div class="fj-seg" data-k="car">${CARS.map(c => `<button data-v="${c.id}" class="${m.car === c.id ? 'on' : ''}" ${h.carUnlocked(c) ? '' : 'disabled title="Låst"'}>${h.carUnlocked(c) ? '' : '🔒 '}${c.name}</button>`).join('')}</div>
-          <div class="fj-swatches" data-k="col">${COLORS.map((c, k) => `<button class="${m.col === k ? 'on' : ''}" data-v="${k}" title="${c.name}" aria-label="${c.name}" style="background:${h.css(c.hex)}"></button>`).join('')}</div>`;
+        const m = net.me.meta || meta(s.car);
+        el.innerHTML = `<div class="nl-h">Din bil (med ditt utseende från Garaget)</div>
+          <div class="fj-seg" data-k="car">${s.owned.map(id => { const c = CARS.find(x => x.id === id); return `<button data-v="${id}" class="${m.car === id ? 'on' : ''}">${c.name}</button>`; }).join('')}</div>
+          <p class="nl-note">Lika villkor: prestandadelar är avstängda online – alla kör med standardbilar. Utseendet syns för de andra.</p>`;
       };
       el.onclick = e => {
         const b = e.target.closest('button[data-v]'); if (!b || b.disabled) return;
-        const k = b.parentNode.dataset.k, m = Object.assign({}, mine());
-        if (k === 'car') m.car = b.dataset.v; else m.col = +b.dataset.v;
-        s.car = m.car; s.color = m.col; h.persist();
-        net.setMeta(m); draw();
+        s.car = b.dataset.v; h.persist(); h.onCar && h.onCar(s.car);
+        net.setMeta(meta(s.car)); draw();
       };
-      const m0 = mine();
-      if (!h.carUnlocked(CARS.find(c => c.id === m0.car) || CARS[0])) m0.car = 'viggen';
-      net.setMeta(m0);
+      if (!s.owned.includes(s.car)) s.car = 'viggen';
+      net.setMeta(meta(s.car));
       draw();
     },
     renderSettings(el, { isHost, state, set }) {
@@ -163,13 +173,13 @@ export function buildStart(net) {
   const humans = net.players.filter(p => p.connected).slice(0, 8);
   const seed = (Math.random() * 2 ** 31) | 0;
   // människor i slumpad ordning längst bak, datorförare framför
-  const hs = humans.map(p => ({ id: p.id, n: p.name, car: p.meta ? p.meta.car : 'viggen', col: p.meta ? p.meta.col : 0 })).sort(() => Math.random() - 0.5);
+  const hs = humans.map(p => { const o = { id: p.id, n: p.name, car: p.meta ? p.meta.car : 'viggen', col: p.meta ? p.meta.col : 0xb0281f }; if (p.meta && p.meta.lk) o.lk = p.meta.lk; return o; }).sort(() => Math.random() - 0.5);
   const nAi = Math.max(0, Math.min(8 - hs.length, st.fill - hs.length));
   const used = new Set(hs.map(x => x.col));
   const pool = AI_DRIVERS.slice().sort(() => Math.random() - 0.5).slice(0, nAi);
-  const aiCars = ['viggen', 'algen', 'lodjuret', 'blixten'];
+  const aiCars = ['viggen', 'algen', 'pixel', 'lodjuret', 'spark', 'vega', 'fjallbjorn'];
   const ais = pool.map((d, k) => {
-    let col = 0; for (let n = 0; n < 40; n++) { col = (Math.random() * COLORS.length) | 0; if (!used.has(col)) break; }
+    let col = 0; for (let n = 0; n < 40; n++) { col = COLORS[(Math.random() * COLORS.length) | 0].hex; if (!used.has(col)) break; }
     used.add(col);
     return { id: 'ai' + k, n: d.name, car: aiCars[(Math.random() * aiCars.length) | 0], col, sk: d.skill, ag: d.aggr };
   });

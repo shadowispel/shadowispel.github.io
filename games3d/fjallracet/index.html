@@ -29,13 +29,20 @@
     <a class="g3-back" href="../../index.html">← Spelhallen</a>
     <div class="g3-panel fj-side">
       <h1 class="g3-title">Fjällracet</h1>
-      <p class="g3-sub">Arkadracing genom Sverige – från midsommarskog till norrskensis. Drifta, ladda nitro och kör om allt som rör sig.</p>
+      <p class="g3-sub">Arkadracing genom Sverige – 16 banor från Höga kusten till Neostad, 22 bilar, karriär, lådor och delar. Drifta, ladda nitro och kör om allt som rör sig.</p>
+      <div class="fj-wallet" id="mWallet"></div>
       <div class="g3-btns">
-        <button class="btn primary" id="mCup"><span class="ic" aria-hidden="true">🏆</span>Mästerskap</button>
-        <button class="btn" id="mQuick"><span class="ic" aria-hidden="true">🏁</span>Snabblopp</button>
-        <button class="btn" id="mOnline"><span class="ic" aria-hidden="true">🌐</span>Online</button>
-        <button class="btn" id="mTime"><span class="ic" aria-hidden="true">⏱️</span>Tidskörning</button>
-        <button class="btn" id="mFree"><span class="ic" aria-hidden="true">🚗</span>Fri körning</button>
+        <button class="btn primary" id="mPlay"><span class="ic" aria-hidden="true">🏆</span>Karriär</button>
+        <div class="fj-menugrid">
+          <button class="btn" id="mCareer"><span class="ic" aria-hidden="true">🗺️</span>Karriärkarta</button>
+          <button class="btn" id="mQuick"><span class="ic" aria-hidden="true">🏁</span>Snabblopp</button>
+          <button class="btn" id="mGarage"><span class="ic" aria-hidden="true">🔧</span>Garage</button>
+          <button class="btn" id="mDealer"><span class="ic" aria-hidden="true">🚘</span>Bilhandel</button>
+          <button class="btn" id="mCrates"><span class="ic" aria-hidden="true">🎁</span>Lådor</button>
+          <button class="btn" id="mOnline"><span class="ic" aria-hidden="true">🌐</span>Online</button>
+          <button class="btn" id="mTime"><span class="ic" aria-hidden="true">⏱️</span>Tidskörning</button>
+          <button class="btn" id="mFree"><span class="ic" aria-hidden="true">🚗</span>Fri körning</button>
+        </div>
         <div class="g3-row">
           <button class="btn small" id="mSettings"><span class="ic" aria-hidden="true">⚙️</span>Inställningar</button>
           <button class="btn small" id="mHelp"><span class="ic" aria-hidden="true">❓</span>Hur man spelar</button>
@@ -57,6 +64,56 @@
       </div>
     </div>
     <div class="fj-carinfo" id="carInfo"></div>
+  </div>
+
+  <!-- Karriär -->
+  <div class="g3-screen hidden fj-menu" id="career">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2">🏆 Karriär</h2>
+      <div id="careerBody"></div>
+      <div class="fj-sec" id="careerCars"></div>
+      <div class="g3-row fj-setupbtns">
+        <button class="btn" data-back id="careerBack">← Tillbaka</button>
+        <button class="btn primary" id="careerGo">Starta</button>
+      </div>
+    </div>
+    <div class="fj-carinfo" id="careerInfo"></div>
+  </div>
+
+  <!-- Garage -->
+  <div class="g3-screen hidden fj-menu" id="garage">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2">🔧 Garage</h2>
+      <div id="garageBody"></div>
+      <div class="g3-row fj-setupbtns">
+        <button class="btn primary" data-back id="garageBack">Klar</button>
+      </div>
+    </div>
+    <div class="fj-carinfo" id="garageInfo"></div>
+  </div>
+
+  <!-- Bilhandel -->
+  <div class="g3-screen hidden fj-menu" id="dealer">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2">🚘 Bilhandel</h2>
+      <div id="dealerBody"></div>
+      <div class="g3-row fj-setupbtns">
+        <button class="btn" data-back id="dealerBack">← Tillbaka</button>
+        <button class="btn primary" id="dealerBuy">Köp</button>
+      </div>
+    </div>
+    <div class="fj-carinfo" id="dealerInfo"></div>
+  </div>
+
+  <!-- Lådor -->
+  <div class="g3-screen hidden fj-menu" id="crates">
+    <div class="g3-panel fj-side wide-side">
+      <h2 class="g3-h2">🎁 Lådor</h2>
+      <div id="cratesBody"></div>
+      <div class="g3-row fj-setupbtns">
+        <button class="btn primary" data-back id="cratesBack">Klar</button>
+      </div>
+    </div>
   </div>
 
   <!-- Online-lobby (byggs av engine/net.js) -->
@@ -113,7 +170,11 @@
         <li>Brytpunkten: bromsa <i>före</i> kurvan, gasa ut ur den. Pilskyltarna varnar för skarpa kurvor.</li>
         <li><b>Perfekt start:</b> tryck gas precis innan KÖR! – för tidigt ger ingen extra skjuts.</li>
         <li>Kör du fel håll eller åker av banan återställs bilen automatiskt.</li>
-        <li>Varje bil har egna egenskaper. Lodjuret greppar bäst på is och snö, Älgen tål knuffar, Vråken driftar villigast.</li>
+        <li><b>Karriär:</b> fem kapitel med lopp, cuper, eliminering (sist ut efter varje varv), driftmästerskap, tidsjakt, rallysträckor, klasslopp och dueller – vinn duellen så blir motståndarens bil din! Stjärnor (★) låser upp nya kapitel och banor. Tre nya dagliga utmaningar varje dag.</li>
+        <li><b>Lådor och delar:</b> lådor vinns i karriären och ligger gömda på banorna i Fri körning (kör in i dem). De innehåller kronor och delar i fem sällsyntheter: <span style="color:#b9c2cf">Vanlig</span>, <span style="color:#4ade80">Ovanlig</span>, <span style="color:#39a0ff">Sällsynt</span>, <span style="color:#b56cff">Episk</span>, <span style="color:#ffb52e">Legendarisk</span>. Dubbletter blir kronor.</li>
+        <li><b>Garage:</b> montera motor, turbo, växellåda, däck, fjädring, bromsar, nitro och viktminskning – staplarna visar före/efter. Välj däck efter underlaget: asfalt, grus eller vinterdäck för snö och is. Ändra lack, fälgar, spoiler, bodykit, dekaler, startnummer, neon och rutfärg. Dra i bilden för att vrida bilen.</li>
+        <li><b>Bilhandeln:</b> köp nya bilar för kronor. 22 bilar i åtta klasser – kompakt, sport, muskel, rally, klassiker, terräng, el och super. Prestandaindex (D–S) visar hur snabb bilen är.</li>
+        <li><b>Online:</b> andra ser din bil med ditt utseende. Prestandadelar är avstängda online (lika villkor).</li>
         <li><b>Poäng</b> per lopp: placering + tidsbonus + driftpoäng, gånger svårighetsgrad. Mästerskapen ger mest.</li>
       </ul>
       <button class="btn primary" data-back id="helpBack">Tillbaka</button>

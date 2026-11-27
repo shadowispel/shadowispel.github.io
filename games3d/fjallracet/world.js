@@ -7,10 +7,13 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import { makeRng } from '../../engine/kit.js';
 import * as TX from './textures.js';
+import { colorize, merge, treeSpruce, treeBirch, treePine, rockGeo, cottageGeo, turbineTower, turbineRotor, spectatorBody, spectatorHead } from './props.js';
+import { buildThemeScenery, buildLampPosts } from './scenery.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const smooth01 = (x) => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };
 const UP = new THREE.Vector3(0, 1, 0);
+const _tc = new THREE.Color();
 
 /* ------------------------------------------------------------------ Himmel */
 function makeSky(th) {
@@ -22,13 +25,15 @@ function makeSky(th) {
     uniforms: {
       top: { value: new THREE.Color(s.top) }, horizon: { value: new THREE.Color(s.horizon) }, bottom: { value: new THREE.Color(s.bottom) },
       sunColor: { value: new THREE.Color(s.sun) }, sunDir: { value: sunDir }, sunSize: { value: s.sunSize },
-      stars: { value: s.stars || 0 }, aurora: { value: s.aurora || 0 }, moon: { value: s.moon ? 1 : 0 }, time: { value: 0 }
+      stars: { value: s.stars || 0 }, aurora: { value: s.aurora || 0 }, moon: { value: s.moon ? 1 : 0 }, clouds: { value: s.clouds || 0 }, time: { value: 0 }
     },
     vertexShader: `varying vec3 vDir; void main(){ vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; gl_Position.z = p.w * 0.99995; }`,
     fragmentShader: `
-      uniform vec3 top, horizon, bottom, sunColor, sunDir; uniform float sunSize, stars, aurora, moon, time;
+      uniform vec3 top, horizon, bottom, sunColor, sunDir; uniform float sunSize, stars, aurora, moon, clouds, time;
       varying vec3 vDir;
       float hash(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+      float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
       void main(){
         vec3 d = normalize(vDir); float y = d.y;
         vec3 col = y > 0.0 ? mix(horizon, top, pow(smoothstep(0.0, 0.65, y), 0.75)) : mix(horizon, bottom, smoothstep(0.0, -0.2, y));
@@ -57,6 +62,12 @@ function makeSky(th) {
           vec3 ac = mix(vec3(0.15, 1.0, 0.55), vec3(0.65, 0.25, 1.0), smoothstep(0.25, 0.65, y));
           col += ac * band * rays * hf * aurora * 0.75;
         }
+        if (clouds > 0.0 && y > 0.0) {
+          vec2 q = d.xz / (y + 0.12) * 1.4 + vec2(time * 0.012, time * 0.004);
+          float n = vn(q) * 0.55 + vn(q * 2.3 + 7.0) * 0.3 + vn(q * 5.1 + 3.0) * 0.15;
+          float c = smoothstep(0.5, 0.78, n) * smoothstep(0.02, 0.2, y);
+          col = mix(col, mix(vec3(0.86, 0.9, 0.96), vec3(1.0), smoothstep(0.6, 0.9, n)), c * clouds * 0.85);
+        }
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -65,85 +76,6 @@ function makeSky(th) {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), mat);
   mesh.frustumCulled = false; mesh.renderOrder = -10;
   return { mesh, mat, sunDir };
-}
-
-/* ------------------------------------------------------------------ Geometri-hjälp */
-function colorize(geo, color) {
-  const c = new THREE.Color(color); const n = geo.attributes.position.count;
-  const arr = new Float32Array(n * 3); for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
-  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-  return geo;
-}
-function snowTop(geo, base, snow, thresh = 0.55) {
-  geo.computeVertexNormals();
-  const n = geo.attributes.normal, cnt = n.count; const arr = new Float32Array(cnt * 3);
-  const a = new THREE.Color(base), b = new THREE.Color(snow), c = new THREE.Color();
-  for (let i = 0; i < cnt; i++) { c.copy(a).lerp(b, smooth01((n.getY(i) - thresh) / 0.25)); arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
-  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-  return geo;
-}
-function merge(list) { const g = mergeGeometries(list.map(x => x.index ? x.toNonIndexed() : x)); list.forEach(x => x.dispose()); g.computeVertexNormals(); return g; }
-
-function treeSpruce(snow) {
-  const parts = [colorize(new THREE.CylinderGeometry(0.18, 0.28, 2.2, 6).translate(0, 1.1, 0), 0x4a3426)];
-  const layers = 4;
-  for (let k = 0; k < layers; k++) {
-    const r = 2.2 - k * 0.45, h = 3.0 - k * 0.35, y = 1.6 + k * 1.7;
-    const c = new THREE.ConeGeometry(r, h, 7).translate(0, y + h / 2, 0);
-    if (snow) snowTop(c, 0x1f4a2a, 0xf2f6fa, 0.62); else colorize(c, k % 2 ? 0x24502c : 0x1e4626);
-    parts.push(c);
-  }
-  return merge(parts);
-}
-function treeBirch() {
-  const parts = [colorize(new THREE.CylinderGeometry(0.13, 0.2, 5.5, 6).translate(0, 2.75, 0), 0xe8e4dc)];
-  // mörka fläckar på stammen (små lådor)
-  for (let k = 0; k < 4; k++) parts.push(colorize(new THREE.BoxGeometry(0.3, 0.12, 0.3).translate(0, 1 + k * 1.1, 0), 0x2a2a2a));
-  const crowns = [[0, 6.0, 0, 1.9], [0.8, 5.2, 0.3, 1.3], [-0.7, 5.5, -0.4, 1.4], [0.1, 7.1, -0.2, 1.3]];
-  crowns.forEach(([x, y, z, r], k) => parts.push(colorize(new THREE.IcosahedronGeometry(r, 0).translate(x, y, z), k % 2 ? 0x7aa840 : 0x6a9a36)));
-  return merge(parts);
-}
-function treePine(dry) {
-  const parts = [colorize(new THREE.CylinderGeometry(0.16, 0.26, 6, 6).translate(0, 3, 0), 0x8a5a3a)];
-  const col = dry ? 0x5a6a30 : 0x2f5a2e;
-  parts.push(colorize(new THREE.IcosahedronGeometry(1.8, 0).scale(1.3, 0.6, 1.3).translate(0, 6.4, 0), col));
-  parts.push(colorize(new THREE.IcosahedronGeometry(1.3, 0).scale(1.3, 0.6, 1.3).translate(0.9, 5.6, 0.4), col));
-  return merge(parts);
-}
-function rockGeo() {
-  const g = new THREE.IcosahedronGeometry(1, 1);
-  const p = g.attributes.position; const rng = makeRng(5);
-  for (let i = 0; i < p.count; i++) { const f = 0.75 + rng() * 0.5; p.setXYZ(i, p.getX(i) * f, p.getY(i) * f * 0.7, p.getZ(i) * f); }
-  g.computeVertexNormals();
-  return colorize(g.index ? g.toNonIndexed() : g, 0xffffff);
-}
-function cottageGeo(wall = 0xa0281e) {
-  const parts = [];
-  parts.push(colorize(new THREE.BoxGeometry(7, 3.4, 5).translate(0, 1.7, 0), wall));
-  const roof = new THREE.CylinderGeometry(0.01, 4.3, 2.6, 4, 1); roof.rotateY(Math.PI / 4); roof.scale(1.3, 1, 0.95); roof.translate(0, 4.7, 0);
-  parts.push(colorize(roof, 0x2f2f33));
-  for (const x of [-3.52, 3.52]) parts.push(colorize(new THREE.BoxGeometry(0.12, 3.4, 5.1).translate(x, 1.7, 0), 0xf2f2ee));
-  for (const x of [-1.8, 1.8]) parts.push(colorize(new THREE.BoxGeometry(1.1, 1.1, 0.1).translate(x, 2.0, 2.52), 0xf2f2ee), colorize(new THREE.BoxGeometry(0.9, 0.9, 0.12).translate(x, 2.0, 2.53), 0x2a3440));
-  parts.push(colorize(new THREE.BoxGeometry(1.0, 2.0, 0.1).translate(0, 1.0, 2.52), 0xf2f2ee));
-  parts.push(colorize(new THREE.BoxGeometry(0.6, 1.4, 0.6).translate(1.8, 5.4, 0), 0x8a3a2a));
-  return merge(parts);
-}
-function turbineTower() {
-  return merge([colorize(new THREE.CylinderGeometry(0.9, 1.8, 60, 10).translate(0, 30, 0), 0xeef0f2), colorize(new THREE.BoxGeometry(2.4, 2.4, 6).translate(0, 61, 0.8), 0xe6e8ea)]);
-}
-function turbineRotor() {
-  const parts = [colorize(new THREE.SphereGeometry(1.2, 10, 8).scale(1, 1, 1.6), 0xe8eaec)];
-  for (let k = 0; k < 3; k++) {
-    const b = new THREE.BoxGeometry(1.6, 26, 0.4); b.translate(0, 14, 0); b.rotateZ(k * Math.PI * 2 / 3);
-    parts.push(colorize(b, 0xf2f3f5));
-  }
-  return merge(parts);
-}
-function spectatorBody() {
-  return merge([colorize(new THREE.CylinderGeometry(0.26, 0.22, 1.1, 6).translate(0, 0.95, 0), 0xffffff), colorize(new THREE.BoxGeometry(0.42, 0.5, 0.25).translate(0, 0.25, 0), 0x2a2d3a)]);
-}
-function spectatorHead() {
-  return colorize(new THREE.SphereGeometry(0.17, 7, 5).translate(0, 1.68, 0), 0xe8b896);
 }
 
 /** Åskådarmaterial som hoppar i vertexshadern (gemensam tid/uppspelthet). */
@@ -161,7 +93,7 @@ function cheerMaterial(base, uniforms) {
 }
 
 /* ------------------------------------------------------------------ Instanser i chunkar */
-class Chunked {
+export class Chunked {
   constructor(geo, mat, chunk = 220, opts = {}) { this.geo = geo; this.mat = mat; this.chunk = chunk; this.map = new Map(); this.opts = opts; }
   add(m4, color) {
     const e = m4.elements; const key = Math.floor(e[12] / this.chunk) + ',' + Math.floor(e[14] / this.chunk);
@@ -227,8 +159,8 @@ export class World {
     const envScene = new THREE.Scene();
     const skyCopy = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), sky.mat);
     envScene.add(skyCopy);
-    if (th.night && th.road === 'wet') {
-      const cols = [0xff3aa0, 0x34d4ff, 0xffc040, 0x9a5bff, 0xff6a30];
+    if (th.night && (th.lamps || th.edgeGlow)) {
+      const cols = th.edgeGlow ? [0xff3aa0, 0x34d4ff, 0x40ffd0, 0x9a5bff, 0x34d4ff] : [0xffc070, 0xffe0a0, 0xff9a50, 0xfff0c0, 0x8ab0ff];
       for (let k = 0; k < 26; k++) {
         const m = new THREE.Mesh(new THREE.BoxGeometry(6 + this.rng() * 10, 2 + this.rng() * 4, 1), new THREE.MeshBasicMaterial({ color: new THREE.Color(cols[k % cols.length]).multiplyScalar(1.3) }));
         const a = this.rng() * Math.PI * 2; m.position.set(Math.cos(a) * 60, 2 + this.rng() * 25, Math.sin(a) * 60); m.lookAt(0, m.position.y, 0);
@@ -241,6 +173,17 @@ export class World {
     scene.environmentIntensity = th.night ? 0.45 : 0.55;
     envScene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material !== sky.mat) o.material.dispose(); });
     pm.dispose();
+    // några riktiga punktljus som följer med till gatlamporna närmast bilen (lyser upp bilar och räcken)
+    this.lampLights = [];
+    const lay = this.track.lampLayout();
+    if (lay && th.pointLights) {
+      const lc = th.lamps.color;
+      for (let k = 0; k < th.pointLights; k++) {
+        const l = new THREE.PointLight(new THREE.Color(lc[0], lc[1], lc[2]), 0, 34, 1.6);
+        l.castShadow = false; this.group.add(l); this.lampLights.push(l);
+      }
+      this._lf = this.track.constructor.makeFrame(); this._lf.i = -1; this._lv = new THREE.Vector3();
+    }
   }
 
   /* ---------- terräng ---------- */
@@ -290,6 +233,7 @@ export class World {
     const oL = sm(openL), oR = sm(openR);
     const bridgeS = sm(Float32Array.from(tr.bridge));
 
+    this._prepNatural();
     const heights = new Float32Array(cnt);
     const dist = new Float32Array(cnt);
     const lim = tr.limit;
@@ -299,7 +243,7 @@ export class World {
     for (let c = 0; c < cnt; c++) {
       const x = vx(c), z = vz(c);
       let i = nearest[c];
-      if (i < 0) { heights[c] = nat(x, z, tr.minY, 999, 0); dist[c] = 999; continue; }
+      if (i < 0) { heights[c] = nat(x, z, tr.minY, 999, 0, 0); dist[c] = 999; continue; }
       // förfina: exakt projektion på närmaste segment (±5 sampel)
       let bj = i, bt = 0, bd2 = Infinity;
       for (let k = -5; k <= 5; k++) {
@@ -321,7 +265,7 @@ export class World {
       const roadY = cyp + R[i * 3 + 1] * clamp(l, -lim, lim);
       const side = l < 0 ? -1 : 1;
       const open = side < 0 ? oL[i] : oR[i];
-      let natural = nat(x, z, P[i * 3 + 1], dd, open);
+      let natural = nat(x, z, P[i * 3 + 1], dd, open, bridgeS[i]);
       // stup vid öppna kanter
       if (open > 0.01) {
         const drop = this.waterY != null ? Math.min(this.waterY - 5, roadY - 6) : roadY - 34;
@@ -329,7 +273,7 @@ export class World {
         natural = natural * (1 - open) + (drop + (natural - P[i * 3 + 1]) * 0.15) * open;
         natural = roadY - 0.35 + (natural - roadY + 0.35) * w2;
       }
-      const blendW = th.road === 'wet' ? 8 : th.road === 'ice' ? 12 : 30;
+      const blendW = { wet: 8, neo: 8, ice: 12, airfield: 10 }[th.road] || (th.flatBlend || 30);
       let w = smooth01((dd - (lim + flatX)) / blendW);
       if (open > 0.01) w = Math.max(w, smooth01((dd - lim - 3) / 4) * open);
       let h = (roadY - 0.35) * (1 - w) + natural * w;
@@ -369,8 +313,9 @@ export class World {
     // uv för detaljtextur
     const uv = geo.attributes.uv;
     for (let k = 0; k < uv.count; k++) uv.setXY(k, pos.getX(k) / 14, pos.getZ(k) / 14);
-    const detail = TX.groundTex(th.road === 'ice' || th.shoulder === 'snow' ? 'detail' : 'detail');
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, roughness: th.road === 'ice' ? 0.45 : 0.96, metalness: 0 });
+    const detail = TX.groundTex('detail');
+    const wetGround = th.weather === 'rain';
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, map: detail, roughness: th.road === 'ice' ? 0.45 : wetGround ? 0.6 : 0.96, metalness: wetGround ? 0.1 : 0 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true; mesh.name = 'terrain';
     this.group.add(mesh);
@@ -378,20 +323,56 @@ export class World {
     this.terrain = mesh;
   }
 
-  /** Naturlig terränghöjd (utan vägpåverkan). */
-  _natural(x, z, baseY, dd, open) {
+  /** Förberäknar strandlinjer (taggar coast/quay/lake) och gruvgropen. */
+  _prepNatural() {
+    const tr = this.track, N = tr.N, P = tr.P;
+    let cx = 0, cz = 0; for (let i = 0; i < N; i++) { cx += P[i * 3]; cz += P[i * 3 + 2]; } cx /= N; cz /= N;
+    this.center = [cx, cz];
+    const shoreTag = { gotland: 'coast', hamn: 'quay', dalarna: 'lake' }[tr.def.theme];
+    this.shore = null;
+    if (shoreTag) {
+      const t = tr.tags.find(t => t[shoreTag]);
+      if (t) {
+        const a = Math.round(t.from * N), b = Math.round(t.to * N), m = Math.round((a + b) / 2) % N;
+        const ia = a % N, ib = b % N;
+        let tx = P[ib * 3] - P[ia * 3], tz = P[ib * 3 + 2] - P[ia * 3 + 2]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+        let nx = -tz, nz = tx;
+        const mx = P[m * 3], mz = P[m * 3 + 2];
+        if ((mx - cx) * nx + (mz - cz) * nz < 0) { nx = -nx; nz = -nz; }
+        const gap = { gotland: 22, hamn: 9, dalarna: 26 }[tr.def.theme];
+        this.shore = { mx, mz, nx, nz, tx, tz, off: tr.limit + gap, ramp: { gotland: 34, hamn: 1.2, dalarna: 30 }[tr.def.theme], ia, ib, wig: tr.def.theme === 'hamn' ? 0 : 9 };
+      }
+    }
+    if (tr.def.theme === 'gruva') {
+      // gropen: mittpunkt = tyngdpunkten av de djupaste delarna
+      const th = tr.minY + (tr.maxY - tr.minY) * 0.45;
+      let sx = 0, sz = 0, n = 0;
+      for (let i = 0; i < N; i++) if (P[i * 3 + 1] < th) { sx += P[i * 3]; sz += P[i * 3 + 2]; n++; }
+      sx /= n; sz /= n;
+      let rr = 0; for (let i = 0; i < N; i++) if (P[i * 3 + 1] < tr.maxY - 4) rr = Math.max(rr, Math.hypot(P[i * 3] - sx, P[i * 3 + 2] - sz));
+      this.pit = { x: sx, z: sz, rim: rr + 30, floor: tr.minY - 2, top: tr.maxY - 0.5 };
+    }
+  }
+  /** Signerat avstånd ut över strandlinjen (> 0 = vatten). */
+  shoreT(x, z) {
+    const s = this.shore; if (!s) return -999;
+    return (x - s.mx) * s.nx + (z - s.mz) * s.nz - s.off + (s.wig ? this.noise.noise(x / 60, z / 60) * s.wig : 0);
+  }
+
+  /** Naturlig terränghöjd (utan vägpåverkan). bs = närhet till bro (0..1). */
+  _natural(x, z, baseY, dd, open, bs = 0) {
     const n = this.noise, th = this.th;
     const fbm = (s, oct = 4) => { let a = 0, f = 1, amp = 1, sum = 0; for (let o = 0; o < oct; o++) { a += n.noise(x * s * f, z * s * f) * amp; sum += amp; f *= 2.03; amp *= 0.5; } return a / sum; };
-    const tr = this.track;
+    const tr = this.track, W = this.waterY;
+    const shore = (land, depth) => { const t = this.shoreT(x, z); if (t <= -998) return land; const f = smooth01(t / this.shore.ramp); return land + (W - depth - land) * f; };
     switch (tr.def.theme) {
       case 'midsommar': {
         const hills = fbm(1 / 260) * 26 + fbm(1 / 70, 2) * 4;
-        let h = baseY + (hills - 2) * smooth01((dd - 12) / 120);
-        return h;
+        return baseY + (hills - 2) * smooth01((dd - 12) / 120);
       }
       case 'skargard': {
         const isl = fbm(1 / 160) * 22 + fbm(1 / 40, 3) * 4;
-        return this.waterY - 7 + Math.max(0, isl + 4) * 1.1 + (baseY - this.waterY) * (1 - smooth01((dd - 10) / 70)) * 0.9;
+        return W - 7 + Math.max(0, isl + 4) * 1.1 + (baseY - W) * (1 - smooth01((dd - 10) / 70)) * 0.9;
       }
       case 'odemark': {
         const r = 1 - Math.abs(n.noise(x / 140, z / 90));
@@ -404,53 +385,125 @@ export class World {
         const up = smooth01((dd - 18) / 260);
         return baseY + m * up * (1 - open) + (fbm(1 / 60, 2) * 4) * (1 - up);
       }
-      case 'stad': return baseY - 0.08;
+      case 'stad': case 'tivoli': return baseY - 0.08;
       case 'is': {
-        const shore = smooth01((dd - 230) / 160);
-        return baseY - 0.12 + shore * (8 + fbm(1 / 180) * 40 + 20);
+        const shoreF = smooth01((dd - 230) / 160);
+        return baseY - 0.12 + shoreF * (8 + fbm(1 / 180) * 40 + 20);
+      }
+      case 'kust': {
+        // höga klippor: land (skog/berg) eller hav, skarp övergång = klippa. Fjärd under hängbron.
+        const up = smooth01((dd - 14) / 160);
+        const landH = baseY + (fbm(1 / 170, 3) * 0.5 + 0.5) * 55 * up + fbm(1 / 45, 2) * 3;
+        const seaH = W - 16;
+        let c = smooth01((fbm(1 / 420, 4) + 0.1) / 0.09);
+        c = Math.max(c, 1 - smooth01((dd - 26) / 40));
+        c *= 1 - smooth01((bs - 0.15) / 0.5);
+        return seaH + (landH - seaH) * c;
+      }
+      case 'hamn': return shore(baseY - 0.08, 7);
+      case 'gotland': {
+        const land = baseY - 0.25 + fbm(1 / 220, 3) * 3.5 * smooth01((dd - 20) / 120);
+        return shore(land, 5);
+      }
+      case 'lappland': {
+        const up = smooth01((dd - 16) / 200);
+        const r = 1 - Math.abs(fbm(1 / 650, 4));
+        return baseY + fbm(1 / 260) * 16 * up + r * r * 150 * smooth01((dd - 280) / 380);
+      }
+      case 'dalarna': {
+        const up = smooth01((dd - 14) / 150);
+        return shore(baseY + (fbm(1 / 240) * 26 + fbm(1 / 70, 2) * 4 + 6) * up, 8);
+      }
+      case 'oland': {
+        const land = baseY - 0.3 + fbm(1 / 260, 3) * 1.6 * smooth01((dd - 15) / 60);
+        // sund under bron
+        const sea = W - 6;
+        return land + (sea - land) * smooth01((bs - 0.1) / 0.5);
+      }
+      case 'flyg': return baseY - 0.06 + fbm(1 / 300, 2) * 1.2 * smooth01((dd - 60) / 200);
+      case 'gruva': {
+        const p = this.pit, r = Math.hypot(x - p.x, z - p.z);
+        if (r > p.rim) return p.top - 0.6 + fbm(1 / 160, 3) * 5 * smooth01((r - p.rim) / 80) + fbm(1 / 40, 2) * 0.8;
+        // terrasserat dagbrott: hyllor med branta kanter
+        const f = smooth01(r / p.rim), hgt = (p.top - p.floor) * Math.pow(f, 0.9);
+        const step = 8, k = Math.floor(hgt / step), fr = hgt / step - k;
+        return p.floor + k * step + step * smooth01((fr - 0.55) / 0.4);
+      }
+      case 'skog': {
+        const up = smooth01((dd - 8) / 90);
+        return baseY + (fbm(1 / 190) * 30 + fbm(1 / 55, 2) * 5 + 4) * up;
       }
       default: return baseY;
     }
   }
   _terrainColor(c, x, y, z, ny, dd) {
-    const th = this.th, n = this.noise;
+    const th = this.th, n = this.noise, W = this.waterY;
     const v = n.noise(x / 37, z / 37) * 0.5 + 0.5, v2 = n.noise(x / 9, z / 9) * 0.5 + 0.5;
     const slope = 1 - ny;
     const set = (hex) => c.setHex(hex);
+    const lerpHex = (hex, f) => c.lerp(_tc.setHex(hex), f);
     switch (this.track.def.theme) {
       case 'midsommar': {
-        set(0x4e7d2f); c.lerp(new THREE.Color(0x76a23e), v * 0.7);
-        if (v2 > 0.78) c.lerp(new THREE.Color(0xd8d070), 0.25); // smörblommor
-        if (slope > 0.35) c.lerp(new THREE.Color(0x7a6a54), smooth01((slope - 0.35) / 0.3));
-        if (this.waterY != null && y < this.waterY + 0.8) c.lerp(new THREE.Color(0x8a7a5a), 0.8);
+        set(0x4e7d2f); lerpHex(0x76a23e, v * 0.7);
+        if (v2 > 0.78) lerpHex(0xd8d070, 0.25);
+        if (slope > 0.35) lerpHex(0x7a6a54, smooth01((slope - 0.35) / 0.3));
+        if (W != null && y < W + 0.8) lerpHex(0x8a7a5a, 0.8);
         break;
       }
       case 'skargard': {
-        set(0x9a7f74); c.lerp(new THREE.Color(0xb59484), v);
-        if (ny > 0.9 && y > this.waterY + 3 && v2 > 0.45) c.lerp(new THREE.Color(0x56723a), 0.6 * smooth01((v2 - 0.45) / 0.3));
-        if (y < this.waterY + 0.6) c.lerp(new THREE.Color(0x4a4038), 0.6);
+        set(0x9a7f74); lerpHex(0xb59484, v);
+        if (ny > 0.9 && y > W + 3 && v2 > 0.45) lerpHex(0x56723a, 0.6 * smooth01((v2 - 0.45) / 0.3));
+        if (y < W + 0.6) lerpHex(0x4a4038, 0.6);
         break;
       }
-      case 'odemark': {
-        set(0xd7a96a); c.lerp(new THREE.Color(0xe8c08a), v);
-        if (v2 > 0.72 && slope < 0.2) c.lerp(new THREE.Color(0x8a8a4a), 0.4);
-        break;
-      }
-      case 'fjall': {
-        set(0xf1f5fa); c.lerp(new THREE.Color(0xd9e2ee), v * 0.6);
-        if (slope > 0.42) c.lerp(new THREE.Color(0x6e6a68), smooth01((slope - 0.42) / 0.25));
-        break;
-      }
-      case 'stad': {
-        set(0x3d3f45); c.lerp(new THREE.Color(0x4a4c52), v);
-        if (dd > 70 && v2 > 0.62) c.lerp(new THREE.Color(0x2c4a28), 0.7);
-        break;
-      }
+      case 'odemark': { set(0xd7a96a); lerpHex(0xe8c08a, v); if (v2 > 0.72 && slope < 0.2) lerpHex(0x8a8a4a, 0.4); break; }
+      case 'fjall': { set(0xf1f5fa); lerpHex(0xd9e2ee, v * 0.6); if (slope > 0.42) lerpHex(0x6e6a68, smooth01((slope - 0.42) / 0.25)); break; }
+      case 'stad': { set(0x24252c); lerpHex(0x2e3038, v); if (v2 > 0.7) lerpHex(0x1a1c22, 0.5); break; }
       case 'is': {
-        if (dd < 220) { set(0x9cc4de); c.lerp(new THREE.Color(0xe6f0f8), smooth01(v * 1.4 - 0.3)); }
-        else { set(0xeaf0f6); if (slope > 0.4) c.lerp(new THREE.Color(0x707478), 0.6); }
+        if (dd < 220) { set(0x9cc4de); lerpHex(0xe6f0f8, smooth01(v * 1.4 - 0.3)); }
+        else { set(0xeaf0f6); if (slope > 0.4) lerpHex(0x707478, 0.6); }
         break;
       }
+      case 'kust': {
+        set(0x3a5a2e); lerpHex(0x4e6a34, v); lerpHex(0x2a4426, v2 * 0.4);
+        if (slope > 0.32) lerpHex(v2 > 0.5 ? 0x8a6a62 : 0x77706a, smooth01((slope - 0.32) / 0.22));
+        if (y < W + 2.5) lerpHex(0x5a5048, 0.85);
+        break;
+      }
+      case 'hamn': {
+        set(0x4a4c52); lerpHex(0x55575c, v); if (v2 > 0.8) lerpHex(0x3a3c40, 0.5);
+        if (y < W + 0.5) lerpHex(0x2a2a2c, 0.9);
+        break;
+      }
+      case 'gotland': {
+        set(0x9aa058); lerpHex(0xc8c08a, v * 0.8); if (v2 > 0.7) lerpHex(0xd0ccc0, 0.6);
+        if (v2 < 0.2 && dd > 30) lerpHex(0xc8484a, 0.35);
+        const t = this.shoreT(x, z); if (t > -14) lerpHex(0xb8b4aa, smooth01((t + 14) / 10));
+        break;
+      }
+      case 'lappland': { set(0xe8eef6); lerpHex(0xcfdcec, v * 0.7); if (slope > 0.45) lerpHex(0x5a5a62, smooth01((slope - 0.45) / 0.25)); break; }
+      case 'dalarna': {
+        set(0x5a8a36); lerpHex(0x7aa448, v * 0.6); if (v2 > 0.8) lerpHex(0xe8e070, 0.25);
+        if (slope > 0.35) lerpHex(0x6a5a44, smooth01((slope - 0.35) / 0.3));
+        if (this.shoreT(x, z) > -6) lerpHex(0x8a7a5a, 0.7);
+        break;
+      }
+      case 'oland': {
+        set(0x9a9a64); lerpHex(0xb8b07a, v * 0.7);
+        if (v2 > 0.62) lerpHex(0xc8c4b8, smooth01((v2 - 0.62) / 0.2) * 0.8); // kalkhällar
+        if (v2 < 0.18) lerpHex(0x8a5a8a, 0.35); // ljung
+        if (W != null && y < W + 1.2) lerpHex(0x8a8070, 0.8);
+        break;
+      }
+      case 'flyg': { set(0x4a6a32); lerpHex(0x5a7a3a, v * 0.7); if (dd < 40) lerpHex(0x5a5c60, smooth01((40 - dd) / 18) * 0.7); break; }
+      case 'gruva': {
+        set(0x8a6a54); lerpHex(0x9a7a5a, v); lerpHex(0x6a5a50, v2 * 0.5);
+        if (slope > 0.4) lerpHex(0x5a4a44, smooth01((slope - 0.4) / 0.3));
+        if (this.pit && Math.hypot(x - this.pit.x, z - this.pit.z) > this.pit.rim + 20) lerpHex(0x5a6a3a, 0.55 * smooth01(v2 * 1.5));
+        break;
+      }
+      case 'tivoli': { set(0x3a5a2e); lerpHex(0x4a6a36, v); if (dd < 30 || v2 > 0.72) lerpHex(0x6a6460, 0.75); break; }
+      case 'skog': { set(0x3e5a2c); lerpHex(0x5a6a34, v * 0.7); lerpHex(0x6a5a3a, v2 * 0.35); if (slope > 0.4) lerpHex(0x5a564e, 0.5); break; }
       default: set(0x808080);
     }
     c.multiplyScalar(0.92 + v2 * 0.16);
@@ -482,7 +535,8 @@ export class World {
     const size = Math.max(t.nx, t.nz) * t.cell * 1.6;
     const g = new THREE.PlaneGeometry(size, size, 1, 1); g.rotateX(-Math.PI / 2);
     const nt = TX.waterNormalTex();
-    const mat = new THREE.MeshStandardMaterial({ color: this.track.def.theme === 'skargard' ? 0x1d4a66 : 0x2a4a50, roughness: 0.06, metalness: 0.1, normalMap: nt, normalScale: new THREE.Vector2(0.35, 0.35), transparent: true, opacity: 0.92, envMapIntensity: 1.2 });
+    const th = this.th;
+    const mat = new THREE.MeshStandardMaterial({ color: th.waterColor || ({ skargard: 0x1d4a66, kust: 0x1a3e58, hamn: 0x1e2a30, dalarna: 0x2a4a5a }[this.track.def.theme] || 0x2a4a50), roughness: th.weather === 'rain' ? 0.12 : 0.06, metalness: 0.1, normalMap: nt, normalScale: new THREE.Vector2(0.35, 0.35), transparent: true, opacity: 0.92, envMapIntensity: 1.2 });
     nt.repeat.set(size / 24, size / 24);
     const m = new THREE.Mesh(g, mat);
     m.position.set(t.x0 + (t.nx - 1) * t.cell / 2, this.waterY, t.z0 + (t.nz - 1) * t.cell / 2);
@@ -554,14 +608,15 @@ export class World {
       scatter(reg(treeSpruce(true)), veg, 1300 * dens, lim + 6, 520, 0.8, 1.5, { tint: 0.08, filter: (x, z) => { const h = this.heightAt(x, z); return h < this.track.maxY + 40; } });
       scatter(reg(rockGeo()), vegFlat, 220 * dens, lim + 5, 600, 0.8, 3.5, { tint: 0.06, squash: true });
       this._cottages(0x9a2a20, 6);
-    } else if (theme === 'stad') {
-      this._city(dens);
+    } else if (buildThemeScenery(this, theme, dens, { scatter, reg, veg, vegFlat })) {
+      // nya teman (scenery.js)
     } else if (theme === 'is') {
       scatter(reg(treeSpruce(true)), veg, 900 * dens, 240, 900, 0.9, 1.6, { tint: 0.08 });
       this._fishingHuts();
       this._torches();
     }
     sets.forEach(s => s.build(this.group, this.disp));
+    if (this.track.lampLayout()) buildLampPosts(this);
     this._spectators(dens);
     this._billboards();
   }
@@ -740,129 +795,6 @@ export class World {
     this.animated.push((dt, time) => { const s = 1 + Math.sin(time * 17) * 0.08 + Math.sin(time * 23) * 0.05; iF.scale.set(1, s, 1); });
   }
 
-  _city(dens) {
-    const tr = this.track, rng = this.rng;
-    const fac = TX.facadeTex(true);
-    fac.map.repeat.set(1, 1);
-    const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, 0.5, 0);
-    // uv skalas i shader via instans-skala – enkel lösning: världsbaserade uv i onBeforeCompile
-    const mat = new THREE.MeshStandardMaterial({ map: fac.map, emissiveMap: fac.emissive, emissive: 0xffffff, emissiveIntensity: 0.75, roughness: 0.75 });
-    mat.onBeforeCompile = (sh) => {
-      sh.vertexShader = sh.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-        #ifdef USE_INSTANCING
-        vec3 isc = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
-        vec2 fuv = abs(normal.x) > 0.5 ? vec2(position.z * isc.z, position.y * isc.y) : vec2(position.x * isc.x, position.y * isc.y);
-        if (abs(normal.y) > 0.5) fuv = vec2(0.02, 0.02);
-        vMapUv = fuv / vec2(16.0, 32.0);
-        vEmissiveMapUv = vMapUv;
-        #endif`);
-    };
-    this.disp.push(geo, mat);
-    const ch = new Chunked(geo, mat, 260, { shadow: this.q.shadows });
-    const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion();
-    const placed = [];
-    const tryPlace = (x, z, w, dpt, hgt, yaw) => {
-      const r = Math.max(w, dpt) * 0.55;
-      if (this.roadInfo(x, z).d < tr.limit + 3 + r) return false;
-      // kolla hörnen också
-      for (const [ax, az] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-        const cx = x + (Math.cos(yaw) * ax * w - Math.sin(yaw) * az * dpt) / 2, cz = z + (-Math.sin(yaw) * ax * w - Math.cos(yaw) * az * dpt) / 2;
-        if (this.roadInfo(cx, cz).d < tr.limit + 3) return false;
-      }
-      if (placed.some(p => Math.hypot(p[0] - x, p[1] - z) < (p[2] + r) * 0.9)) return false;
-      placed.push([x, z, r]);
-      qq.setFromAxisAngle(UP, yaw);
-      m4.compose(new THREE.Vector3(x, this.heightAt(x, z) - 0.3, z), qq, new THREE.Vector3(w, hgt, dpt));
-      const c = new THREE.Color().setHSL(rng() * 0.15 + 0.55, 0.1, 0.55 + rng() * 0.4);
-      ch.add(m4, c);
-      return true;
-    };
-    // längs banan
-    for (let i = 0; i < tr.N; i += 6) {
-      if (tr.bridge[i]) continue;
-      for (const side of [-1, 1]) {
-        if (rng() < 0.15) continue;
-        const w = 14 + rng() * 16, dpt = 14 + rng() * 14, hgt = 12 + rng() * rng() * 70;
-        const d = side * (tr.limit + 5 + dpt / 2 + rng() * 6);
-        const x = tr.P[i * 3] + tr.R[i * 3] * d, z = tr.P[i * 3 + 2] + tr.R[i * 3 + 2] * d;
-        tryPlace(x, z, w, dpt, hgt, Math.atan2(tr.T[i * 3], tr.T[i * 3 + 2]));
-      }
-    }
-    // utfyllnad
-    const t = this.tg;
-    for (let k = 0; k < 900 * dens; k++) {
-      const x = t.x0 + rng() * (t.nx - 1) * t.cell, z = t.z0 + rng() * (t.nz - 1) * t.cell;
-      const ri = this.roadInfo(x, z); if (ri.d > 520) continue;
-      tryPlace(x, z, 16 + rng() * 22, 16 + rng() * 22, 14 + rng() * rng() * 90 * (ri.d < 200 ? 0.6 : 1.2), Math.round(rng() * 4) * Math.PI / 2 + 0.3);
-    }
-    ch.build(this.group, this.disp);
-    this._streetLamps();
-    this._neon();
-    // parkträd
-    const tg = treeBirch(); this.disp.push(tg);
-    const vm = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }); this.disp.push(vm);
-    const tch = new Chunked(tg, vm, 260, { shadow: false });
-    for (let k = 0; k < 2500 && k < 160 * dens * 15; k++) {
-      const x = t.x0 + rng() * (t.nx - 1) * t.cell, z = t.z0 + rng() * (t.nz - 1) * t.cell;
-      const ri = this.roadInfo(x, z); if (ri.d < tr.limit + 6 || ri.d > 400) continue;
-      if (placed.some(p => Math.hypot(p[0] - x, p[1] - z) < p[2] + 3)) continue;
-      m4.compose(new THREE.Vector3(x, this.heightAt(x, z), z), qq.setFromAxisAngle(UP, rng() * 6), new THREE.Vector3(0.9, 0.9, 0.9));
-      tch.add(m4);
-      if (tch.map.size > 40) break;
-    }
-    tch.build(this.group, this.disp);
-  }
-  _streetLamps() {
-    const tr = this.track;
-    const pole = new THREE.CylinderGeometry(0.1, 0.14, 8, 6); pole.translate(0, 4, 0);
-    const arm = new THREE.BoxGeometry(0.12, 0.12, 2.2); arm.translate(0, 7.9, 1.0);
-    const poleGeo = mergeGeometries([pole.toNonIndexed(), arm.toNonIndexed()]); pole.dispose(); arm.dispose();
-    const headGeo = new THREE.BoxGeometry(0.5, 0.18, 0.9); headGeo.translate(0, 7.8, 2.0);
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a2e36, metalness: 0.5, roughness: 0.5 });
-    const headMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd9a0).multiplyScalar(3) });
-    const poolGeo = new THREE.PlaneGeometry(17, 17); poolGeo.rotateX(-Math.PI / 2);
-    const poolMat = new THREE.MeshBasicMaterial({ map: TX.poolTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 1, fog: false, polygonOffset: true, polygonOffsetFactor: -4 });
-    poolMat.color.setScalar(1.7);
-    this.disp.push(poleGeo, headGeo, poleMat, headMat, poolGeo, poolMat);
-    const list = [];
-    let side = 1;
-    for (let i = 0; i < tr.N; i += 14) { if (tr.tunnel[i]) continue; list.push([i, side]); side = -side; }
-    const ip = new THREE.InstancedMesh(poleGeo, poleMat, list.length), ih = new THREE.InstancedMesh(headGeo, headMat, list.length), ipool = new THREE.InstancedMesh(poolGeo, poolMat, list.length);
-    const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), pv = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
-    list.forEach(([i, s], n) => {
-      const d = s * (tr.limit + 0.9);
-      pv.set(tr.P[i * 3] + tr.R[i * 3] * d, tr.P[i * 3 + 1] + tr.R[i * 3 + 1] * d, tr.P[i * 3 + 2] + tr.R[i * 3 + 2] * d);
-      qq.setFromAxisAngle(UP, Math.atan2(tr.T[i * 3], tr.T[i * 3 + 2]) + (s > 0 ? Math.PI / 2 : -Math.PI / 2));
-      m4.compose(pv, qq, one); ip.setMatrixAt(n, m4); ih.setMatrixAt(n, m4);
-      const d2 = s * (tr.limit - 3.5);
-      pv.set(tr.P[i * 3] + tr.R[i * 3] * d2, tr.P[i * 3 + 1] + tr.R[i * 3 + 1] * d2 + 0.04, tr.P[i * 3 + 2] + tr.R[i * 3 + 2] * d2);
-      m4.compose(pv, qq, one); ipool.setMatrixAt(n, m4);
-    });
-    [ip, ih, ipool].forEach(m => { m.computeBoundingSphere(); this.group.add(m); this.disp.push(m); });
-    ip.castShadow = true; ipool.renderOrder = 2;
-    // ljusglöd runt lamphuvudena
-    const gp = [], hv = new THREE.Vector3();
-    for (let n = 0; n < list.length; n++) { ih.getMatrixAt(n, m4); hv.set(0, 7.75, 2.0).applyMatrix4(m4); gp.push(hv.x, hv.y, hv.z); }
-    const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(gp, 3));
-    const gm = new THREE.PointsMaterial({ map: TX.dotTex(), color: 0xffc880, size: 7, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.55 });
-    const glow = new THREE.Points(gg, gm); glow.renderOrder = 3;
-    this.group.add(glow); this.disp.push(gg, gm);
-  }
-  _neon() {
-    const tr = this.track, rng = this.rng;
-    const words = [['KAFÉ NORD', '#ff4fb0'], ['PIZZA', '#ffcc33'], ['BIO', '#39d5ff'], ['HOTELL', '#b083ff'], ['GODIS', '#ff6a3a'], ['SPELHALLEN', '#4ade80'], ['KEBAB', '#ff5a5a'], ['FIKA', '#ffd85c'], ['NATTÖPPET', '#39d5ff']];
-    const geo = new THREE.PlaneGeometry(6, 2.25); this.disp.push(geo);
-    const mats = words.map(([w, c]) => { const t = TX.neonTex(w, c); const m = new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide }); m.color.setScalar(2.2); this.disp.push(m); return m; });
-    for (let i = 3; i < tr.N; i += 23) {
-      if (tr.tunnel[i] || tr.bridge[i]) continue;
-      const side = rng() < 0.5 ? -1 : 1, d = side * (tr.limit + 5.2);
-      const m = new THREE.Mesh(geo, mats[(rng() * mats.length) | 0]);
-      m.position.set(tr.P[i * 3] + tr.R[i * 3] * d, tr.P[i * 3 + 1] + 6 + rng() * 6, tr.P[i * 3 + 2] + tr.R[i * 3 + 2] * d);
-      m.rotation.y = Math.atan2(tr.T[i * 3], tr.T[i * 3 + 2]) + (side > 0 ? Math.PI / 2 : -Math.PI / 2);
-      this.group.add(m);
-    }
-  }
-
   _spectators(dens) {
     const tr = this.track, rng = this.rng;
     const bodyG = spectatorBody(), headG = spectatorHead();
@@ -956,7 +888,8 @@ export class World {
     const pos = [], col = [], idx = [];
     const fogC = new THREE.Color(th.fog.color), base = new THREE.Color();
     const kind = tr.def.theme;
-    const baseCol = { midsommar: 0x2f5a30, skargard: 0x3a5a40, odemark: 0x8a5a48, fjall: 0xb0b8c8, stad: 0x0a0c16, is: 0x24384a }[kind];
+    const baseCol = { midsommar: 0x2f5a30, skargard: 0x3a5a40, odemark: 0x8a5a48, fjall: 0xb0b8c8, stad: 0x0a0814, is: 0x24384a, kust: 0x2a4a34, hamn: 0x2a2c34,
+      gotland: 0x6a7a58, lappland: 0x8aa0b8, dalarna: 0x2a4a2c, oland: 0x6a7a5a, flyg: 0x3a3a48, gruva: 0x5a4a40, tivoli: 0x0c0c18, skog: 0x2a3a2a }[kind] || 0x404040;
     base.setHex(baseCol);
     for (let i = 0; i <= seg; i++) {
       const a = i / seg * Math.PI * 2;
@@ -964,7 +897,12 @@ export class World {
       const n2 = this.noise.noise(Math.cos(a) * 7 + 9, Math.sin(a) * 7) * 0.5 + 0.5;
       let h;
       if (kind === 'fjall') h = 60 + n1 * 220 + n2 * 60;
-      else if (kind === 'stad') h = (Math.floor(n2 * 8) % 3 === 0 ? 40 : 15) + n1 * 70 + (i % 3 === 0 ? 30 * n2 : 0);
+      else if (kind === 'lappland') h = 40 + n1 * 160 + n2 * 40;
+      else if (kind === 'kust') h = n1 < 0.35 ? 0 : 20 + (n1 - 0.35) * 160;
+      else if (kind === 'stad') h = (Math.floor(n2 * 8) % 3 === 0 ? 90 : 35) + n1 * 110 + (i % 3 === 0 ? 50 * n2 : 0);
+      else if (kind === 'hamn' || kind === 'tivoli') h = (i % 4 === 0 ? 25 : 10) + n1 * 30;
+      else if (kind === 'oland' || kind === 'gotland' || kind === 'flyg') h = 4 + n1 * 14;
+      else if (kind === 'skog') h = 30 + n1 * 60 + n2 * 20;
       else if (kind === 'odemark') h = 10 + n1 * 40;
       else if (kind === 'skargard') h = n1 < 0.45 ? 0 : (n1 - 0.45) * 60;
       else h = 20 + n1 * 50 + n2 * 15;
@@ -974,7 +912,7 @@ export class World {
         const y = tr.minY - 20 + h * Math.sin(f * Math.PI * 0.5) * (r === rows - 1 ? 0.6 : 1);
         pos.push(cx + Math.cos(a) * rad, (r === 0 ? tr.minY - 30 : y), cz + Math.sin(a) * rad);
         const c = base.clone();
-        if (kind === 'fjall' && f > 0.3) c.lerp(new THREE.Color(0xffffff), 0.6);
+        if ((kind === 'fjall' || kind === 'lappland') && f > 0.3) c.lerp(new THREE.Color(0xffffff), 0.6);
         c.lerp(fogC, 0.55 + f * 0.15);
         col.push(c.r, c.g, c.b);
       }
@@ -990,15 +928,18 @@ export class World {
     const m = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(g, m); mesh.renderOrder = -5; mesh.frustumCulled = false;
     this.group.add(mesh); this.disp.push(g, m);
-    if (kind === 'stad') {
+    if (kind === 'stad' || kind === 'hamn' || kind === 'tivoli') {
       // fönsterljus i skyline: punkter
-      const pts = [];
-      for (let k = 0; k < 900; k++) {
+      const pts = [], cols = [];
+      const pal = kind === 'stad' ? [0x9ad8ff, 0xff6ad0, 0xffe0a0, 0x60ffe0, 0xffffff] : [0xffd890, 0xffe8b0, 0xffc070];
+      const cc = new THREE.Color();
+      for (let k = 0; k < (kind === 'stad' ? 1800 : 600); k++) {
         const a = this.rng() * Math.PI * 2; const rad = R * (1.02 + this.rng() * 0.15);
-        pts.push(cx + Math.cos(a) * rad, tr.minY - 15 + this.rng() * 70, cz + Math.sin(a) * rad);
+        pts.push(cx + Math.cos(a) * rad, tr.minY - 15 + this.rng() * (kind === 'stad' ? 150 : 50), cz + Math.sin(a) * rad);
+        cc.setHex(pal[(this.rng() * pal.length) | 0]); cols.push(cc.r, cc.g, cc.b);
       }
-      const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-      const pm = new THREE.PointsMaterial({ color: 0xffd890, size: 2.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.7 });
+      const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); pg.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      const pm = new THREE.PointsMaterial({ vertexColors: true, size: 2.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.75 });
       const p = new THREE.Points(pg, pm); p.frustumCulled = false; p.renderOrder = -4;
       this.group.add(p); this.disp.push(pg, pm);
     }
@@ -1022,15 +963,17 @@ export class World {
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('rnd', new THREE.BufferAttribute(rnd, 1));
     g.setAttribute('endp', new THREE.BufferAttribute(end, 1));
-    const vel = { snow: [0.6, -2.2, 0.3], rain: [1.5, -26, 0.8], pollen: [0.4, 0.15, 0.2], dust: [7, 0.3, 2] }[kind];
-    const color = { snow: 0xffffff, rain: 0xa8b8d8, pollen: 0xfff0a0, dust: 0xe8c090 }[kind];
+    const vel = this.th.weatherVel || { snow: [0.6, -2.2, 0.3], rain: [1.5, -26, 0.8], pollen: [0.4, 0.15, 0.2], dust: [7, 0.3, 2] }[kind];
+    const dc = this.th.dust;
+    const color = kind === 'dust' && dc ? new THREE.Color(dc[0] * 1.1, dc[1] * 1.1, dc[2] * 1.1).getHex() : { snow: 0xffffff, rain: this.th.edgeGlow ? 0xb8c8f0 : 0xa8b8d8, pollen: 0xfff0a0, dust: 0xe8c090 }[kind];
     const size = { snow: 0.22, rain: 1, pollen: 0.12, dust: 0.35 }[kind];
     const mat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: kind === 'pollen' ? THREE.AdditiveBlending : THREE.NormalBlending,
-      uniforms: { time: { value: 0 }, cam: { value: new THREE.Vector3() }, box: { value: box }, vel: { value: new THREE.Vector3(...vel) }, color: { value: new THREE.Color(color) }, size: { value: size }, tex: { value: TX.dotTex() }, carVel: { value: new THREE.Vector3() }, alpha: { value: kind === 'rain' ? 0.35 : kind === 'dust' ? 0.35 : 0.85 } },
+      uniforms: { time: { value: 0 }, cam: { value: new THREE.Vector3() }, box: { value: box }, vel: { value: new THREE.Vector3(...vel) }, color: { value: new THREE.Color(color) }, size: { value: size }, tex: { value: TX.dotTex() }, carVel: { value: new THREE.Vector3() }, alpha: { value: kind === 'rain' ? 0.35 : kind === 'dust' ? 0.35 : 0.85 },
+        lp: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] }, lcol: { value: new THREE.Color(1, 1, 1) } },
       vertexShader: `
-        uniform float time; uniform vec3 cam, box, vel, carVel; uniform float size;
-        attribute float rnd; attribute float endp; varying float vA;
+        uniform float time; uniform vec3 cam, box, vel, carVel; uniform float size; uniform vec4 lp[3];
+        attribute float rnd; attribute float endp; varying float vA; varying float vG;
         void main(){
           vec3 v = vel * (0.7 + 0.6 * rnd);
           vec3 p = position + v * time;
@@ -1041,13 +984,17 @@ export class World {
           gl_Position = projectionMatrix * mv;
           float dist = length(p - cam);
           vA = smoothstep(box.x * 0.5, box.x * 0.3, dist) * smoothstep(0.5, 3.0, -mv.z);
+          // glitter: droppar nära gatlamporna lyser upp
+          vG = 0.0;
+          for (int k = 0; k < 3; k++) { vec3 dl = p - lp[k].xyz; vG += lp[k].w / (1.0 + dot(dl, dl) * 0.025); }
           gl_PointSize = size * 420.0 / max(1.0, -mv.z);
         }`,
       fragmentShader: `
-        uniform vec3 color; uniform sampler2D tex; uniform float alpha; varying float vA;
+        uniform vec3 color, lcol; uniform sampler2D tex; uniform float alpha; varying float vA; varying float vG;
         void main(){
           ${isRain ? 'float a = 1.0;' : 'float a = texture2D(tex, gl_PointCoord).a;'}
-          gl_FragColor = vec4(color, a * vA * alpha);
+          float g = min(vG, 3.0);
+          gl_FragColor = vec4(color * (1.0 + g * 1.6) + lcol * g * 0.8, a * vA * alpha * (1.0 + g * 1.5));
         }`
     });
     const obj = isRain ? new THREE.LineSegments(g, mat) : new THREE.Points(g, mat);
@@ -1074,10 +1021,13 @@ export class World {
     this.cheer.uTime.value = t;
     if (this.water) { this.waterTex.offset.set(t * 0.012, t * 0.008); }
     this.animated.forEach(fn => fn(dt, t));
+    if (this.track.roadUniforms) this.track.roadUniforms.uTime.value = t;
+    if (this.lampLights && this.lampLights.length && focus) this._updateLampLights(focus);
     if (this.weather) {
       const u = this.weather.material.uniforms;
       u.time.value = t; u.cam.value.copy(cam.position);
       if (carVel) u.carVel.value.copy(carVel);
+      if (this.lampLights) for (let k = 0; k < 3; k++) { const l = this.lampLights[k]; if (l) u.lp.value[k].set(l.position.x, l.position.y, l.position.z, l.intensity / 120); else u.lp.value[k].w = 0; }
     }
     // skuggkameran följer bilen (snäppt till texelrutnät)
     if (focus) {
@@ -1086,6 +1036,26 @@ export class World {
       const fx = Math.round(focus.x / snap) * snap, fz = Math.round(focus.z / snap) * snap;
       s.target.position.set(fx, focus.y, fz);
       s.position.set(fx + this.sunDir.x * 200, focus.y + Math.max(0.25, this.sunDir.y) * 200, fz + this.sunDir.z * 200);
+    }
+  }
+
+  /** Flyttar punktljusen till gatlamporna närmast bilen. Intensiteten tonas med avståndet längs banan så att bytet aldrig syns. */
+  _updateLampLights(focus) {
+    const tr = this.track, lay = tr.lampLayout(), f = this._lf;
+    tr.project(focus, f.i, f);
+    const n = this.lampLights.length, sp = lay.sp;
+    const u = (f.s - lay.off) / sp;
+    const k0 = n % 2 ? Math.floor(u + 0.5) - (n - 1) / 2 : Math.floor(u) - (n / 2 - 1);
+    const win = n * sp / 2;
+    const base = this.th.lamps.strength * 95;
+    for (let j = 0; j < n; j++) {
+      const k = k0 + j, s = lay.off + k * sp;
+      const kk = ((k % lay.n) + lay.n) % lay.n, side = kk % 2 ? -1 : 1;
+      const x = (s - f.s) / win;
+      const w = Math.abs(x) >= 1 ? 0 : Math.cos(x * Math.PI / 2) ** 2;
+      const l = this.lampLights[j];
+      tr.pointAt(s, side * lay.D, this.th.lamps.height - 0.6, l.position);
+      l.intensity = base * w;
     }
   }
 

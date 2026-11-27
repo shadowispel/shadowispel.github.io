@@ -8,8 +8,12 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Settings, createRenderer, Loop, Input, Audio, buildSettings, fpsMeter, toast, show, hide, loadingScreen, nextFrame, submitScore, bestScore, kv, makeRng, isTouchDevice } from '../../engine/kit.js';
-import { CARS, COLORS, AI_DRIVERS, DIFFICULTY, POINTS, TRACKS, CUPS, UNLOCK_TEXT, CAR_TIER, trackById, trackName } from './data.js';
+import { CARS, COLORS, AI_DRIVERS, DIFFICULTY, POINTS, TRACKS, CAR_TIER, CLASSES, perfIndex, piClass, trackById, trackName } from './data.js';
+import { RARITIES, PERF, TIRES, LOOK, CRATES, SURFACE_NAME, partInfo, openCrate, applyParts, lookCat } from './parts.js';
+import { ETYPES, CHAPTERS, EVENTS, eventById, chapterOf, totalStars, chapterUnlocked, eventUnlocked, starsFor, rewardText, dailyChallenges, todayKey } from './career.js';
+import { FINISHES } from './carmodel.js';
 import { Track } from './track.js';
+import { THEMES as trackThemes } from './themes.js';
 import { World } from './world.js';
 import { Car, collideCars, buildCarModel, disposeCarModel } from './car.js';
 import { AIDriver } from './ai.js';
@@ -17,7 +21,7 @@ import { Particles, Skids, SpeedFx } from './fx.js';
 import { Hud, fmtTime } from './hud.js';
 import * as TX from './textures.js';
 import { engineVoice } from './sound.js';
-import { makeNet, makeLobby, buildStart, packCar, pushSample, stepRemote, INTERP } from './online.js';
+import { makeNet, makeLobby, buildStart, packCar, pushSample, stepRemote, INTERP, lookFromNet } from './online.js';
 import { backgroundTicker, emoteBar } from '../../engine/net.js';
 
 const ID = 'fjallracet';
@@ -49,22 +53,55 @@ let race = null, paused = false;
 
 /* ------------------------------------------------------------------ Sparfil */
 const SAVE = 'fjallracet:save';
-const save = Object.assign({ cups: {}, cars: [], tutorial: false, best: {}, car: 'viggen', color: 0, diff: 'easy', laps: 3, opp: 7, track: 'midsommar', cup: 'brons', cupRun: null, tt: 'midsommar' }, Spelhallen.store.get(SAVE, {}));
+const save = Object.assign({ cups: {}, cars: [], tutorial: false, best: {}, car: 'viggen', color: 0, diff: 'easy', laps: 3, opp: 7, track: 'midsommar', cupRun: null, tt: 'midsommar' }, Spelhallen.store.get(SAVE, {}));
+/* --- sparfil v2: garage, delar, lådor, karriär (gamla sparfiler migreras) --- */
+if (!(save.v >= 2)) {
+  const old = Array.isArray(save.cars) ? save.cars : [];
+  save.owned = ['viggen', 'algen'].concat(old.filter(id => CARS.some(c => c.id === id) && id !== 'viggen' && id !== 'algen'));
+  const col = (COLORS[save.color] || COLORS[0]).hex;
+  save.looks = {}; save.looks[save.car] = { color: col };
+  // tidigare cupframgångar ger startkapital
+  const cups = save.cups || {};
+  save.kr = 2000 + ['brons', 'silver', 'guld'].reduce((a, k) => a + (cups[k] && cups[k].best <= 3 ? 4000 : 0), 0);
+  save.crates = old.length ? ['stal'] : ['tra'];
+  save.parts = []; save.perf = {}; save.career = {}; save.daily = { day: '', done: [] }; save.found = [];
+  save.cupRun = null; save.v = 2;
+}
 const persist = () => Spelhallen.store.set(SAVE, save);
 const carSpec = (id) => CARS.find(c => c.id === id) || CARS[0];
-const carUnlocked = (c) => !c.unlock || save.cars.includes(c.id);
-const cupUnlocked = (cup) => !cup.unlock || !!(save.cups[cup.unlock] && save.cups[cup.unlock].best <= 3);
-const reverseUnlocked = () => !!(save.cups.silver && save.cups.silver.best <= 3);
+const owns = (id) => save.owned.includes(id);
+const carUnlocked = (c) => owns(c.id);
+const DEF_COL = { viggen: 0xb0281f, algen: 0x1f4fbf, pixel: 0xf2c414, blixten: 0xe8ecef, falk: 0xb0281f, kaze: 0x1f4fbf, vraken: 0xf06b12, bison: 0x15171f, aska: 0x5b6169,
+  lodjuret: 0x2e6b3a, tempesta: 0xe8ecef, vega: 0x8ab8c8, ankar: 0xd8c8a0, kupol: 0x12a9b0, fjallbjorn: 0x2e6b3a, timmer: 0x5b6169, spark: 0xe8ecef, aurora: 0x8a6fd1,
+  ion: 0x15171f, norrsken: 0x12a9b0, valkyria: 0xb0281f, stormfagel: 0xf2c414 };
+const PLATE_L = 'ABCDEFGHJKLMNOPRSTUWXYZ';
+/** Bilens utseende (look-objekt till carmodel.js). */
+function lookOf(id) {
+  if (!save.looks[id]) {
+    let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    save.looks[id] = { color: DEF_COL[id] ?? 0xb0281f, plate: PLATE_L[h % 23] + PLATE_L[(h >> 5) % 23] + PLATE_L[(h >> 10) % 23] + ' ' + String(100 + (h >> 15) % 900) };
+  }
+  return save.looks[id];
+}
+const perfOf = (id) => save.perf[id] || (save.perf[id] = {});
+/** Effektiv spec för spelarens bil (med delar). */
+function playerSpec(id, surface, equal) { const b = carSpec(id); return equal ? b : applyParts(b, perfOf(id), surface || 'asfalt'); }
+function addKr(n) { save.kr = Math.max(0, (save.kr || 0) + Math.round(n)); }
+function giveCar(id) { if (!owns(id)) { save.owned.push(id); return true; } return false; }
+const fmtKr = (n) => Math.round(n).toLocaleString('sv-SE') + ' kr';
+const reverseUnlocked = () => totalStars(save.career) >= 16;
+/** Bana upplåst om den ingår i ett upplåst evenemang (eller man kört den). */
 function trackUnlocked(key) {
   const t = trackById(key); if (!t) return false;
   if (t.reverse && !reverseUnlocked()) return false;
-  return CUPS.some(c => cupUnlocked(c) && c.tracks.some(k => k.split('@')[0] === t.def.id));
+  return EVENTS.some(e => eventUnlocked(e, save.career) && e.tracks.some(k => k.split('@')[0] === t.def.id));
 }
 /** Medaljtider för tidskörning (sekunder per varv). */
 function medalTimes(key) { const p = trackById(key).def.par; return [p * 0.86, p * 0.93, p * 1.0]; }
 function medalFor(key, t) { if (!t) return ''; const m = medalTimes(key); return t <= m[0] ? '🥇' : t <= m[1] ? '🥈' : t <= m[2] ? '🥉' : ''; }
-function allTrackKeys() { return TRACKS.map(t => t.id).concat(TRACKS.map(t => t.id + '@r')); }
-if (!carUnlocked(carSpec(save.car))) save.car = 'viggen';
+function allTrackKeys() { return TRACKS.map(t => t.id).concat(TRACKS.filter(t => !t.sprint).map(t => t.id + '@r')); }
+if (!owns(save.car)) save.car = 'viggen';
+persist();
 
 /* ------------------------------------------------------------------ Efterbehandling */
 let composer = null, bloomPass = null;
@@ -117,14 +154,19 @@ const showroom = (() => {
   let model = null, modelKey = '', angle = 0.7, mode = 'car', podCars = [], time = 0, confT = 0;
   const pmat = new THREE.MeshStandardMaterial({ color: 0x1f2b50, metalness: 0.4, roughness: 0.4 });
   const numMats = [];
+  const drag = { on: false, x: 0, v: 0, t: 0 };
+  root.addEventListener('pointerdown', e => { if (race || mode !== 'car' || e.target.closest('.g3-panel, button, input, select, a, .fj-carinfo, .fj-crateov')) return; drag.on = true; drag.x = e.clientX; drag.t = performance.now(); });
+  addEventListener('pointermove', e => { if (!drag.on) return; drag.v += (e.clientX - drag.x) * 0.01; drag.x = e.clientX; drag.t = performance.now(); });
+  addEventListener('pointerup', () => { drag.on = false; });
   function clearPodium() { podCars.forEach(m => { podium.remove(m.root); disposeCarModel(m); }); podCars = []; }
   return {
     scene: sc, cam,
-    setCar(id, colorIdx) {
-      const k = id + ':' + colorIdx;
+    setCar(id, look) {
+      const k = id + ':' + JSON.stringify(look || null);
       if (k === modelKey && model) return;
       if (model) { turn.remove(model.root); disposeCarModel(model); }
-      model = buildCarModel(carSpec(id), COLORS[colorIdx].hex, { physical: true });
+      const q = settings.get('quality');
+      model = buildCarModel(carSpec(id), look || lookOf(id), { quality: q === 'low' ? 'medium' : q === 'medium' ? 'high' : q });
       model.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
       turn.add(model.root); modelKey = k;
     },
@@ -137,7 +179,7 @@ const showroom = (() => {
         const b = new THREE.Mesh(new THREE.BoxGeometry(4.3, H[k], 3.4), pmat); b.position.set(X[k], H[k] / 2, 0); b.receiveShadow = true; b.castShadow = true; podium.add(b);
         if (!numMats[k]) numMats[k] = new THREE.MeshBasicMaterial({ map: TX.numberTex(k + 1), transparent: true });
         const n = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), numMats[k]); n.position.set(X[k], H[k] / 2, 1.71); podium.add(n);
-        const m = buildCarModel(carSpec(e.car), e.color, { physical: true });
+        const m = buildCarModel(carSpec(e.car), e.look || e.color, { quality: 'high' });
         m.root.position.set(X[k], H[k], 0); m.root.rotation.y = 0.35 * (k === 1 ? 1 : k === 2 ? -1 : 0) + Math.PI * 0.08;
         m.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
         podium.add(m.root); podCars.push(m);
@@ -149,10 +191,11 @@ const showroom = (() => {
       time += dt;
       const wide = R.size.w > 760;
       if (mode === 'car') {
-        angle += dt * 0.35;
+        if (!drag.on) angle += dt * (performance.now() - drag.t < 2500 ? 0 : 0.35);
+        angle += drag.v; drag.v = 0;
         turn.rotation.y = angle;
-        const d = 8.8 * Math.max(1, 1.2 / cam.aspect);
-        cam.position.set(Math.sin(0.6) * d, 1.95 + (d - 8.8) * 0.12, Math.cos(0.6) * d);
+        const d = 10.8 * Math.max(1, 1.45 / cam.aspect);
+        cam.position.set(Math.sin(0.6) * d, 2.2 + (d - 10.8) * 0.12, Math.cos(0.6) * d);
         cam.lookAt(wide ? -1.9 : 0, 0.7, wide ? 1.1 : 0);
       } else {
         const a = 0.25 + Math.sin(time * 0.25) * 0.3;
@@ -239,25 +282,27 @@ function engineState(car, throttle) {
 }
 
 /* ------------------------------------------------------------------ Skärmar */
-const SCREENS = ['loading', 'menu', 'setup', 'settingsScr', 'help', 'pause', 'results', 'online'];
-const isRace = (m) => m === 'quick' || m === 'cup' || m === 'online';
+const SCREENS = ['loading', 'menu', 'setup', 'settingsScr', 'help', 'pause', 'results', 'online', 'career', 'garage', 'dealer', 'crates'];
+const isRace = (m) => m === 'quick' || m === 'cup' || m === 'online' || m === 'career';
 const isAiKey = (k) => /^ai\d$/.test(k || '');
 function screen(id) { SCREENS.forEach(s => s === id ? show(s) : hide(s)); }
 let backTo = 'menu';
+const esc = (t) => String(t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+const starTxt = (n, max = 3) => '<span class="fj-stars">' + '★'.repeat(n) + '<i>' + '★'.repeat(Math.max(0, max - n)) + '</i></span>';
+const crateCount = () => (save.crates || []).length;
 
 function updateMenu() {
   const b = bestScore(ID);
-  $('mBest').textContent = b > 0 ? `Ditt rekord: ${Spelhallen.fmt(b)} poäng` : 'Tips: börja med Bronsbucklan i Mästerskap.';
-  let play = $('mPlay');
-  if (!play) { play = document.createElement('button'); play.id = 'mPlay'; play.className = 'btn primary'; $('mCup').parentNode.insertBefore(play, $('mCup')); $('mCup').classList.remove('primary'); play.addEventListener('click', () => { audio.play('select'); quickPlay(); }); }
-  const run = save.cupRun;
-  if (run) { const cup = CUPS.find(c => c.id === run.id); play.innerHTML = `<span class="ic" aria-hidden="true">▶</span>Fortsätt ${cup.name} (lopp ${run.idx + 1}/${cup.tracks.length})`; }
-  else play.innerHTML = '<span class="ic" aria-hidden="true">▶</span>Spela';
+  const stars = totalStars(save.career), maxStars = EVENTS.length * 3;
+  $('mWallet').innerHTML = `<span>💰 ${fmtKr(save.kr || 0)}</span><span>⭐ ${stars}/${maxStars}</span><span>🚗 ${save.owned.length}/${CARS.length}</span>`;
+  $('mBest').textContent = b > 0 ? `Ditt rekord: ${Spelhallen.fmt(b)} poäng` : 'Tips: börja i Karriären – vinn kronor, lådor och nya bilar.';
+  $('mCrates').innerHTML = `<span class="ic" aria-hidden="true">🎁</span>Lådor${crateCount() ? ` <b class="fj-badge">${crateCount()}</b>` : ''}`;
+  const run = save.cupRun, ev = run && eventById(run.id);
+  $('mPlay').innerHTML = ev ? `<span class="ic" aria-hidden="true">▶</span>Fortsätt ${esc(ev.name)} (lopp ${run.idx + 1}/${ev.tracks.length})` : '<span class="ic" aria-hidden="true">🏆</span>Karriär';
 }
 function quickPlay() {
-  if (save.cupRun) return continueCup();
-  if (!save.tutorial) return startCup('brons', save.diff || 'easy');
-  openSetup('quick');
+  if (save.cupRun && eventById(save.cupRun.id)) return continueCup();
+  openCareer();
 }
 function toMenu() {
   if (net && net.status !== 'idle') net.leave();
@@ -265,20 +310,45 @@ function toMenu() {
   ol.results = null;
   if (race) endSession(true);
   disposeRace();
-  showroom.showCar(); showroom.setCar(save.car, save.color);
+  showroom.showCar(); showroom.setCar(save.car, lookOf(save.car));
   screen('menu'); updateMenu();
   audio.music('adventure');
   hudEl.classList.add('hidden'); buildTouch();
 }
 
-/* ---------- Val-skärm ---------- */
+/* ---------- statistikstaplar (före/efter) ---------- */
+const STATS = [
+  ['Toppfart', s => s.top, 44, 82, s => Math.round(s.top * 3.6) + ' km/h'],
+  ['Acceleration', s => s.accel, 7, 17, s => s.accel.toFixed(1)],
+  ['Grepp', s => s.grip, 13, 20, s => s.grip.toFixed(1)],
+  ['Bromsar', s => s.brake, 18, 33, s => s.brake.toFixed(0)],
+  ['Drift', s => s.drift, 0.8, 1.75, s => s.drift.toFixed(2)],
+  ['Vikt', s => s.mass, 0.5, 1.8, s => Math.round(s.mass * 1250) + ' kg']
+];
+function statBars(base, eff) {
+  eff = eff || base;
+  const pb = perfIndex(base), pe = perfIndex(eff);
+  let h = `<div class="fj-pi"><b class="pc pc-${piClass(pe)}">${piClass(pe)} ${pe}</b>${pe !== pb ? `<small>standard ${piClass(pb)} ${pb}</small>` : ''}</div>`;
+  for (const [label, f, a, b, fmt] of STATS) {
+    const v0 = clamp((f(base) - a) / (b - a), 0.03, 1), v1 = clamp((f(eff) - a) / (b - a), 0.03, 1);
+    const up = v1 > v0 + 0.001, dn = v1 < v0 - 0.001;
+    h += `<div class="fj-stat"><span>${label}</span><i><em style="width:${Math.round(Math.min(v0, v1) * 100)}%"></em>${up || dn ? `<u class="${up ? 'up' : 'dn'}" style="left:${Math.round(Math.min(v0, v1) * 100)}%;width:${Math.round(Math.abs(v1 - v0) * 100)}%"></u>` : ''}</i><small>${fmt(eff)}</small></div>`;
+  }
+  return h;
+}
+function carHead(spec) {
+  const cl = CLASSES.find(c => c.id === spec.klass) || CLASSES[0];
+  return `<h3>${esc(spec.name)}</h3><div class="k"><span class="fj-cls" style="--c:${cl.color}">${cl.icon} ${spec.klass}</span> · Årsmodell ${spec.year}</div>`;
+}
+
+/* ---------- Val-skärm (snabblopp, tidskörning, fri körning) ---------- */
 let setup = null;
 function openSetup(mode) {
-  setup = { mode, track: save.track, car: save.car, color: save.color, laps: save.laps, diff: save.diff, opp: save.opp, cup: save.cup };
+  setup = { mode, track: save.track, car: save.car, laps: save.laps, diff: save.diff, opp: save.opp };
   if (mode === 'time') setup.track = save.tt || save.track;
   if (!trackUnlocked(setup.track)) setup.track = 'midsommar';
-  if (!cupUnlocked(CUPS.find(c => c.id === setup.cup) || CUPS[0])) setup.cup = 'brons';
-  $('setupTitle').textContent = { cup: 'Mästerskap', quick: 'Snabblopp', time: 'Tidskörning', free: 'Fri körning' }[mode];
+  if (!owns(setup.car)) setup.car = 'viggen';
+  $('setupTitle').textContent = { quick: 'Snabblopp', time: 'Tidskörning', free: 'Fri körning' }[mode];
   renderSetup();
   screen('setup');
   showroom.showCar();
@@ -286,67 +356,299 @@ function openSetup(mode) {
 function seg(label, items, cur, onPick) {
   return `<div class="fj-sec"><label>${label}</label><div class="fj-seg" data-seg="${onPick}">${items.map(([v, t]) => `<button data-v="${v}" class="${String(v) === String(cur) ? 'on' : ''}">${t}</button>`).join('')}</div></div>`;
 }
+function trackTag(def) {
+  const bits = [];
+  if (def.sprint) bits.push('Sprint');
+  if (def.surface && def.surface !== 'asfalt') bits.push(SURFACE_NAME[def.surface] || def.surface);
+  const th = THEMES_LABEL(def); if (th) bits.push(th);
+  return bits.join(' · ');
+}
+function THEMES_LABEL(def) { const th = trackThemes[def.theme]; return th ? (th.night ? 'Natt' : '') + (th.weather === 'rain' ? (th.night ? ', regn' : 'Regn') : th.weather === 'snow' ? (th.night ? ', snö' : 'Snöfall') : '') : ''; }
+function carCards(ids, cur) {
+  return `<div class="fj-cards">` + ids.map(id => {
+    const c = carSpec(id), pi = perfIndex(c);
+    return `<button class="fj-card ${cur === id ? 'on' : ''}" data-car="${id}"><span class="tag pc pc-${piClass(pi)}">${piClass(pi)}</span><b>${esc(c.name)}</b><small>${c.klass} · ${c.year}</small><span class="sw" style="background:${css(lookOf(id).color)}"></span></button>`;
+  }).join('') + `</div>`;
+}
 function renderSetup() {
   const s = setup; let h = '';
-  if (s.mode === 'cup') {
-    h += `<div class="fj-sec"><label>Cup</label><div class="fj-cards">` + CUPS.map(c => {
-      const un = cupUnlocked(c); const res = save.cups[c.id];
-      const medal = res ? (res.best === 1 ? '🥇' : res.best === 2 ? '🥈' : res.best === 3 ? '🥉' : `${res.best}:a`) : '';
-      return `<button class="fj-card ${s.cup === c.id ? 'on' : ''} ${un ? '' : 'locked'}" data-cup="${c.id}"><span class="tag">${un ? medal : '🔒'}</span><b>${c.medal} ${c.name}</b><small>${un ? c.tracks.map(trackName).join(' · ') : 'Lås upp: kom topp 3 i ' + CUPS.find(x => x.id === c.unlock).name}</small></button>`;
-    }).join('') + `</div></div>`;
-  } else {
-    const keys = allTrackKeys().filter(k => !trackById(k).reverse || reverseUnlocked());
-    h += `<div class="fj-sec"><label>Bana</label><div class="fj-cards">` + keys.map(k => {
-      const t = trackById(k), un = trackUnlocked(k);
-      const best = save.best[k];
-      return `<button class="fj-card ${s.track === k ? 'on' : ''} ${un ? '' : 'locked'}" data-track="${k}"><span class="tag">${un ? medalFor(k, best) : '🔒'}</span><b>${trackName(k)}</b><small>${best ? 'Bästa varv ' + fmtTime(best) : (t.def.grip < 0.8 ? 'Halt underlag' : t.def.theme === 'stad' ? 'Nattlopp i regn' : '&nbsp;')}</small><span class="sw" style="background:${themeSwatch(t.def.theme)}"></span></button>`;
-    }).join('') + `</div><p class="fj-desc">${trackById(s.track).def.desc}${trackById(s.track).reverse ? ' Körs baklänges.' : ''}</p>` +
-      (s.mode === 'time' ? `<p class="fj-desc">Medaljtider: ${medalTimes(s.track).map((t, k) => ['🥇', '🥈', '🥉'][k] + ' ' + fmtTime(t)).join(' · ')}</p>` : '') + `</div>`;
-  }
-  if (s.mode === 'cup' || s.mode === 'quick') h += seg('Svårighetsgrad', Object.entries(DIFFICULTY).map(([k, d]) => [k, d.label]), s.diff, 'diff');
+  const keys = allTrackKeys().filter(k => !trackById(k).reverse || reverseUnlocked());
+  h += `<div class="fj-sec"><label>Bana</label><div class="fj-cards">` + keys.map(k => {
+    const t = trackById(k), un = trackUnlocked(k);
+    const best = save.best[k];
+    return `<button class="fj-card ${s.track === k ? 'on' : ''} ${un ? '' : 'locked'}" data-track="${k}"><span class="tag">${un ? medalFor(k, best) : '🔒'}</span><b>${trackName(k)}</b><small>${best ? 'Bästa varv ' + fmtTime(best) : (trackTag(t.def) || '&nbsp;')}</small><span class="sw" style="background:${themeSwatch(t.def.theme)}"></span></button>`;
+  }).join('') + `</div><p class="fj-desc">${trackById(s.track).def.desc}${trackById(s.track).reverse ? ' Körs baklänges.' : ''}${trackById(s.track).def.region ? ' <i>(' + trackById(s.track).def.region + ')</i>' : ''}</p>` +
+    (s.mode === 'time' ? `<p class="fj-desc">Medaljtider: ${medalTimes(s.track).map((t, k) => ['🥇', '🥈', '🥉'][k] + ' ' + fmtTime(t)).join(' · ')}</p>` : '') +
+    (s.mode === 'free' ? `<p class="fj-desc">🎁 Gömda lådor på banan: ${3 - crateSpotsFound(s.track)} kvar att hitta.</p>` : '') + `</div>`;
   if (s.mode === 'quick') {
-    h += seg('Varv', [1, 2, 3, 4, 5, 6].map(n => [n, n]), s.laps, 'laps');
+    h += seg('Svårighetsgrad', Object.entries(DIFFICULTY).map(([k, d]) => [k, d.label]), s.diff, 'diff');
+    if (!trackById(s.track).def.sprint) h += seg('Varv', [1, 2, 3, 4, 5, 6].map(n => [n, n]), s.laps, 'laps');
     h += seg('Motståndare', [1, 3, 5, 7].map(n => [n, n]), s.opp, 'opp');
   }
-  h += `<div class="fj-sec"><label>Bil</label><div class="fj-cards">` + CARS.map(c => {
-    const un = carUnlocked(c);
-    return `<button class="fj-card ${s.car === c.id ? 'on' : ''} ${un ? '' : 'locked'}" data-car="${c.id}"><span class="tag">${un ? '' : '🔒'}</span><b>${c.name}</b><small>${un ? c.klass : UNLOCK_TEXT[c.unlock]}</small></button>`;
-  }).join('') + `</div></div>`;
-  h += `<div class="fj-sec"><label>Färg</label><div class="fj-swatches">` + COLORS.map((c, k) => `<button class="${s.color === k ? 'on' : ''}" data-color="${k}" title="${c.name}" aria-label="${c.name}" style="background:${css(c.hex)}"></button>`).join('') + `</div></div>`;
+  h += `<div class="fj-sec"><label>Bil (utseende och delar ändras i Garaget)</label>${carCards(save.owned, s.car)}</div>`;
   $('setupBody').innerHTML = h;
   const go = $('setupGo');
-  go.textContent = s.mode === 'cup' ? (save.cupRun && save.cupRun.id === s.cup ? 'Starta om cupen' : 'Starta cupen') : 'Starta';
-  go.disabled = !carUnlocked(carSpec(s.car)) || (s.mode === 'cup' ? !cupUnlocked(CUPS.find(c => c.id === s.cup)) : !trackUnlocked(s.track));
-  showroom.setCar(s.car, s.color);
-  const spec = carSpec(s.car);
-  const bar = (label, v) => `<div class="fj-stat"><span>${label}</span><i><em style="width:${Math.round(clamp(v, 0.05, 1) * 100)}%"></em></i></div>`;
-  $('carInfo').innerHTML = `<h3>${spec.name}</h3><div class="k">${spec.klass} · ${COLORS[s.color].name}</div>` +
-    bar('Toppfart', (spec.top - 50) / 21) + bar('Acceleration', (spec.accel - 7) / 6.5) + bar('Väggrepp', (spec.grip - 13) / 4.5) + bar('Vikt', (spec.mass - 0.7) / 0.95) + bar('Driftvillighet', (spec.drift - 0.7) / 0.8) +
-    `<p class="fj-desc">${spec.desc}</p>`;
+  go.textContent = 'Starta';
+  go.disabled = !owns(s.car) || !trackUnlocked(s.track);
+  showroom.setCar(s.car, lookOf(s.car));
+  const def = trackById(s.track).def;
+  $('carInfo').innerHTML = carHead(carSpec(s.car)) + statBars(carSpec(s.car), playerSpec(s.car, def.surface)) + `<p class="fj-desc">${esc(carSpec(s.car).desc)}</p>`;
 }
-function themeSwatch(th) { return { midsommar: 'linear-gradient(90deg,#f4d2a0,#4e7d2f)', skargard: 'linear-gradient(90deg,#2f72d2,#b59484)', odemark: 'linear-gradient(90deg,#ff9448,#d7a96a)', fjall: 'linear-gradient(90deg,#1a56b8,#f1f5fa)', stad: 'linear-gradient(90deg,#2b1d40,#ff4fb0)', is: 'linear-gradient(90deg,#15405c,#2cff9a)' }[th]; }
+const SW = { midsommar: 'linear-gradient(90deg,#f4d2a0,#4e7d2f)', skargard: 'linear-gradient(90deg,#2f72d2,#b59484)', odemark: 'linear-gradient(90deg,#ff9448,#d7a96a)', fjall: 'linear-gradient(90deg,#1a56b8,#f1f5fa)', stad: 'linear-gradient(90deg,#2b1d40,#ff4fb0)', is: 'linear-gradient(90deg,#15405c,#2cff9a)' };
+function themeSwatch(th) {
+  if (SW[th]) return SW[th];
+  const t = trackThemes[th]; if (!t) return '#555';
+  return `linear-gradient(90deg,${css(t.sky.top)},${css(t.sky.horizon)},${css(t.fog.color)})`;
+}
 $('setupBody').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const s = setup;
-  if (b.classList.contains('locked')) { audio.play('error'); toast('Låst – ' + (b.querySelector('small') ? b.querySelector('small').textContent : '')); return; }
-  if (b.dataset.cup) s.cup = b.dataset.cup;
-  else if (b.dataset.track) s.track = b.dataset.track;
+  if (b.classList.contains('locked')) { audio.play('error'); toast('Låst – lås upp banan i Karriären'); return; }
+  if (b.dataset.track) s.track = b.dataset.track;
   else if (b.dataset.car) s.car = b.dataset.car;
-  else if (b.dataset.color != null) s.color = +b.dataset.color;
   else if (b.dataset.v != null) { const k = b.parentNode.dataset.seg; s[k] = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v; }
   audio.play('click');
   renderSetup();
 });
 $('setupGo').addEventListener('click', () => {
   const s = setup; audio.play('select');
-  Object.assign(save, { car: s.car, color: s.color, diff: s.diff, laps: s.laps, opp: s.opp });
-  if (s.mode === 'cup') { save.cup = s.cup; persist(); startCup(s.cup, s.diff); return; }
+  Object.assign(save, { car: s.car, diff: s.diff, laps: s.laps, opp: s.opp });
   if (s.mode === 'time') save.tt = s.track; else save.track = s.track;
   persist();
-  startRace({ mode: s.mode, track: s.track, laps: s.mode === 'quick' ? s.laps : 0, diff: s.diff, car: s.car, color: s.color, opp: s.mode === 'quick' ? s.opp : 0 });
+  const sprint = trackById(s.track).def.sprint;
+  startRace({ mode: s.mode, track: s.track, laps: s.mode === 'quick' ? (sprint ? 1 : s.laps) : 0, diff: s.diff, car: s.car, opp: s.mode === 'quick' ? s.opp : 0 });
 });
 $('setupBack').addEventListener('click', () => { audio.play('click'); screen('menu'); updateMenu(); });
-$('mCup').addEventListener('click', () => { audio.play('select'); openSetup('cup'); });
+
+/* ---------- Karriär ---------- */
+let careerSel = null;
+function unlockedTrackIds() { return TRACKS.map(t => t.id).filter(id => trackUnlocked(id)); }
+function todaysDaily() {
+  if (!save.daily || save.daily.day !== todayKey()) save.daily = { day: todayKey(), done: [] };
+  return dailyChallenges(unlockedTrackIds());
+}
+function findEvent(id) { return eventById(id) || todaysDaily().find(e => e.id === id); }
+function eventCars(e) {
+  if (e.type !== 'klass') return save.owned.slice();
+  const own = save.owned.filter(id => carSpec(id).klass === e.klass);
+  return own.length ? own : [CARS.find(c => c.klass === e.klass).id];
+}
+function openCareer() {
+  const ds = todaysDaily();
+  if (!careerSel || !findEvent(careerSel.id)) {
+    const first = EVENTS.find(e => eventUnlocked(e, save.career) && !(save.career[e.id] >= 3)) || EVENTS[0];
+    careerSel = { id: first.id, car: null };
+  }
+  renderCareer(ds);
+  screen('career'); showroom.showCar();
+}
+function evCard(e, extraCls = '') {
+  const un = e.daily || eventUnlocked(e, save.career);
+  const st = e.daily ? (save.daily.done.includes(e.id) ? 3 : 0) : (save.career[e.id] || 0);
+  const t = ETYPES[e.type];
+  return `<button class="fj-card fj-ev ${careerSel.id === e.id ? 'on' : ''} ${un ? '' : 'locked'} ${extraCls}" data-ev="${e.id}"><span class="tag">${un ? (e.daily ? (st ? '✅' : '') : starTxt(st)) : '🔒'}</span><b>${t.icon} ${esc(e.name)}</b><small>${t.name}${e.klass ? ' · ' + e.klass : ''} · ${e.tracks.map(trackName).join(', ')}</small></button>`;
+}
+function renderCareer(ds) {
+  ds = ds || todaysDaily();
+  const stars = totalStars(save.career);
+  let h = `<div class="fj-wallet"><span>💰 ${fmtKr(save.kr)}</span><span>⭐ ${stars}/${EVENTS.length * 3}</span></div>`;
+  h += `<div class="fj-sec"><label>Dagens utmaningar (${todayKey()})</label><div class="fj-cards">${ds.map(e => evCard(e, 'daily')).join('')}</div></div>`;
+  for (const ch of CHAPTERS) {
+    const un = chapterUnlocked(ch, save.career);
+    const evs = EVENTS.filter(e => e.ch === ch.id);
+    const got = evs.reduce((a, e) => a + (save.career[e.id] || 0), 0);
+    h += `<div class="fj-sec"><label>${ch.name} ${un ? `· ${got}/${evs.length * 3} ★` : `· 🔒 kräver ${ch.req} ★`}</label><div class="fj-cards">${evs.map(e => evCard(e)).join('')}</div></div>`;
+  }
+  $('careerBody').innerHTML = h;
+  const e = findEvent(careerSel.id);
+  const cars = eventCars(e);
+  if (!careerSel.car || !cars.includes(careerSel.car)) careerSel.car = cars.includes(save.car) ? save.car : cars[0];
+  const loaner = !owns(careerSel.car);
+  const t = ETYPES[e.type], un = e.daily || eventUnlocked(e, save.career);
+  const def0 = trackById(e.tracks[0]).def;
+  let info = `<h3>${t.icon} ${esc(e.name)}</h3><div class="k">${t.name}${e.daily ? ' · Daglig utmaning' : ' · ' + chapterOf(e).name.split(' – ')[0]}</div><p class="fj-desc">${t.desc}</p>`;
+  info += `<p class="fj-desc"><b>Banor:</b> ${e.tracks.map(trackName).join(' → ')}<br>`;
+  if (e.type === 'elim') info += `<b>Förare:</b> ${(e.opp || 5) + 1} · ${e.opp || 5} varv`;
+  else info += `<b>Varv:</b> ${e.laps || 1}${e.opp ? ` · <b>Motståndare:</b> ${e.opp}` : e.type === 'duel' ? ` · <b>Motståndare:</b> ${esc(e.rival.name)} i ${esc(carSpec(e.rival.car).name)}` : ''}`;
+  if (e.type === 'tid' || e.type === 'rally') info += `<br><b>Måltider:</b> ${e.tgt.map((m, k) => ['🥇', '🥈', '🥉'][k] + ' ' + fmtTime(m * def0.par * (e.laps || 1))).join(' · ')}`;
+  if (e.type === 'drift') info += `<br><b>Driftpoäng:</b> ${e.tgt.map((m, k) => ['🥇', '🥈', '🥉'][k] + ' ' + m).join(' · ')}`;
+  info += `</p><p class="fj-desc"><b>Belöning:</b> ${rewardText(e, id => carSpec(id).name).join(' · ')}</p>`;
+  if (!e.daily) info += `<p class="fj-desc">Ditt bästa: ${starTxt(save.career[e.id] || 0)}</p>`;
+  $('careerInfo').innerHTML = info;
+  $('careerCars').innerHTML = `<label>${loaner ? 'Lånebil (du har ingen ' + e.klass + '-bil)' : 'Välj bil'}</label>` + carCards(cars, careerSel.car);
+  $('careerGo').disabled = !un;
+  $('careerGo').textContent = un ? 'Starta' : '🔒 Låst';
+  showroom.setCar(careerSel.car, loaner ? { color: DEF_COL[careerSel.car] ?? 0xcccccc } : lookOf(careerSel.car));
+}
+$('careerBody').addEventListener('click', e => {
+  const b = e.target.closest('button[data-ev]'); if (!b) return;
+  careerSel = { id: b.dataset.ev, car: careerSel.car }; audio.play('click'); renderCareer();
+  if (b.classList.contains('locked')) toast('Låst – samla fler stjärnor');
+});
+$('careerCars').addEventListener('click', e => { const b = e.target.closest('button[data-car]'); if (!b) return; careerSel.car = b.dataset.car; audio.play('click'); renderCareer(); });
+$('careerGo').addEventListener('click', () => { audio.play('select'); startEvent(findEvent(careerSel.id), careerSel.car); });
+$('careerBack').addEventListener('click', () => { audio.play('click'); toMenu(); });
+function startEvent(e, carId) {
+  if (owns(carId)) { save.car = carId; persist(); }
+  const diff = e.daily ? (save.diff || 'medium') : chapterOf(e).diff;
+  if (e.type === 'cup') return startCup(e, diff, carId);
+  const solo = e.type === 'tid' || e.type === 'rally' || e.type === 'drift';
+  const opp = e.type === 'duel' ? 1 : solo ? 0 : (e.opp || 5);
+  const laps = e.type === 'elim' ? opp : (e.laps || 1);
+  startRace({ mode: 'career', ev: e.id, evObj: e.daily ? e : null, etype: e.type, track: e.tracks[0], laps, diff, car: carId, loaner: !owns(carId), opp, klass: e.klass || null });
+}
+
+/* ---------- Garage ---------- */
+const gar = { car: null, tab: 'perf' };
+function openGarage() { gar.car = owns(save.car) ? save.car : save.owned[0]; renderGarage(); screen('garage'); showroom.showCar(); }
+function ownedOf(cat) { return save.parts.filter(k => k.startsWith(cat)); }
+function partBtn(key, on, locked) {
+  const info = partInfo(key); const r = RARITIES[info.rar];
+  return `<button class="fj-part ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-part="${key}" style="--r:${r.color}"><b>${esc(info.name)}</b><small>${r.name}</small></button>`;
+}
+function renderGarage() {
+  const id = gar.car, spec = carSpec(id), lk = lookOf(id), pf = perfOf(id);
+  let h = `<div class="fj-wallet"><span>💰 ${fmtKr(save.kr)}</span><span>🧩 ${save.parts.length} delar</span><span>🎁 ${crateCount()} lådor</span></div>`;
+  h += `<div class="fj-sec"><label>Dina bilar</label>${carCards(save.owned, id)}</div>`;
+  h += `<div class="fj-seg fj-tabs" data-tab="1"><button data-t="perf" class="${gar.tab === 'perf' ? 'on' : ''}">🔧 Prestanda</button><button data-t="look" class="${gar.tab === 'look' ? 'on' : ''}">🎨 Utseende</button></div>`;
+  if (gar.tab === 'perf') {
+    for (const c of PERF) {
+      const keys = ownedOf('p:' + c.id + ':').sort((a, b) => partInfo(b).rar - partInfo(a).rar);
+      h += `<div class="fj-sec"><label>${c.icon} ${c.name} – <span class="fj-muted">${c.desc}</span></label><div class="fj-parts"><button class="fj-part ${!pf[c.id] ? 'on' : ''}" data-part="none:${c.id}"><b>Standard</b><small>Original</small></button>${keys.map(k => partBtn(k, pf[c.id] === k)).join('') || '<span class="fj-muted">Inga hittade ännu – öppna lådor!</span>'}</div></div>`;
+    }
+  } else {
+    h += `<div class="fj-sec"><label>Lackfärg</label><div class="fj-swatches">${COLORS.map(c => `<button class="${lk.color === c.hex ? 'on' : ''}" data-col="${c.hex}" title="${c.name}" aria-label="${c.name}" style="background:${css(c.hex)}"></button>`).join('')}<label class="fj-custom" title="Egen färg"><input type="color" id="gCol" value="${css(lk.color)}"><span>Egen</span></label></div></div>`;
+    const lookRow = (cat, curId, stdName) => {
+      const c = lookCat(cat);
+      return `<div class="fj-sec"><label>${c.icon} ${c.name}</label><div class="fj-parts"><button class="fj-part ${!curId ? 'on' : ''}" data-look="${cat}:"><b>${stdName}</b><small>Standard</small></button>${c.items.map(it => { const key = `l:${cat}:${it.id}`; const own = save.parts.includes(key); return partBtn(key, String(curId) === String(it.id), !own).replace('data-part=', 'data-look-key="' + key + '" data-x='); }).join('')}</div></div>`;
+    };
+    h += lookRow('finish', lk.finish && lk.finish !== 'gloss' ? lk.finish : '', 'Blank');
+    h += lookRow('rims', lk.rims && lk.rims !== 'std' ? lk.rims : '', 'Original');
+    h += lookRow('spoiler', lk.spoiler && lk.spoiler !== 'default' ? lk.spoiler : '', 'Original');
+    h += lookRow('kit', lk.kit && lk.kit !== 'none' ? lk.kit : '', 'Original');
+    h += lookRow('decal', lk.decal && lk.decal !== 'none' ? lk.decal : '', 'Ingen');
+    h += `<div class="fj-sec"><label>Dekalfärg</label><div class="fj-swatches">${[0xffffff, 0x111111, 0xffcc33, 0xff3b30, 0x39d5ff, 0x4ade80, 0xff7ad0, 0xf06b12].map(c => `<button class="${(lk.decalColor ?? 0xffffff) === c ? 'on' : ''}" data-dcol="${c}" style="background:${css(c)}"></button>`).join('')}</div></div>`;
+    h += lookRow('neon', lk.neon != null ? '0x' + lk.neon.toString(16).padStart(6, '0') : '', 'Inget');
+    h += lookRow('tint', lk.tint && lk.tint !== 'clear' ? lk.tint : '', 'Ljus');
+    h += `<div class="fj-sec fj-row2"><label>Startnummer <input type="number" id="gNum" min="0" max="99" value="${lk.number || 0}"></label><label>Registreringsskylt <input type="text" id="gPlate" maxlength="7" value="${esc(lk.plate || '')}"></label></div>`;
+  }
+  $('garageBody').innerHTML = h;
+  showroom.setCar(id, lk);
+  $('garageInfo').innerHTML = carHead(spec) + statBars(spec, applyParts(spec, pf, 'asfalt')) + `<p class="fj-desc">${esc(spec.desc)}</p><p class="fj-note2">Dra i bilden för att vrida bilen. Staplarna visar standard (grå) och med dina delar (grönt = bättre, rött = sämre). Däckens effekt beror på underlaget.</p>`;
+}
+function setLook(patch) {
+  const lk = lookOf(gar.car); Object.assign(lk, patch); persist(); renderGarage();
+}
+$('garageBody').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.car) { gar.car = b.dataset.car; save.car = gar.car; persist(); audio.play('click'); return renderGarage(); }
+  if (b.dataset.t) { gar.tab = b.dataset.t; audio.play('click'); return renderGarage(); }
+  if (b.dataset.part) {
+    const pf = perfOf(gar.car);
+    if (b.dataset.part.startsWith('none:')) delete pf[b.dataset.part.slice(5)];
+    else { const info = partInfo(b.dataset.part); if (pf[info.cat] === info.key) delete pf[info.cat]; else pf[info.cat] = info.key; }
+    audio.play('pickup', { vol: 0.5 }); persist(); return renderGarage();
+  }
+  if (b.dataset.lookKey) {
+    if (b.classList.contains('locked')) { audio.play('error'); toast('Inte hittad än – finns i lådor'); return; }
+    const info = partInfo(b.dataset.lookKey);
+    const map = { finish: 'finish', rims: 'rims', spoiler: 'spoiler', kit: 'kit', decal: 'decal', tint: 'tint' };
+    audio.play('pickup', { vol: 0.5 });
+    if (info.cat === 'neon') return setLook({ neon: parseInt(info.id, 16) });
+    return setLook({ [map[info.cat]]: info.id });
+  }
+  if (b.dataset.look != null) {
+    const cat = b.dataset.look.split(':')[0];
+    const reset = { finish: { finish: 'gloss' }, rims: { rims: 'std' }, spoiler: { spoiler: 'default' }, kit: { kit: 'none' }, decal: { decal: 'none' }, neon: { neon: null }, tint: { tint: 'clear' } }[cat];
+    audio.play('click'); return setLook(reset);
+  }
+  if (b.dataset.col) { audio.play('click'); return setLook({ color: +b.dataset.col }); }
+  if (b.dataset.dcol) { audio.play('click'); return setLook({ decalColor: +b.dataset.dcol }); }
+});
+$('garageBody').addEventListener('change', e => {
+  if (e.target.id === 'gCol') setLook({ color: parseInt(e.target.value.slice(1), 16) });
+  if (e.target.id === 'gNum') setLook({ number: clamp(Math.round(+e.target.value || 0), 0, 99) });
+  if (e.target.id === 'gPlate') setLook({ plate: e.target.value.toUpperCase().replace(/[^A-ZÅÄÖ0-9 ]/g, '').slice(0, 7) || 'ABC 123' });
+});
+$('garageBack').addEventListener('click', () => { audio.play('click'); toMenu(); });
+
+/* ---------- Bilhandel ---------- */
+let dealSel = 'pixel';
+function openDealer() { renderDealer(); screen('dealer'); showroom.showCar(); }
+function renderDealer() {
+  let h = `<div class="fj-wallet"><span>💰 ${fmtKr(save.kr)}</span><span>🚗 ${save.owned.length}/${CARS.length}</span></div>`;
+  for (const cl of CLASSES) {
+    const cars = CARS.filter(c => c.klass === cl.id); if (!cars.length) continue;
+    h += `<div class="fj-sec"><label>${cl.icon} ${cl.id}</label><div class="fj-cards">${cars.map(c => {
+      const own = owns(c.id), pi = perfIndex(c);
+      return `<button class="fj-card ${dealSel === c.id ? 'on' : ''}" data-deal="${c.id}"><span class="tag pc pc-${piClass(pi)}">${piClass(pi)}</span><b>${esc(c.name)}</b><small>${own ? '✅ I garaget' : c.price == null ? '🏆 Kan bara vinnas' : fmtKr(c.price)}</small></button>`;
+    }).join('')}</div></div>`;
+  }
+  $('dealerBody').innerHTML = h;
+  const c = carSpec(dealSel), own = owns(c.id);
+  showroom.setCar(c.id, own ? lookOf(c.id) : { color: DEF_COL[c.id] ?? 0xcccccc });
+  $('dealerInfo').innerHTML = carHead(c) + statBars(c) + `<p class="fj-desc">${esc(c.desc)}</p>`;
+  const buy = $('dealerBuy');
+  buy.disabled = own || c.price == null || save.kr < c.price;
+  buy.textContent = own ? 'Redan din' : c.price == null ? 'Vinns i karriären' : save.kr < c.price ? `Köp (${fmtKr(c.price)}) – för lite pengar` : `Köp för ${fmtKr(c.price)}`;
+}
+$('dealerBody').addEventListener('click', e => { const b = e.target.closest('button[data-deal]'); if (!b) return; dealSel = b.dataset.deal; audio.play('click'); renderDealer(); });
+$('dealerBuy').addEventListener('click', () => {
+  const c = carSpec(dealSel); if (owns(c.id) || c.price == null || save.kr < c.price) return;
+  addKr(-c.price); giveCar(c.id); save.car = c.id; persist();
+  audio.play('levelup'); toast('Ny bil i garaget: ' + c.name);
+  renderDealer();
+});
+$('dealerBack').addEventListener('click', () => { audio.play('click'); toMenu(); });
+
+/* ---------- Lådor ---------- */
+function openCrates() { renderCrates(); screen('crates'); showroom.showCar(); }
+function renderCrates() {
+  const n = (t) => save.crates.filter(x => x === t).length;
+  let h = `<div class="fj-wallet"><span>💰 ${fmtKr(save.kr)}</span><span>🧩 ${save.parts.length} delar</span></div>`;
+  h += `<p class="fj-desc">Lådor vinner du i karriären och dagliga utmaningar – och några ligger gömda på banorna i Fri körning (kör in i dem!). Dubbletter växlas automatiskt mot kronor.</p><div class="fj-cratelist">`;
+  for (const [id, c] of Object.entries(CRATES)) {
+    h += `<div class="fj-crate" style="--c:${c.color}"><div class="fj-cratebox"></div><b>${c.name}</b><small>${n(id)} st</small><button class="btn ${n(id) ? 'primary' : ''}" data-open="${id}" ${n(id) ? '' : 'disabled'}>Öppna</button></div>`;
+  }
+  h += `</div><div class="fj-sec"><label>Sällsynthet</label><div class="fj-rar">${RARITIES.map(r => `<span style="--r:${r.color}">${r.name}</span>`).join('')}</div></div>`;
+  $('cratesBody').innerHTML = h;
+}
+$('cratesBody').addEventListener('click', e => { const b = e.target.closest('button[data-open]'); if (b) openCrateAnim(b.dataset.open); });
+$('cratesBack').addEventListener('click', () => { audio.play('click'); toMenu(); });
+function openCrateAnim(type) {
+  const i = save.crates.indexOf(type); if (i < 0) return;
+  save.crates.splice(i, 1);
+  const res = openCrate(type, save.parts);
+  let dupKr = 0;
+  for (const it of res.items) { if (it.dup) dupKr += RARITIES[it.info.rar].sell; else save.parts.push(it.key); }
+  addKr(res.coins + dupKr); persist();
+  const c = CRATES[type];
+  const ov = document.createElement('div'); ov.className = 'fj-crateov';
+  ov.innerHTML = `<div class="fj-bigcrate" style="--c:${c.color}"><div class="lid"></div><div class="box"></div><div class="glow"></div></div><h2>${c.name}</h2><div class="fj-loot"></div><p class="fj-lootkr"></p><button class="btn primary hidden">Fortsätt</button>`;
+  root.appendChild(ov);
+  audio.play('select');
+  const best = Math.max(...res.items.map(x => x.info.rar));
+  ov.querySelector('.fj-bigcrate').style.setProperty('--g', RARITIES[best].color);
+  setTimeout(() => { ov.classList.add('open'); audio.play(best >= 3 ? 'levelup' : 'power'); }, 1300);
+  const loot = ov.querySelector('.fj-loot');
+  res.items.forEach((it, k) => setTimeout(() => {
+    const r = RARITIES[it.info.rar];
+    const d = document.createElement('div'); d.className = 'fj-lootcard'; d.style.setProperty('--r', r.color);
+    d.innerHTML = `<i>${it.info.icon}</i><b>${esc(it.info.name)}</b><small>${r.name} · ${it.info.kind === 'perf' ? 'Prestanda' : 'Utseende'}</small>${it.dup ? `<em>Dubblett → +${fmtKr(r.sell)}</em>` : '<em class="new">NY!</em>'}`;
+    loot.appendChild(d); audio.play(it.info.rar >= 3 ? 'coin' : 'pickup', { vol: 0.6 });
+  }, 1700 + k * 450));
+  setTimeout(() => {
+    ov.querySelector('.fj-lootkr').textContent = `+${fmtKr(res.coins)} i lådan${dupKr ? ` · +${fmtKr(dupKr)} för dubbletter` : ''}`;
+    const b = ov.querySelector('button'); b.classList.remove('hidden'); b.focus();
+    b.addEventListener('click', () => { ov.remove(); audio.play('click'); renderCrates(); });
+  }, 1900 + res.items.length * 450);
+}
+
+$('mPlay').addEventListener('click', () => { audio.play('select'); quickPlay(); });
+$('mCareer').addEventListener('click', () => { audio.play('select'); openCareer(); });
+$('mGarage').addEventListener('click', () => { audio.play('select'); openGarage(); });
+$('mDealer').addEventListener('click', () => { audio.play('select'); openDealer(); });
+$('mCrates').addEventListener('click', () => { audio.play('select'); openCrates(); });
 $('mQuick').addEventListener('click', () => { audio.play('select'); openSetup('quick'); });
 $('mTime').addEventListener('click', () => { audio.play('select'); openSetup('time'); });
 $('mFree').addEventListener('click', () => { audio.play('select'); openSetup('free'); });
@@ -385,7 +687,7 @@ function pauseGame(on) {
   loop.setPaused(on);
   if (on) {
     muteLoops(); input.clear();
-    $('pauseInfo').textContent = trackName(race.cfg.track) + (race.cfg.mode === 'cup' ? ' · ' + CUPS.find(c => c.id === race.cfg.cup).name : '');
+    $('pauseInfo').textContent = trackName(race.cfg.track) + (race.cfg.mode === 'cup' ? ' · ' + eventById(race.cfg.cup).name : race.cfg.ev ? ' · ' + findEvent(race.cfg.ev).name : '');
     $('pRestart').textContent = race.cfg.mode === 'time' || race.cfg.mode === 'free' ? 'Börja om' : 'Starta om loppet';
     screen('pause');
   } else { screen(null); loop.timeScale = race.slowmo > 0 ? 0.35 : 1; if (document.activeElement) document.activeElement.blur(); }
@@ -408,25 +710,37 @@ addEventListener('keydown', (e) => {
 });
 
 /* ------------------------------------------------------------------ Mästerskap */
-function startCup(cupId, diff) {
-  const cup = CUPS.find(c => c.id === cupId);
+const AI_DECALS = ['none', 'none', 'none', 'race', 'side', 'checker', 'fade', 'geo'];
+function aiLook(rng, hex, carId) {
+  const lk = { color: hex };
+  if (rng() < 0.4) lk.decal = AI_DECALS[(rng() * AI_DECALS.length) | 0];
+  if (rng() < 0.35) lk.number = 1 + ((rng() * 98) | 0);
+  if (rng() < 0.2) lk.rims = ['fem', 'mesh', 'racing', 'turbin'][(rng() * 4) | 0];
+  return lk;
+}
+/** Datorbilar med prestanda nära spelarens (klass: bara den klassen). */
+function pickAiCars(playerId, klass, n, rng, pi) {
+  let pool = klass ? CARS.filter(c => c.klass === klass) : CARS.slice();
+  pi = pi || perfIndex(carSpec(playerId));
+  pool = pool.slice().sort((a, b) => Math.abs(perfIndex(a) - pi) - Math.abs(perfIndex(b) - pi)).slice(0, Math.max(3, Math.min(6, pool.length)));
+  const out = []; for (let k = 0; k < n; k++) out.push(pool[(rng() * pool.length) | 0].id);
+  return out;
+}
+function startCup(ev, diff, carId) {
   const rng = makeRng(Date.now() & 0xffff);
-  const pool = AI_DRIVERS.slice().sort(() => rng() - 0.5).slice(0, 7);
-  const usedColors = new Set([save.color]);
-  const drivers = [{ name: 'Du', player: true, car: save.car, color: COLORS[save.color].hex }];
-  pool.forEach((d, k) => {
-    let ci; do { ci = (rng() * COLORS.length) | 0; } while (usedColors.has(ci) && usedColors.size < COLORS.length);
-    usedColors.add(ci);
-    drivers.push({ name: d.name, skill: d.skill, aggr: d.aggr, car: cup.aiCars[k % cup.aiCars.length], color: COLORS[ci].hex });
-  });
-  save.cupRun = { id: cupId, diff, idx: 0, drivers, points: drivers.map(() => 0), scores: [] };
+  const pool = AI_DRIVERS.slice().sort(() => rng() - 0.5).slice(0, ev.opp || 7);
+  const cars = pickAiCars(carId, ev.klass, pool.length, rng, perfIndex(playerSpec(carId)));
+  const drivers = [{ name: 'Du', player: true, car: carId }];
+  pool.forEach((d, k) => drivers.push({ name: d.name, skill: d.skill, aggr: d.aggr, car: cars[k], look: aiLook(rng, COLORS[(rng() * COLORS.length) | 0].hex) }));
+  save.cupRun = { id: ev.id, diff, idx: 0, drivers, points: drivers.map(() => 0), scores: [], car: carId };
   persist();
   continueCup();
 }
 function continueCup() {
-  const run = save.cupRun; const cup = CUPS.find(c => c.id === run.id);
-  run.drivers[0].car = save.car; run.drivers[0].color = COLORS[save.color].hex;
-  startRace({ mode: 'cup', cup: run.id, track: cup.tracks[run.idx], laps: 3, diff: run.diff, car: save.car, color: save.color, opp: 7 });
+  const run = save.cupRun; const ev = eventById(run.id);
+  if (!ev) { save.cupRun = null; persist(); return toMenu(); }
+  run.drivers[0].car = run.car || save.car;
+  startRace({ mode: 'cup', cup: run.id, track: ev.tracks[run.idx], laps: ev.laps || 2, diff: run.diff, car: run.drivers[0].car, opp: ev.opp || 7 });
 }
 
 /* ------------------------------------------------------------------ Loppet */
@@ -473,37 +787,41 @@ async function startRace(cfg) {
   const diff = DIFFICULTY[cfg.diff] || DIFFICULTY.easy;
   const rng = makeRng(Date.now() & 0xfffff);
   let entries = [];
+  const surface = t.def.surface || 'asfalt';
+  const equal = !!cfg.online; // online: lika villkor – prestandadelar avstängda
   if (cfg.online) {
-    entries = cfg.grid.map((g, k) => ({ name: g.n, car: g.car, color: COLORS[g.col].hex, idx: k, key: g.id, player: g.id === net.selfId,
+    entries = cfg.grid.map((g, k) => ({ name: g.n, car: g.car, look: lookFromNet(g), idx: k, key: g.id, player: g.id === net.selfId,
       remote: g.id !== net.selfId && !(net.isHost && isAiKey(g.id)), skill: g.sk, aggr: g.ag }));
   } else if (cfg.mode === 'cup') {
     const run = save.cupRun;
     // startordning: ledaren startar sist
     const order = run.drivers.map((d, k) => k).sort((a, b) => run.points[a] - run.points[b] || (a === 0 ? 1 : b === 0 ? -1 : a - b));
-    if (run.idx === 0) { order.splice(order.indexOf(0), 1); order.splice(5, 0, 0); }
+    if (run.idx === 0) { order.splice(order.indexOf(0), 1); order.splice(Math.min(order.length, 5), 0, 0); }
     entries = order.map(k => Object.assign({ idx: k }, run.drivers[k]));
   } else {
-    entries.push({ name: 'Du', player: true, car: cfg.car, color: COLORS[cfg.color].hex, idx: 0 });
+    entries.push({ name: 'Du', player: true, car: cfg.car, idx: 0 });
     if (cfg.opp > 0) {
-      const pt = CAR_TIER[cfg.car] || 0;
-      const aiCars = CARS.filter(c => { const t = CAR_TIER[c.id]; return t <= pt && t >= pt - 1; }).map(c => c.id);
-      const pool = AI_DRIVERS.slice().sort(() => rng() - 0.5).slice(0, cfg.opp);
-      const used = new Set([cfg.color]);
+      const ev = cfg.ev ? findEvent(cfg.ev) : null;
+      let pool = AI_DRIVERS.slice().sort(() => rng() - 0.5).slice(0, cfg.opp);
+      let cars = pickAiCars(cfg.car, cfg.klass, pool.length, rng, perfIndex(playerSpec(cfg.car, surface, cfg.loaner)));
+      if (ev && ev.type === 'duel') { pool = [{ name: ev.rival.name, skill: ev.rival.skill, aggr: 0.7 }]; cars = [ev.rival.car]; }
       pool.forEach((d, k) => {
-        let ci; do { ci = (rng() * COLORS.length) | 0; } while (used.has(ci) && used.size < COLORS.length); used.add(ci);
-        entries.push({ name: d.name, skill: d.skill, aggr: d.aggr, car: aiCars[(rng() * aiCars.length) | 0], color: COLORS[ci].hex, idx: k + 1 });
+        entries.push({ name: d.name, skill: d.skill, aggr: d.aggr, car: cars[k], look: aiLook(rng, ev && ev.type === 'duel' ? (DEF_COL[ev.rival.car] ?? 0x15171f) : COLORS[(rng() * COLORS.length) | 0].hex), idx: k + 1 });
       });
-      // spelaren i mitten/bak av fältet
+      // spelaren i mitten/bak av fältet (duell: bredvid varandra)
       const me = entries.shift(); entries.splice(Math.min(entries.length, Math.ceil(entries.length * 0.7)), 0, me);
     }
   }
   const night = th.night;
+  const q = settings.get('quality');
   entries.forEach((e, slot) => {
-    const car = new Car(carSpec(e.car), e.color, { physical: !!e.player && settings.get('quality') !== 'low' });
-    car.name = e.name; car.isPlayer = !!e.player; car.entryIdx = e.idx; car.colorHex = e.color;
+    const look = e.player && !cfg.online ? (cfg.loaner ? { color: DEF_COL[e.car] ?? 0xcccccc } : lookOf(e.car)) : (e.look || { color: 0xcccccc });
+    const spec = e.player && !cfg.online ? playerSpec(e.car, surface, cfg.loaner) : carSpec(e.car);
+    const car = new Car(spec, look, { quality: e.player ? (q === 'low' ? 'low' : q === 'medium' ? 'high' : q) : (q === 'low' ? 'low' : 'medium') });
+    car.name = e.name; car.isPlayer = !!e.player; car.entryIdx = e.idx; car.colorHex = look.color; car.look = look;
     car.key = e.key || null; car.remote = !!e.remote; car.isHuman = cfg.online ? !isAiKey(e.key) : !!e.player;
     // nattbanor: lite egenljus i lacken så att bilarna (och särskilt den egna) inte blir svarta siluetter
-    if (th.night) car.model.paintMat.emissive.set(e.color).multiplyScalar(e.player ? 0.16 : 0.1);
+    if (th.night && car.model.paintMat.emissive) car.model.paintMat.emissive.set(look.color).multiplyScalar(e.player ? 0.16 : 0.1);
     const gs = track.gridSlot(slot);
     car.placeAt(track, gs.s, gs.d);
     Object.assign(car, { progress: gs.s, lastS: car.tp.s, lapsDone: 0, cpNext: 1, lapStart: 0, lapTimes: [], bestLap: Infinity, finished: false, finishTime: 0, wrong: 0, stuck: 0, raceActive: false, position: slot + 1 });
@@ -516,10 +834,6 @@ async function startRace(cfg) {
         car.ai = ai; r.ais.push(ai); car.noDrift = true; car.powerMul = diff.power;
       }
     }
-    if (night && !e.player) {
-      if (!r.coneGeo) { const g = new THREE.ConeGeometry(3.2, 15, 16, 1, true); g.rotateX(-Math.PI / 2); g.translate(0, 0, 8); r.coneGeo = g; }
-      const cone = new THREE.Mesh(r.coneGeo, buildConeMat()); cone.position.set(0, 0.7, 1.9); cone.rotation.x = 0.06; car.model.body.add(cone);
-    }
     r.cars.push(car);
     if (car.key) r.byKey[car.key] = car;
     if (car.isPlayer) { r.player = car; car.progressive = true; }
@@ -529,6 +843,7 @@ async function startRace(cfg) {
     sl.position.set(0, 0.9, 1.6); sl.target.position.set(0, -0.6, 22);
     r.player.model.body.add(sl, sl.target); r.spot = sl;
   }
+  if (cfg.mode === 'free') buildCrates(r);
   // spöke
   if (cfg.mode === 'time') {
     const gm = buildCarModel(carSpec(cfg.car), 0xffffff, { ghost: true });
@@ -583,8 +898,46 @@ function warmShaders() {
   } catch (e) { /* bara en optimering */ }
 }
 let race0CamMode = [0, 1, 2].includes(save.cam) ? save.cam : 0; // kameraval sparas mellan sessioner
-let coneMat = null;
-function buildConeMat() { if (!coneMat) coneMat = new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0.035, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }); return coneMat; }
+
+/* ---------- gömda lådor (fri körning) ---------- */
+let crateGeo = null, crateMat = null, beamMat = null;
+function crateSpotsFound(key) { const b = String(key).split('@')[0] + ':'; return (save.found || []).filter(f => f.startsWith(b)).length; }
+function buildCrates(r) {
+  const tr = r.track, base = r.cfg.track.split('@')[0];
+  if (!crateGeo) {
+    crateGeo = new THREE.BoxGeometry(1.3, 1.3, 1.3);
+    const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    g.fillStyle = '#9a6a3a'; g.fillRect(0, 0, 128, 128); g.strokeStyle = '#5a3a1a'; g.lineWidth = 10; g.strokeRect(5, 5, 118, 118);
+    g.beginPath(); g.moveTo(5, 5); g.lineTo(123, 123); g.stroke(); g.fillStyle = '#ffcc33'; g.font = '900 54px Rubik, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', 64, 66);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    crateMat = new THREE.MeshStandardMaterial({ map: t, emissive: 0xffaa33, emissiveIntensity: 0.25, roughness: 0.7 });
+    beamMat = new THREE.MeshBasicMaterial({ color: 0xffd060, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false });
+  }
+  r.crates = [];
+  for (let k = 0; k < 3; k++) {
+    const id = base + ':' + k;
+    if ((save.found || []).includes(id)) continue;
+    const s = tr.L * (0.18 + 0.31 * k), side = k % 2 ? 1 : -1;
+    const p = tr.pointAt(s, side * (tr.half + Math.min(tr.shoulder, 2.5) * 0.55), 0.75, new THREE.Vector3());
+    const m = new THREE.Mesh(crateGeo, crateMat); m.position.copy(p); m.castShadow = true;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 14, 8, 1, true), beamMat); beam.position.y = 7; m.add(beam);
+    scene.add(m); r.crates.push({ id, m, y: p.y, type: k === 2 ? 'stal' : 'tra' });
+  }
+  if (r.crates.length) hud.msg(`🎁 ${r.crates.length} gömda lådor på banan – hitta dem!`, 3200, 'gold');
+}
+function updateCrates(r, dt) {
+  if (!r.crates) return;
+  for (let k = r.crates.length - 1; k >= 0; k--) {
+    const c = r.crates[k];
+    c.m.rotation.y += dt * 1.2; c.m.position.y = c.y + Math.sin(r.time * 2 + k) * 0.15;
+    if (c.m.position.distanceTo(r.player.pos) < 2.8) {
+      save.found.push(c.id); save.crates.push(c.type); persist();
+      hud.msg(`🎁 Du hittade en ${CRATES[c.type].name.toLowerCase()}! Öppna den under Lådor.`, 3000, 'gold'); audio.play('levelup');
+      scene.remove(c.m); c.m.children[0].geometry.dispose(); r.crates.splice(k, 1);
+    }
+  }
+}
+function disposeCrates(r) { if (r.crates) for (const c of r.crates) { scene.remove(c.m); c.m.children[0].geometry.dispose(); } r.crates = null; }
 
 function disposeRace() {
   if (ol.stopTick) { ol.stopTick(); ol.stopTick = null; }
@@ -593,9 +946,9 @@ function disposeRace() {
   stopLoops();
   r.cars.forEach(c => { scene.remove(c.root); disposeCarModel(c.model); });
   if (r.ghost) { scene.remove(r.ghost.model.root); }
+  disposeCrates(r);
   scene.remove(r.trackGroup); r.track.dispose(); r.world.dispose();
   r.particles.dispose(scene); r.sparks.dispose(scene); r.skids.dispose(scene); r.speedFx.dispose(scene);
-  if (r.coneGeo) r.coneGeo.dispose();
   if (r.spot) { try { r.spot.dispose(); } catch (e) {} }
   TX.disposeTrackTextures();
   race = null;
@@ -642,7 +995,7 @@ const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vect
 const _sc = [0, 0, 0];
 function surfaceColor(tr, onRoad) {
   const th = tr.theme;
-  const c = onRoad ? (th.road === 'ice' ? [0.92, 0.96, 1] : th.road === 'wet' ? [0.55, 0.58, 0.66] : [0.82, 0.82, 0.84])
+  const c = onRoad ? (th.dust ? th.dust : th.road === 'ice' ? [0.92, 0.96, 1] : th.road === 'wet' || th.road === 'neo' ? [0.55, 0.58, 0.66] : [0.82, 0.82, 0.84])
     : ({ grass: [0.45, 0.5, 0.3], gravel: [0.6, 0.55, 0.48], sand: [0.86, 0.72, 0.5], snow: [0.95, 0.97, 1], pave: [0.5, 0.5, 0.55] }[th.shoulder] || [0.7, 0.7, 0.7]);
   const k = th.night ? 0.45 : 1;
   _sc[0] = c[0] * k; _sc[1] = c[1] * k; _sc[2] = c[2] * k;
@@ -772,6 +1125,8 @@ function raceUpdate(dt) {
     const allDone = r.cars.every(c => c.finished);
     if (r.finishT > 6.5 || (allDone && r.finishT > 3.5)) { endRace(); return; }
   }
+  if (r.cfg.etype === 'elim') elimCheck(r);
+  if (r.crates) updateCrates(r, dt);
   // ---------- handledning ----------
   if (r.tut) tutorial(dt);
   // ---------- effekter ----------
@@ -780,6 +1135,27 @@ function raceUpdate(dt) {
   hudUpdate(dt);
 }
 
+function elimCheck(r) {
+  if (r.state === 'countdown' || !r.sorted) return;
+  const alive = r.sorted.filter(c => !c.elim);
+  const leader = alive[0]; if (!leader) return;
+  if (leader.lapsDone > (r.elimDone || 0)) {
+    r.elimDone = leader.lapsDone;
+    const out = alive.filter(c => !c.finished).pop();
+    if (out && alive.length > 1) {
+      out.elim = true; out.finished = true; out.finishTime = 10000 - r.time; out.noCollide = true;
+      if (out.ai) { r.ais.splice(r.ais.indexOf(out.ai), 1); out.ai = null; }
+      Object.assign(out.ctl, { throttle: 0, brake: 0.3, steer: 0, hand: false, nitro: false });
+      r.finishOrder.push(out);
+      if (out.isPlayer) {
+        r.state = 'finished'; r.finishT = 0; hud.center('UTSLAGEN!', 'fin stay'); audio.play('lose');
+        out.ai = new AIDriver(out, r.track, { skill: 0.9, aggr: 0.2, pace: 0.6 }); out.progressive = false;
+      } else { hud.msg('❌ ' + out.name + ' är utslagen!', 2000, 'cyan'); audio.play('whoosh', { vol: 0.5 }); }
+      const left = alive.filter(c => !c.elim);
+      if (left.length === 1 && !left[0].finished) finishCar(left[0]);
+    }
+  }
+}
 function onLap(c) {
   const r = race, tr = r.track;
   const lt = r.time - c.lapStart; c.lapStart = r.time;
@@ -879,8 +1255,8 @@ function emitFx(dt) {
         r.particles.spawn(p.x, p.y + 0.2, p.z, -c.vel.x * 0.2 + (Math.random() - 0.5) * 3, 1 + Math.random() * 2.5, -c.vel.z * 0.2 + (Math.random() - 0.5) * 3, 0.8, 0.5, 2.2, col[0], col[1], col[2], 0.6, 1.5, 6);
       }
       // regn-dimma / snörök bakom bilarna
-      if (c.grounded && c.speed > 18 && near && (th.weather === 'rain' || th.road === 'ice' || th.shoulder === 'snow') && Math.random() < 0.25) {
-        const col = th.weather === 'rain' ? [0.32, 0.34, 0.4] : [0.95, 0.97, 1];
+      if (c.grounded && c.speed > 18 && near && (th.weather === 'rain' || th.road === 'ice' || th.road === 'snow' || th.road === 'gravel' || th.shoulder === 'snow') && Math.random() < 0.25) {
+        const col = th.weather === 'rain' ? [0.32, 0.34, 0.4] : th.road === 'gravel' && th.dust ? th.dust : [0.95, 0.97, 1];
         r.particles.spawn(p.x, p.y + 0.3, p.z, -c.vel.x * 0.25, 0.4, -c.vel.z * 0.25, 0.7, 0.6, 2.4, col[0], col[1], col[2], th.weather === 'rain' ? 0.12 : 0.2, 2, 0);
       }
     }
@@ -908,13 +1284,14 @@ Skids.prototype.mark = function (car, side, p, Rt, on, strength) {
   return origMark.call(this, keys[side], p, Rt, on, strength);
 };
 
+const ENGINE_BASE = { Kompakt: 1, Sport: 1.12, Muskel: 0.78, Rally: 1.08, Klassiker: 0.92, 'Terräng': 0.85, El: 1.45, Super: 1.18 };
 function updateAudio(dt) {
   const r = race; if (!r || !snd.engine) return;
   const P = r.player;
   const thr = r.state === 'countdown' ? snd.rev : P.ctl.throttle;
   let es = engineState(P, thr);
   if (r.state === 'countdown') es = { rpm: 0.2 + snd.rev * 0.75, gear: 'N' };
-  const base = { hatch: 1, wagon: 0.9, rally: 1.08, coupe: 1.12, gt: 0.78, super: 1.18 }[P.spec.shape] || 1;
+  const base = ENGINE_BASE[P.spec.klass] || 1;
   snd.engine.set({ freq: (40 + es.rpm * 104) * base, vol: 0.1 + thr * 0.06 + (P.nitroOn ? 0.03 : 0), filter: 380 + es.rpm * 1250 + thr * 450 + (P.nitroOn ? 300 : 0) });
   const slip = P.grounded ? P.wheelSlip : 0;
   const sq = P.speed > 4 && P.onRoad ? clamp(slip - 0.3, 0, 1) : 0;
@@ -924,7 +1301,7 @@ function updateAudio(dt) {
   // närmaste motståndare
   let best = null, bd = 60;
   for (const c of r.cars) { if (c === P) continue; const d = c.pos.distanceTo(P.pos); if (d < bd) { bd = d; best = c; } }
-  if (best) { const e2 = engineState(best, best.ctl.throttle); const b2 = { hatch: 1, wagon: 0.9, rally: 1.08, coupe: 1.12, gt: 0.78, super: 1.18 }[best.spec.shape] || 1; snd.engine2.set({ freq: (40 + e2.rpm * 104) * b2 * 1.01, vol: (1 - bd / 60) * 0.055, filter: 300 + e2.rpm * 900 }); }
+  if (best) { const e2 = engineState(best, best.ctl.throttle); const b2 = ENGINE_BASE[best.spec.klass] || 1; snd.engine2.set({ freq: (40 + e2.rpm * 104) * b2 * 1.01, vol: (1 - bd / 60) * 0.055, filter: 300 + e2.rpm * 900 }); }
   else snd.engine2.set({ vol: 0 });
   r.gear = es.gear; r.rpm = es.rpm;
 }
@@ -992,7 +1369,7 @@ function endRace() {
   const order = r.cars.slice().sort((a, b) => a.finishTime - b.finishTime);
   const P = r.player, pos = order.indexOf(P) + 1;
   const score = raceScore(pos, order.length, P.finishTime, laps, r.track.def.par, P.driftScore, r.cfg.diff);
-  const rows = order.map((c, k) => ({ name: c.isPlayer ? 'Du' : c.name, car: c.spec.name, carId: c.spec.id, color: c.colorHex, time: c.finishTime, est: c.estimated, best: c.bestLap, me: c.isPlayer, idx: c.entryIdx, pts: POINTS[k] || 0 }));
+  const rows = order.map((c, k) => ({ name: c.isPlayer ? 'Du' : c.name, car: c.spec.name, carId: c.spec.id, color: c.colorHex, look: c.look, elim: !!c.elim, time: c.finishTime, est: c.estimated, best: c.bestLap, me: c.isPlayer, idx: c.entryIdx, pts: POINTS[k] || 0 }));
   const summary = { cfg: r.cfg, rows, pos, score, drift: P.driftScore, trackKey: r.cfg.track };
   endSession(false);
   disposeRace();
@@ -1009,63 +1386,102 @@ function endSession(abort) {
   }
 }
 
+/** Delar ut karriärbelöningar. Returnerar lista med rader att visa. */
+function grantRewards(e, stars) {
+  const out = [];
+  if (e.daily) {
+    if (stars >= 1 && !save.daily.done.includes(e.id)) {
+      save.daily.done.push(e.id); addKr(e.kr); save.crates.push(e.crate);
+      out.push(`💰 +${fmtKr(e.kr)}`, `🎁 ${CRATES[e.crate].name}`);
+    } else if (stars < 1) out.push('Klarade inte utmaningen – försök igen!');
+    return out;
+  }
+  const prev = save.career[e.id] || 0;
+  const chBefore = CHAPTERS.filter(ch => chapterUnlocked(ch, save.career)).length;
+  if (stars > prev) {
+    save.career[e.id] = stars;
+    const kr = Math.round(e.kr * (stars - prev) / 3 / 10) * 10 + (prev === 0 ? Math.round(e.kr / 3 / 10) * 10 : 0);
+    addKr(kr); out.push(`💰 +${fmtKr(kr)}`);
+    if (prev === 0 && e.crate) { save.crates.push(e.crate); out.push(`🎁 ${CRATES[e.crate].name}`); }
+    if (stars === 3 && e.car && giveCar(e.car)) out.push(`🚗 Ny bil: ${carSpec(e.car).name}!`);
+  } else if (stars > 0) { const kr = Math.round(e.kr * 0.1 / 10) * 10; addKr(kr); out.push(`💰 +${fmtKr(kr)} (inga nya stjärnor)`); }
+  if (e.type === 'duel' && stars === 3 && giveCar(e.rival.car)) out.push(`🚗 Du vann ${esc(e.rival.name)}s ${carSpec(e.rival.car).name}!`);
+  const chAfter = CHAPTERS.filter(ch => chapterUnlocked(ch, save.career));
+  if (chAfter.length > chBefore) out.push(`🔓 Nytt kapitel: ${chAfter[chAfter.length - 1].name}`);
+  return out;
+}
 function showResults(sm) {
   const cfg = sm.cfg;
   let h = '', title = '';
   const tbl = (rows, cols) => `<table class="fj-table"><thead><tr>${cols.map(c => `<th class="${c[2] || ''}">${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr class="${r.me ? 'me' : ''}">${cols.map(c => `<td class="${c[2] || ''}">${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   const posTxt = (p) => p === 1 ? '🥇 1' : p === 2 ? '🥈 2' : p === 3 ? '🥉 3' : String(p);
-  const cols = [['#', (r) => posTxt(sm.rows.indexOf(r) + 1)], ['Förare', r => `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${css(r.color)};margin-right:6px"></i>${r.name}`], ['Bil', r => r.car, 'car'], ['Tid', r => (r.est ? '≈\u00a0' : '') + fmtTime(r.time), 'num'], ['Bästa varv', r => isFinite(r.best) ? fmtTime(r.best) : '–', 'num']];
+  const cols = [['#', (r) => posTxt(sm.rows.indexOf(r) + 1)], ['Förare', r => `<i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${css(r.color)};margin-right:6px"></i>${esc(r.name)}`], ['Bil', r => esc(r.car), 'car'], ['Tid', r => r.elim ? 'Utslagen' : (r.est ? '≈ ' : '') + fmtTime(r.time), 'num'], ['Bästa varv', r => isFinite(r.best) ? fmtTime(r.best) : '–', 'num']];
   const btns = [];
-  let unlockMsgs = [];
+  let msgs = [];
+  const podium = (rows) => showroom.showPodium(rows.map(r => ({ car: r.carId, look: r.look, color: r.color })));
   if (cfg.mode === 'cup') {
-    const run = save.cupRun; const cup = CUPS.find(c => c.id === run.id);
+    const run = save.cupRun; const ev = eventById(run.id);
     sm.rows.forEach((row, k) => { run.points[row.idx] += POINTS[k] || 0; });
     run.scores.push(sm.score);
     run.idx++;
     cols.push(['Poäng', r => '+' + r.pts, 'num']);
     title = `${trackName(cfg.track)} – ${sm.pos}:a plats`;
     h += tbl(sm.rows, cols);
-    const stand = run.drivers.map((d, k) => ({ name: d.name, pts: run.points[k], me: !!d.player, color: d.color, car: d.car })).sort((a, b) => b.pts - a.pts);
-    const last = run.idx >= cup.tracks.length;
-    h += `<h3>${last ? 'Slutställning' : 'Ställning efter ' + run.idx + ' av ' + cup.tracks.length + ' lopp'}</h3>`;
-    h += tbl(stand, [['#', r => posTxt(stand.indexOf(r) + 1)], ['Förare', r => r.name], ['Poäng', r => r.pts, 'num']]);
+    const stand = run.drivers.map((d, k) => ({ name: d.name, pts: run.points[k], me: !!d.player, color: d.player ? lookOf(d.car).color : d.look.color, look: d.player ? lookOf(d.car) : d.look, car: d.car })).sort((a, b) => b.pts - a.pts);
+    const last = run.idx >= ev.tracks.length;
+    h += `<h3>${last ? 'Slutställning' : 'Ställning efter ' + run.idx + ' av ' + ev.tracks.length + ' lopp'}</h3>`;
+    h += tbl(stand, [['#', r => posTxt(stand.indexOf(r) + 1)], ['Förare', r => esc(r.name)], ['Poäng', r => r.pts, 'num']]);
     if (last) {
       const fpos = stand.findIndex(s => s.me) + 1;
       const bonus = [1500, 900, 500][fpos - 1] || 0;
       const total = Math.round(run.scores.reduce((a, b) => a + b, 0) + bonus * (DIFFICULTY[run.diff] || DIFFICULTY.easy).scoreMult);
-      title = fpos === 1 ? `${cup.medal} Du vann ${cup.name}!` : `${cup.name}: ${fpos}:a plats`;
+      const stars = starsFor(ev, { pos: fpos });
+      title = fpos === 1 ? `🏆 Du vann ${ev.name}!` : `${ev.name}: ${fpos}:a plats`;
       const res = submitScore(ID, total);
-      h = `<div class="fj-score"><div><small>Cuppoäng</small><b>${Spelhallen.fmt(total)}</b></div><div><small>Placering</small><b>${fpos}</b></div><div><small>Rekord</small><b>${Spelhallen.fmt(res.best)}</b></div></div>` + (res.isNew ? '<p class="new-record">Nytt rekord!</p>' : '') + h;
-      // upplåsningar
-      const prevBest = save.cups[cup.id] ? save.cups[cup.id].best : 99;
-      save.cups[cup.id] = { best: Math.min(prevBest, fpos) };
-      if (fpos <= 3) {
-        CARS.filter(c => c.unlock === cup.id && !save.cars.includes(c.id)).forEach(c => { save.cars.push(c.id); unlockMsgs.push('Ny bil: ' + c.name); });
-        const nextCup = CUPS.find(c => c.unlock === cup.id); if (nextCup && prevBest > 3) unlockMsgs.push('Ny cup: ' + nextCup.name + ' (nya banor!)');
-        if (cup.id === 'silver' && prevBest > 3) unlockMsgs.push('Alla banor kan nu köras baklänges');
-      }
-      if (fpos === 1) CARS.filter(c => c.unlock === cup.id + 'Win' && !save.cars.includes(c.id)).forEach(c => { save.cars.push(c.id); unlockMsgs.push('Ny bil: ' + c.name); });
+      msgs = grantRewards(ev, stars);
+      h = `<div class="fj-score"><div><small>Stjärnor</small><b>${starTxt(stars)}</b></div><div><small>Cuppoäng</small><b>${Spelhallen.fmt(total)}</b></div><div><small>Rekord</small><b>${Spelhallen.fmt(res.best)}</b></div></div>` + (res.isNew ? '<p class="new-record">Nytt rekord!</p>' : '') + h;
       save.cupRun = null;
-      showroom.showPodium(stand.map(s => ({ car: s.car, color: s.color })));
-      btns.push(['Huvudmeny', toMenu, true], ['Kör cupen igen', () => startCup(cup.id, run.diff)]);
-      audio.music('victory');
+      showroom.showPodium(stand.map(s => ({ car: s.car, look: s.look })));
+      btns.push(['Karriären', openCareer, true], ['Kör cupen igen', () => startCup(ev, run.diff, run.car)], ['Huvudmeny', toMenu]);
+      audio.music(fpos <= 3 ? 'victory' : 'calm');
     } else {
       h = `<div class="fj-score"><div><small>Loppoäng</small><b>${Spelhallen.fmt(sm.score)}</b></div><div><small>Driftpoäng</small><b>${Spelhallen.fmt(sm.drift)}</b></div></div>` + h;
-      showroom.showPodium(sm.rows.map(r => ({ car: r.carId, color: r.color })));
-      btns.push(['Nästa lopp: ' + trackName(cup.tracks[run.idx]), continueCup, true], ['Huvudmeny', toMenu]);
+      podium(sm.rows);
+      btns.push(['Nästa lopp: ' + trackName(ev.tracks[run.idx]), continueCup, true], ['Huvudmeny', toMenu]);
       audio.music(sm.pos <= 3 ? 'victory' : 'calm');
     }
     persist();
+  } else if (cfg.mode === 'career') {
+    const e = findEvent(cfg.ev);
+    const me = sm.rows.find(r => r.me);
+    const stars = starsFor(e, { pos: sm.pos, time: me.time, drift: sm.drift, par: trackById(cfg.track).def.par });
+    msgs = grantRewards(e, stars);
+    const res = submitScore(ID, sm.score);
+    const t = ETYPES[e.type];
+    title = `${t.icon} ${e.name} – ` + (stars ? ['', 'Brons', 'Silver', 'Guld'][stars] + (e.type === 'duel' ? '' : '') : 'Ingen medalj');
+    if (e.type === 'duel') title = stars ? `⚔️ Du vann duellen!` : `⚔️ Duellen förlorad`;
+    let sc = `<div><small>Stjärnor</small><b>${starTxt(stars)}</b></div>`;
+    if (e.type === 'tid' || e.type === 'rally') sc += `<div><small>Din tid</small><b>${fmtTime(me.time)}</b></div><div><small>Guldtid</small><b>${fmtTime(e.tgt[0] * trackById(cfg.track).def.par * (e.laps || 1))}</b></div>`;
+    else if (e.type === 'drift') sc += `<div><small>Driftpoäng</small><b>${Spelhallen.fmt(sm.drift)}</b></div><div><small>Guld</small><b>${e.tgt[0]}</b></div>`;
+    else sc += `<div><small>Placering</small><b>${sm.pos}</b></div><div><small>Poäng</small><b>${Spelhallen.fmt(sm.score)}</b></div>`;
+    h += `<div class="fj-score">${sc}</div>` + (res.isNew ? '<p class="new-record">Nytt rekord!</p>' : '');
+    if (sm.rows.length > 1) h += tbl(sm.rows, cols);
+    persist();
+    podium(sm.rows);
+    btns.push(['Karriären', openCareer, true], ['Försök igen', () => startEvent(e, cfg.car)], ['Huvudmeny', toMenu]);
+    audio.music(stars ? 'victory' : 'calm');
   } else {
     const res = submitScore(ID, sm.score);
+    const kr = Math.round(([600, 400, 300, 200][sm.pos - 1] || 100) * (DIFFICULTY[cfg.diff] || DIFFICULTY.easy).scoreMult * Math.min(1, (sm.rows.length - 1) / 5) / 10) * 10;
+    if (kr > 0) { addKr(kr); msgs.push(`💰 +${fmtKr(kr)}`); persist(); }
     title = sm.pos === 1 ? '🏆 Seger på ' + trackName(cfg.track) + '!' : `${trackName(cfg.track)} – ${sm.pos}:a plats`;
     h += `<div class="fj-score"><div><small>Poäng</small><b>${Spelhallen.fmt(sm.score)}</b></div><div><small>Driftpoäng</small><b>${Spelhallen.fmt(sm.drift)}</b></div><div><small>Rekord</small><b>${Spelhallen.fmt(res.best)}</b></div></div>` + (res.isNew ? '<p class="new-record">Nytt rekord!</p>' : '');
     h += tbl(sm.rows, cols);
-    showroom.showPodium(sm.rows.map(r => ({ car: r.carId, color: r.color })));
+    podium(sm.rows);
     btns.push(['Kör igen', () => startRace(cfg), true], ['Byt bana', () => { openSetup('quick'); }], ['Huvudmeny', toMenu]);
     audio.music(sm.pos <= 3 ? 'victory' : 'calm');
   }
-  if (unlockMsgs.length) h = unlockMsgs.map(m => `<p class="fj-unlock">🔓 ${m}</p>`).join('') + h;
+  if (msgs.length) h = `<div class="fj-rewards">${msgs.map(m => `<p class="fj-unlock">${m}</p>`).join('')}</div>` + h;
   $('resTitle').textContent = title;
   $('resBody').innerHTML = h;
   const bb = $('resBtns'); bb.innerHTML = '';
@@ -1080,7 +1496,7 @@ function ensureNet() {
   if (net) return;
   net = makeNet();
   lobby = makeLobby(net, {
-    container: $('online'), save, persist, css, carUnlocked,
+    container: $('online'), save, persist, css, carUnlocked, lookOf, onCar: (id) => showroom.setCar(id, lookOf(id)),
     onBack: () => { lobby.close(); screen('menu'); updateMenu(); },
     onStartPressed: () => net.startGame(buildStart(net))
   });
@@ -1122,7 +1538,7 @@ function openOnline() {
   if (ol.emo) { ol.emo.destroy(); ol.emo = null; }
   if (race) { endSession(true); disposeRace(); }
   hudEl.classList.add('hidden');
-  showroom.showCar(); showroom.setCar(save.car, save.color);
+  showroom.showCar(); showroom.setCar(save.car, lookOf(save.car));
   screen('online'); lobby.open();
   audio.music('adventure');
 }
@@ -1192,8 +1608,8 @@ function onlineFinish(rows) {
   const r = race; if (!r || r.ended) return; r.ended = true;
   const grid = r.cfg.grid;
   const res = rows.map(([key, time, best, est]) => {
-    const g = grid.find(x => x.id === key) || { n: '?', car: 'viggen', col: 0 };
-    return { key, name: key === net.selfId ? g.n + ' (du)' : g.n, car: carSpec(g.car).name, carId: g.car, color: COLORS[g.col].hex, time, best: best >= 0 ? best : Infinity, est: !!est, me: key === net.selfId, human: !isAiKey(key) };
+    const g = grid.find(x => x.id === key) || { n: '?', car: 'viggen', col: 0xcccccc };
+    return { key, name: key === net.selfId ? g.n + ' (du)' : g.n, car: carSpec(g.car).name, carId: g.car, color: g.col, look: lookFromNet(g), time, best: best >= 0 ? best : Infinity, est: !!est, me: key === net.selfId, human: !isAiKey(key) };
   });
   ol.results = { rows: res, track: r.cfg.track, laps: r.cfg.laps };
   disposeRace();
@@ -1216,7 +1632,7 @@ function showOnlineResults(sm) {
     ? [['Spela igen', () => net.startGame(buildStart(net)), true], ['Till lobbyn', () => net.backToLobby()], ['Lämna', toMenu]]
     : [['Till lobbyn', () => openOnline()], ['Lämna', toMenu]];
   btns.forEach(([t, fn, prim]) => { const b = document.createElement('button'); b.className = 'btn' + (prim ? ' primary' : ''); b.textContent = t; b.addEventListener('click', () => { audio.play('select'); fn(); }); bb.appendChild(b); });
-  showroom.showPodium(sm.rows.map(x => ({ car: x.carId, color: x.color })));
+  showroom.showPodium(sm.rows.map(x => ({ car: x.carId, look: x.look, color: x.color })));
   audio.music(pos <= 3 ? 'victory' : 'calm');
   screen('results');
 }
@@ -1367,7 +1783,7 @@ const loop = new Loop({
         _lbl.sort((a, b) => a._ld - b._ld);
         for (const c of _lbl) { if (shown >= 3 || c._ld > 70) break; if (c._ld > 10) { c.showLabel = true; shown++; } }
       }
-      for (const c of r.cars) c.syncVisual(r.state === 'countdown' ? 1 : alpha, r.time);
+      for (const c of r.cars) { c.camDist = c.pos.distanceTo(camera.position); c.syncVisual(r.state === 'countdown' ? 1 : alpha, r.time); if (c.elim && !c.isPlayer) c.root.visible = false; }
       if (r.ghost && r.ghost.frames && r.cfg.mode === 'time' && r.state === 'running') {
         const f = r.ghost.frames, n = f.length / 7;
         const t = (r.time - r.player.lapStart) * 30;
@@ -1400,7 +1816,7 @@ fpsMeter(root, loop, settings);
 (async function boot() {
   loader.set(0.3, 'Polerar lacken …');
   await tick();
-  showroom.setCar(save.car, save.color);
+  showroom.setCar(save.car, lookOf(save.car));
   loader.set(0.9, 'Klart!');
   await tick();
   loop.start();
@@ -1411,7 +1827,7 @@ fpsMeter(root, loop, settings);
   addEventListener('pointerdown', startMusic); addEventListener('keydown', startMusic);
   // felsökningskrok – bara med ?debug i adressen (annars går det att fuska via konsolen)
   if (/[?&]debug\b/.test(location.search)) {
-    window.__fj = { get race() { return race; }, get net() { return net; }, get lobby() { return lobby; }, bgStep, save, settings, loop, startRace, toMenu, scene, renderer, camera, AIDriver, input, hud, startCup, showResults, endRace,
+    window.__fj = { get race() { return race; }, startEvent, findEvent, openCareer, grantRewards, get net() { return net; }, get lobby() { return lobby; }, bgStep, save, settings, loop, startRace, toMenu, scene, renderer, camera, AIDriver, input, hud, startCup, showResults, endRace,
       get composer() { return composer; },
       step(n) { for (let k = 0; k < n && race && !race.ended; k++) { raceUpdate(1 / 60); input.endFrame(); } },
       frames(n) { for (let k = 0; k < n; k++) loop.render(1, 1 / 30); } };

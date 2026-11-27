@@ -40,10 +40,23 @@ export class Hud {
   setMode(mode) { this.el.dataset.mode = mode; }
   /** Förrendera banan på minikartan. */
   setTrack(track) {
-    const W = 180, pad = 12;
-    const bb = track.bbox; const sx = bb.x1 - bb.x0, sz = bb.z1 - bb.z0;
-    const sc = (W - pad * 2) / Math.max(sx, sz);
-    this.map = { sc, ox: pad + ((W - pad * 2) - sx * sc) / 2 - bb.x0 * sc, oz: pad + ((W - pad * 2) - sz * sc) / 2 - bb.z0 * sc };
+    // Hela banan ska alltid synas: välj den rotation som ger minst bounding box, skala och centrera (proportioner bevaras).
+    const W = 180, pad = 16;
+    const P = track.P, N = track.N;
+    let best = null;
+    for (let deg = 0; deg < 180; deg += 3) {
+      const a = deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let i = 0; i < N; i++) {
+        const x = P[i * 3], z = P[i * 3 + 2], u = x * ca - z * sa, v = x * sa + z * ca;
+        if (u < x0) x0 = u; if (u > x1) x1 = u; if (v < z0) z0 = v; if (v > z1) z1 = v;
+      }
+      const m = Math.max(x1 - x0, z1 - z0);
+      if (!best || m < best.m - 1e-6) best = { m, ca, sa, x0, x1, z0, z1, a };
+    }
+    const sx = best.x1 - best.x0, sz = best.z1 - best.z0;
+    const sc = (W - pad * 2) / Math.max(sx, sz, 1);
+    this.map = { sc, ca: best.ca, sa: best.sa, rot: best.a, ox: pad + ((W - pad * 2) - sx * sc) / 2 - best.x0 * sc, oz: pad + ((W - pad * 2) - sz * sc) / 2 - best.z0 * sc };
     const c = document.createElement('canvas'); c.width = W; c.height = W;
     const g = c.getContext('2d');
     const path = () => { g.beginPath(); for (let i = 0; i <= track.N; i += 2) { const k = i % track.N; const [x, y] = this.mp(track.P[k * 3], track.P[k * 3 + 2]); if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); } g.closePath(); };
@@ -58,7 +71,10 @@ export class Hud {
     g.fillStyle = '#fff'; g.strokeStyle = '#111'; g.lineWidth = 1.5; g.beginPath(); g.arc(fx, fz, 4.5, 0, 7); g.fill(); g.stroke();
     this.mapBg = c;
   }
-  mp(x, z) { return [x * this.map.sc + this.map.ox, z * this.map.sc + this.map.oz]; }
+  mp(x, z) {
+    const m = this.map, u = x * m.ca - z * m.sa, v = x * m.sa + z * m.ca;
+    return [Math.max(4, Math.min(176, u * m.sc + m.ox)), Math.max(4, Math.min(176, v * m.sc + m.oz))];
+  }
 
   drawMap(cars, player, ghost) {
     const g = this.mapCtx; if (!this.mapBg) return;
@@ -74,7 +90,7 @@ export class Hud {
     if (player) {
       const [x, y] = this.mp(player.pos.x, player.pos.z);
       const a = Math.atan2(player.F.x, player.F.z);
-      g.save(); g.translate(x, y); g.rotate(-a + Math.PI);
+      g.save(); g.translate(x, y); g.rotate(-a + Math.PI + this.map.rot);
       g.fillStyle = '#ffcc33'; g.strokeStyle = '#000'; g.lineWidth = 1.5;
       g.beginPath(); g.moveTo(0, -7); g.lineTo(5, 5); g.lineTo(0, 2.5); g.lineTo(-5, 5); g.closePath(); g.fill(); g.stroke();
       g.restore();
